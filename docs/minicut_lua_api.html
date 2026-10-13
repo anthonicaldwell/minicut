@@ -145,15 +145,15 @@ tr:nth-child(even) {
     <div class="subtitle">Embedded LuaJIT & Plugin API Reference Manual</div>
     <div>
         <span class="badge">LuaJIT 5.1 Runtime</span>
-        <span class="badge">MEL-Style Panels</span>
-        <span class="badge">Maya Shelf Dock</span>
+        <span class="badge">Dockable Tool Panels</span>
+        <span class="badge">Tool Shelf Dock</span>
         <span class="badge">Built-in Network (libcurl)</span>
     </div>
 </div>
 
 <h2>1. Introduction & Architecture</h2>
 <p>
-    <strong>minicut</strong> features a fully embedded, high-performance <strong>LuaJIT</strong> scripting engine. Similar to Maya's MEL and Python architecture, minicut enables automation, timeline editing, clip keyframing, and custom interactive dockable tool panels.
+    <strong>minicut</strong> features a fully embedded, high-performance <strong>LuaJIT</strong> scripting engine. minicut enables automation, timeline editing, clip keyframing, and custom interactive dockable tool panels.
 </p>
 
 <h3>Script Directory Locations</h3>
@@ -166,7 +166,7 @@ tr:nth-child(even) {
     <tr>
         <td><code>~/.config/minicut/autorun/</code></td>
         <td>Startup / Auto-register</td>
-        <td>Scripts execute on startup and generate an icon button on the horizontal Maya Shelf Dock below the main menu bar.</td>
+        <td>Scripts execute on startup and generate an icon button on the horizontal Tool Shelf Dock below the main menu bar.</td>
     </tr>
     <tr>
         <td><code>~/.config/minicut/scripts/</code></td>
@@ -182,11 +182,11 @@ tr:nth-child(even) {
 </table>
 
 <div class="callout">
-    <div class="callout-title">Maya Shelf Fallback Badges</div>
+    <div class="callout-title">Tool Shelf Fallback Badges</div>
     If an autorun script does not have a corresponding PNG icon in <code>~/.config/minicut/icons/</code>, minicut automatically creates a sleek 2-letter uppercase badge (e.g., <code>QP</code> for Quick Placement) on the shelf button.
 </div>
 
-<h2>2. MEL-Style Script Architecture</h2>
+<h2>2. Plugin Script Architecture</h2>
 <p>
     Every minicut script follows an intuitive, modular structure. A script defines timeline and clip manipulation callbacks, followed by a <code>plugin:init_panel()</code> method that registers Dear ImGui UI controls.
 </p>

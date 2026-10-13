@@ -223,7 +223,7 @@
 - **No Canvas Bleed/Overlap**:
   - Track header controls (`M`, `S`, `Z:%d`, name) are strictly clipped using `draw_list->PushClipRect` so they never bleed into or overlap timeline lanes even when resized to narrow dimensions.
 
-### S. LuaJIT Scripting Subsystem, Maya-Style Shelf Dock & MEL Panels (`src/ScriptEngine.h`, `src/ScriptEngine.cpp`)
+### S. LuaJIT Scripting Subsystem, Tool Shelf Dock & Plugin Panels (`src/ScriptEngine.h`, `src/ScriptEngine.cpp`)
 - **Embedded LuaJIT Engine**:
   - Full Lua 5.1 / LuaJIT scripting runtime embedded into minicut.
   - Comprehensive LuaAPI exposed to scripts:
@@ -233,7 +233,7 @@
     - `clip.add_keyframe` / `clip.remove_keyframe`: Keyframe animation access directly from scripts.
     - `project.*` & Global: `project_save([path])` / `project_load(path)` for headless and automated project workflow.
     - `net.*`: Built-in internet, download, and upload capabilities powered by embedded `libcurl` (`net.get`, `net.post`, `net.download`, `net.upload`, `net.request`).
-- **MEL-Style Script Architecture**:
+- **Plugin Script Architecture**:
   - Base script pattern supported:
     ```lua
     function logic_callback()
@@ -246,7 +246,7 @@
     end
     ```
   - Executed scripts automatically spawn dockable panels to the right of the preview and timeline panels.
-- **Maya-Style Shelf Dock**:
+- **Tool Shelf Dock**:
   - Rendered horizontally directly below the main menu bar (44px height with stylish slate background and subtle dividing line).
   - Scripts located in `~/.config/minicut/autorun/` are loaded at startup and create an icon button on the dock. Clicking runs the script and opens its tool panel.
   - Custom PNG icons loaded from `~/.config/minicut/icons/<script_name>.png`, with stylish 2-letter fallback badges.

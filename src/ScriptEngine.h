@@ -20,8 +20,8 @@ struct ScriptItem {
     std::string description;   // Tooltip info
     bool is_autorun = false;   // Lives in ~/.config/minicut/autorun/
     bool is_loaded = false;    // Has file been executed into Lua?
-    bool is_panel_open = false;// MEL-style tool panel currently open
-    GLuint icon_texture = 0;   // Texture for Maya shelf dock icon
+    bool is_panel_open = false; // Plugin tool panel currently open
+    GLuint icon_texture = 0;   // Texture for shelf dock icon
 };
 
 class ScriptEngine {
@@ -52,7 +52,7 @@ public:
 
     // Frame update & UI Rendering
     void update(double delta_time);
-    void render_maya_shelf(float menu_h = 0.0f);
+    void render_shelf_dock(float menu_h = 0.0f);
     void render_scripts_menu();
     void render_script_panels(float total_w, float total_h, float top_offset);
 

@@ -197,7 +197,7 @@ bool App::init(int argc, char* argv[]) {
         }
     }
 
-    // Init Lua Script Engine & Maya Shelf
+    // Init Lua Script Engine & Tool Shelf Dock
     m_script_engine.init(
         &m_project,
         &m_timeline,
@@ -986,9 +986,9 @@ void App::render_menu_bar() {
     }
 }
 
-void App::render_maya_shelf() {
+void App::render_shelf_dock() {
     float menu_h = m_menu_bar_height > 0.0f ? m_menu_bar_height : ImGui::GetFrameHeight();
-    m_script_engine.render_maya_shelf(menu_h);
+    m_script_engine.render_shelf_dock(menu_h);
 }
 
 void App::render_clip_panel() {
@@ -1364,7 +1364,7 @@ void App::render() {
     ImGui::NewFrame();
 
     render_menu_bar();
-    render_maya_shelf();
+    render_shelf_dock();
 
     float menu_h = m_menu_bar_height > 0.0f ? m_menu_bar_height : ImGui::GetFrameHeight();
     float shelf_h = m_script_engine.is_shelf_visible() ? m_script_engine.get_shelf_height() : 0.0f;
@@ -1404,7 +1404,7 @@ void App::render() {
     // Allow view section resizing via interactive splitters
     render_splitters();
 
-    // Render MEL-style Script Panels
+    // Render Plugin Script Panels
     m_script_engine.render_script_panels(total_w, total_h, content_y);
 
     // Export Manager dialog & progress bar

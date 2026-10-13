@@ -61,7 +61,7 @@ private:
 
     // Menu Bar & Panels
     void render_menu_bar();
-    void render_maya_shelf();
+    void render_shelf_dock();
     void render_clip_panel();
     void render_preview_panel();
     void render_timeline_panel();

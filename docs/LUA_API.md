@@ -10,14 +10,14 @@ Scripts and shelf icons are placed in the user configuration directory:
 
 | Directory | Purpose |
 |---|---|
-| `~/.config/minicut/autorun/` | Scripts executed at startup. Generates a tool icon button on the **Maya Shelf Dock** directly beneath the menu bar. |
+| `~/.config/minicut/autorun/` | Scripts executed at startup. Generates a tool icon button on the **Tool Shelf Dock** directly beneath the menu bar. |
 | `~/.config/minicut/scripts/` | Scripts placed in the top-level **Scripts** menu in the main menu bar. |
 | `~/.config/minicut/icons/` | 32x32 PNG icons matching script stem (e.g. `quick_placement.png` for `quick_placement.lua`). |
 | `~/.config/minicut/docs/` | Contains this manual (`minicut_lua_api.pdf`). |
 
 ---
 
-## 2. MEL-Style Plugin Architecture
+## 2. Plugin Architecture & Tool Panels
 
 Every script can define timeline callbacks and register Dear ImGui controls in `plugin:init_panel()`.
 When clicked, the script creates an independent, dockable tool panel positioned to the right of the preview and timeline.

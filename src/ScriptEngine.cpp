@@ -298,7 +298,7 @@ void ScriptEngine::update(double delta_time) {
     (void)delta_time;
 }
 
-void ScriptEngine::render_maya_shelf(float menu_h) {
+void ScriptEngine::render_shelf_dock(float menu_h) {
     if (!m_shelf_visible) return;
 
     ImGuiIO& io = ImGui::GetIO();
@@ -322,8 +322,8 @@ void ScriptEngine::render_maya_shelf(float menu_h) {
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.13f, 0.14f, 0.16f, 1.0f));
 
-    if (ImGui::Begin("##MayaShelfDock", nullptr, flags)) {
-        // Shelf Header Label (Maya style tab)
+    if (ImGui::Begin("##ToolShelfDock", nullptr, flags)) {
+        // Shelf Header Label
         ImGui::AlignTextToFramePadding();
         ImGui::TextColored(ImVec4(0.24f, 0.68f, 0.91f, 1.0f), "SHELF");
         ImGui::SameLine();
@@ -344,7 +344,7 @@ void ScriptEngine::render_maya_shelf(float menu_h) {
                     clicked = ImGui::ImageButton(("##btn_" + script.id).c_str(), (ImTextureID)(intptr_t)script.icon_texture, ImVec2(28, 28), ImVec2(0,0), ImVec2(1,1), bg_col);
                     ImGui::PopStyleVar();
                 } else {
-                    // Maya style initial abbreviation
+                    // Default 2-letter uppercase abbreviation
                     std::string abbr = script.title.substr(0, 2);
                     if (abbr.empty()) abbr = "FX";
                     std::transform(abbr.begin(), abbr.end(), abbr.begin(), ::toupper);
@@ -382,11 +382,11 @@ void ScriptEngine::render_maya_shelf(float menu_h) {
             ImGui::SetCursorPosX(total_w - right_w);
             if (ImGui::Button("⟳ Reload", ImVec2(75, 28))) {
                 reload_scripts();
-                set_status("Scripts and Maya shelf reloaded");
+                set_status("Scripts and tool shelf reloaded");
             }
         }
 
-        // Bottom border line for Maya dock separation
+        // Bottom border line for tool shelf separation
         ImDrawList* dl = ImGui::GetWindowDrawList();
         dl->AddLine(ImVec2(0, menu_h + m_shelf_height - 1.0f), ImVec2(total_w, menu_h + m_shelf_height - 1.0f), IM_COL32(45, 50, 58, 255), 1.0f);
 
