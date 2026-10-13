@@ -123,6 +123,31 @@ if [ -d "locales" ]; then
     cp -rf locales/* "$DATA_DIR/locales/"
 fi
 
+# Install default scripts, autorun scripts, and icons
+if [ -d "scripts" ]; then
+    echo "Installing scripts to $HOME/.config/minicut/scripts/ and $DATA_DIR/scripts/..."
+    mkdir -p "$HOME/.config/minicut/scripts"
+    cp -rf scripts/* "$HOME/.config/minicut/scripts/"
+    mkdir -p "$DATA_DIR/scripts"
+    cp -rf scripts/* "$DATA_DIR/scripts/"
+fi
+
+if [ -d "autorun" ]; then
+    echo "Installing autorun scripts to $HOME/.config/minicut/autorun/ and $DATA_DIR/autorun/..."
+    mkdir -p "$HOME/.config/minicut/autorun"
+    cp -rf autorun/* "$HOME/.config/minicut/autorun/"
+    mkdir -p "$DATA_DIR/autorun"
+    cp -rf autorun/* "$DATA_DIR/autorun/"
+fi
+
+if [ -d "icons" ]; then
+    echo "Installing script icons to $HOME/.config/minicut/icons/ and $DATA_DIR/icons/..."
+    mkdir -p "$HOME/.config/minicut/icons"
+    cp -rf icons/* "$HOME/.config/minicut/icons/"
+    mkdir -p "$DATA_DIR/icons"
+    cp -rf icons/* "$DATA_DIR/icons/"
+fi
+
 # Refresh desktop, MIME, and icon databases
 if command -v update-mime-database > /dev/null 2>&1; then
     update-mime-database "$MIME_BASE_DIR" 2>/dev/null || true

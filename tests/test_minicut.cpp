@@ -9,6 +9,7 @@
 #include "TempManager.h"
 #include "LocaleManager.h"
 #include "FileBrowser.h"
+#include "ScriptEngine.h"
 #include <iostream>
 #include <cassert>
 #include <filesystem>
@@ -760,6 +761,117 @@ void test_filebrowser_system_thumbnail() {
     std::cout << "[PASS] FileBrowser system thumbnail tests passed." << std::endl;
 }
 
+void test_track_header_resizing() {
+    std::cout << "[TEST] Running Track Header resizing & Z-depth layout test..." << std::endl;
+    Timeline tl;
+    assert(tl.get_track_header_width() == 145.0f);
+
+    tl.set_track_header_width(200.0f);
+    assert(tl.get_track_header_width() == 200.0f);
+
+    // Clamping min & max
+    tl.set_track_header_width(50.0f);
+    assert(tl.get_track_header_width() == 80.0f);
+
+    tl.set_track_header_width(500.0f);
+    assert(tl.get_track_header_width() == 400.0f);
+
+    std::cout << "[PASS] Track Header resizing & layout tests passed." << std::endl;
+}
+
+void test_script_engine_lua_api() {
+    std::cout << "[TEST] Running ScriptEngine & LuaAPI integration test..." << std::endl;
+    Project proj;
+    Timeline tl;
+    ClipManager cm;
+    double playhead = 2.5;
+    std::string selected_clip = "";
+    bool undo_pushed = false;
+    bool modified_called = false;
+
+    // Track 0: video, Track 1: audio
+    Track v0; v0.type = "video"; v0.name = "Video 1"; v0.id = "v0"; proj.tracks.push_back(v0);
+    Track a0; a0.type = "audio"; a0.name = "Audio 1"; a0.id = "a0"; proj.tracks.push_back(a0);
+
+    // Add dummy video & audio assets
+    VideoAsset va; va.id = "vid_asset_1"; va.path = "/test/vid.mp4"; va.duration = 10.0; proj.video_assets.push_back(va);
+    AudioAsset aa; aa.id = "aud_asset_1"; aa.path = "/test/aud.mp3"; aa.duration = 8.0; proj.audio_assets.push_back(aa);
+
+    ScriptEngine se;
+    bool init_ok = se.init(
+        &proj, &tl, &cm, &playhead, &selected_clip,
+        [&]() { undo_pushed = true; },
+        [&]() { modified_called = true; },
+        [&](double t) { playhead = t; },
+        nullptr,
+        [&](const std::string& id) { selected_clip = id; }
+    );
+    assert(init_ok);
+    assert(se.get_lua_state() != nullptr);
+
+    // 1. Test timeline navigation from Lua
+    se.run_string("timeline.set_playhead(5.0)");
+    assert(std::abs(playhead - 5.0) < 1e-4);
+
+    // 2. Test timeline placement from Lua
+    se.run_string("placed_vid = timeline.place_video('vid_asset_1', 0, 1.0, 4.0, 0.5)");
+    assert(proj.tracks[0].clips.size() == 1);
+    assert(undo_pushed == true);
+    assert(modified_called == true);
+    Clip& c = proj.tracks[0].clips[0];
+    assert(c.start_time == 1.0);
+    assert(c.duration == 4.0);
+    assert(c.offset == 0.5);
+
+    // 3. Test clip transform and positioning from Lua
+    se.run_string("clip.set_position(placed_vid, 150.0, -80.0)");
+    se.run_string("clip.set_scale(placed_vid, 1.5)");
+    se.run_string("clip.set_rotation(placed_vid, 45.0)");
+    se.run_string("clip.set_opacity(placed_vid, 0.85)");
+    assert(std::abs(c.pos_x - 150.0) < 1e-4);
+    assert(std::abs(c.pos_y - (-80.0)) < 1e-4);
+    assert(std::abs(c.scale - 1.5) < 1e-4);
+    assert(std::abs(c.rotation - 45.0) < 1e-4);
+    assert(std::abs(c.opacity - 0.85) < 1e-4);
+
+    // 4. Test keyframing from Lua
+    se.run_string("timeline.add_keyframe(placed_vid, 'opacity', 0.0, 0.0)");
+    se.run_string("timeline.add_keyframe(placed_vid, 'opacity', 2.0, 1.0)");
+    double kf_mid = proj.evaluate_keyframe(c.id, "opacity", 1.0, 1.0);
+    assert(std::abs(kf_mid - 0.5) < 1e-3);
+
+    // 5. Test base script structure (logic_callback & plugin:init_panel)
+    const char* test_script_code = R"(
+        callback_ran = false
+        function logic_callback()
+            callback_ran = true
+            clip.set_position(placed_vid, 300.0, 200.0)
+        end
+
+        function plugin:init_panel()
+            gui.text("Test Panel Header")
+            gui.button("Run Logic", logic_callback)
+        end
+    )";
+
+    // Run script code in Lua
+    se.run_string(test_script_code);
+
+    // Verify plugin table and callback invocation
+    lua_State* L = se.get_lua_state();
+    lua_getglobal(L, "logic_callback");
+    assert(lua_isfunction(L, -1));
+    lua_pcall(L, 0, 0, 0);
+
+    lua_getglobal(L, "callback_ran");
+    assert(lua_toboolean(L, -1) == true);
+    lua_pop(L, 1);
+    assert(std::abs(c.pos_x - 300.0) < 1e-4);
+    assert(std::abs(c.pos_y - 200.0) < 1e-4);
+
+    std::cout << "[PASS] ScriptEngine & LuaAPI integration tests passed." << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Running minicut Comprehensive Test Suite" << std::endl;
@@ -781,6 +893,8 @@ int main() {
     test_track_render_depth();
     test_slice_and_paste_on_selected_track();
     test_filebrowser_system_thumbnail();
+    test_track_header_resizing();
+    test_script_engine_lua_api();
 
     std::cout << "========================================" << std::endl;
     std::cout << "ALL MINICUT UNIT & PIPELINE TESTS PASSED" << std::endl;

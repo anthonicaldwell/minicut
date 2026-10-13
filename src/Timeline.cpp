@@ -279,7 +279,7 @@ void Timeline::render_ui(Project& project, double& playhead_time,
     }
 
     float total_proj_dur = static_cast<float>(std::max(10.0, std::max(project.get_total_duration(), playhead_time)));
-    float avail_canvas_w = ImGui::GetContentRegionAvail().x - 110.0f;
+    float avail_canvas_w = ImGui::GetContentRegionAvail().x - m_track_header_w;
     float max_scroll_sec = std::max(0.0f, total_proj_dur + 5.0f - (avail_canvas_w * 0.25f / m_pixels_per_sec));
     m_scroll_sec = std::clamp(m_scroll_sec, 0.0f, max_scroll_sec);
 
@@ -311,7 +311,7 @@ void Timeline::render_ui(Project& project, double& playhead_time,
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImGuiIO& io = ImGui::GetIO();
 
-    const float track_header_w = 110.0f;
+    const float track_header_w = m_track_header_w;
     const float ruler_h = 24.0f;
     const float track_h = 44.0f;
     const float scrollbar_h = 16.0f;
@@ -372,6 +372,27 @@ void Timeline::render_ui(Project& project, double& playhead_time,
         m_mouse_hover_time = std::max(0.0, screen_x_to_time(mouse_pos.x));
     }
 
+    // Interactive Resizing for Track Control Header (Splitter)
+    float splitter_x = content_x;
+    bool is_header_splitter_hovered = (is_canvas_hovered &&
+                                       mouse_pos.x >= splitter_x - 4.0f && mouse_pos.x <= splitter_x + 4.0f &&
+                                       mouse_pos.y >= canvas_pos.y && mouse_pos.y <= tracks_bottom_y);
+
+    if (m_dragging_track_header) {
+        if (!io.MouseDown[0]) {
+            m_dragging_track_header = false;
+            if (on_project_changed) on_project_changed();
+        } else {
+            m_track_header_w = std::clamp(mouse_pos.x - canvas_pos.x, 80.0f, 400.0f);
+        }
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+    } else if (is_header_splitter_hovered) {
+        ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
+        if (ImGui::IsMouseClicked(0)) {
+            m_dragging_track_header = true;
+        }
+    }
+
     // Backgrounds
     draw_list->AddRectFilled(canvas_pos, ImVec2(canvas_pos.x + canvas_size.x, tracks_bottom_y),
                              IM_COL32(24, 27, 31, 255));
@@ -381,9 +402,13 @@ void Timeline::render_ui(Project& project, double& playhead_time,
     // Ruler background
     draw_list->AddRectFilled(ImVec2(content_x, canvas_pos.y), ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + ruler_h),
                              IM_COL32(35, 39, 46, 255));
-    // Boundary line
+    // Boundary line / Resizable splitter line
+    ImU32 splitter_line_col = (m_dragging_track_header || is_header_splitter_hovered)
+                              ? IM_COL32(61, 174, 233, 255)
+                              : IM_COL32(55, 62, 72, 255);
+    float splitter_thickness = (m_dragging_track_header || is_header_splitter_hovered) ? 2.5f : 1.0f;
     draw_list->AddLine(ImVec2(content_x, canvas_pos.y), ImVec2(content_x, tracks_bottom_y),
-                       IM_COL32(55, 62, 72, 255));
+                       splitter_line_col, splitter_thickness);
     draw_list->AddLine(ImVec2(content_x, canvas_pos.y + ruler_h), ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + ruler_h),
                        IM_COL32(55, 62, 72, 255));
 
@@ -448,6 +473,9 @@ void Timeline::render_ui(Project& project, double& playhead_time,
         draw_list->AddLine(ImVec2(canvas_pos.x, track_y + track_h), ImVec2(canvas_pos.x + canvas_size.x, track_y + track_h),
                            IM_COL32(45, 50, 58, 255));
 
+        // Clip header controls so they NEVER overflow or overlap the timeline lanes!
+        draw_list->PushClipRect(ImVec2(canvas_pos.x, track_y), ImVec2(content_x - 1.0f, track_y + track_h), true);
+
         // Track Name & selection
         std::string badge = (track.type == "video") ? "[V]" : "[A]";
         ImU32 badge_col = (track.type == "video") ? IM_COL32(61, 174, 233, 255) : IM_COL32(46, 204, 113, 255);
@@ -472,13 +500,17 @@ void Timeline::render_ui(Project& project, double& playhead_time,
         if (ImGui::SmallButton(del_id.c_str())) {
             delete_track(project, static_cast<int>(t));
             if (on_project_changed) on_project_changed();
+            draw_list->PopClipRect();
             break;
         }
 
         // Render Depth control for video tracks (0 to 100)
         if (track.type == "video") {
             ImGui::SameLine();
-            ImGui::SetNextItemWidth(38.0f);
+            float cur_x = ImGui::GetCursorScreenPos().x;
+            float rem_w = std::max(20.0f, content_x - cur_x - 4.0f);
+            float item_w = std::min(45.0f, rem_w);
+            ImGui::SetNextItemWidth(item_w);
             std::string depth_id = "##depth_" + std::to_string(t);
             if (ImGui::DragInt(depth_id.c_str(), &track.depth, 1.0f, 0, 100, "Z:%d")) {
                 if (on_project_changed) on_project_changed();
@@ -487,6 +519,8 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                 ImGui::SetTooltip("Render Depth / Z-Order (0 to 100)\nHigher numbers render on top");
             }
         }
+
+        draw_list->PopClipRect();
 
         bool is_timeline_window_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
 

@@ -12,6 +12,7 @@
 #include "NativeFileDialog.h"
 #include "LocaleManager.h"
 #include "TempManager.h"
+#include "ScriptEngine.h"
 
 #include <SDL2/SDL.h>
 #include <GL/glew.h>
@@ -26,6 +27,22 @@ public:
     bool init(int argc = 0, char* argv[] = nullptr);
     void run();
     void cleanup();
+
+    // Accessors for ScriptEngine & Subsystems
+    Project& get_project() { return m_project; }
+    const Project& get_project() const { return m_project; }
+    double get_playhead_time() const { return m_playhead_time; }
+    void set_playhead_time(double t);
+    void push_undo_state();
+    void on_project_modified();
+    std::string get_selected_clip_id() const { return m_selected_clip_id; }
+    void set_selected_clip_id(const std::string& id);
+    void set_status_notification(const std::string& msg, double duration = 4.0);
+    ClipManager& get_clip_manager() { return m_clip_manager; }
+    Timeline& get_timeline() { return m_timeline; }
+    AudioEngine& get_audio_engine() { return m_audio_engine; }
+    MediaDecoder& get_media_decoder() { return m_media_decoder; }
+    ScriptEngine& get_script_engine() { return m_script_engine; }
 
 private:
     void apply_kde_plasma_theme();
@@ -44,6 +61,7 @@ private:
 
     // Menu Bar & Panels
     void render_menu_bar();
+    void render_maya_shelf();
     void render_clip_panel();
     void render_preview_panel();
     void render_timeline_panel();
@@ -63,7 +81,6 @@ private:
     void export_path_browser();
 
     // Undo / Redo History
-    void push_undo_state();
     void undo();
     void redo();
 
@@ -109,6 +126,7 @@ private:
     ExportManager m_export_manager;
     AudioEngine m_audio_engine;
     FileBrowser m_file_browser;
+    ScriptEngine m_script_engine;
 
     // Undo / Redo stack
     std::vector<Project> m_undo_stack;

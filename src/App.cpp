@@ -197,6 +197,20 @@ bool App::init(int argc, char* argv[]) {
         }
     }
 
+    // Init Lua Script Engine & Maya Shelf
+    m_script_engine.init(
+        &m_project,
+        &m_timeline,
+        &m_clip_manager,
+        &m_playhead_time,
+        &m_selected_clip_id,
+        [this]() { push_undo_state(); },
+        [this]() { on_project_modified(); },
+        [this](double t) { set_playhead_time(t); },
+        [this](const std::string& msg, double d) { set_status_notification(msg, d); },
+        [this](const std::string& id) { set_selected_clip_id(id); }
+    );
+
     return true;
 }
 
@@ -255,6 +269,27 @@ void App::apply_kde_plasma_theme() {
     style.FrameBorderSize   = 1.0f;
     style.ItemSpacing       = ImVec2(8.0f, 5.0f);
     style.FramePadding      = ImVec2(6.0f, 4.0f);
+}
+
+void App::set_playhead_time(double t) {
+    m_playhead_time = std::max(0.0, t);
+    m_audio_engine.set_playhead_time(m_playhead_time);
+    m_media_decoder.request_frame(m_playhead_time, m_project);
+}
+
+void App::on_project_modified() {
+    m_audio_engine.update_project_snapshot(m_project);
+    m_media_decoder.request_frame(m_playhead_time, m_project);
+}
+
+void App::set_selected_clip_id(const std::string& id) {
+    m_selected_clip_id = id;
+    m_keyframe_editor.set_selected_clip(id);
+}
+
+void App::set_status_notification(const std::string& msg, double duration) {
+    m_status_notification = msg;
+    m_status_notification_timer = duration;
 }
 
 void App::push_undo_state() {
@@ -661,6 +696,7 @@ void App::process_events() {
 
 void App::update(double delta_time) {
     NativeFileDialog::poll_callbacks();
+    m_script_engine.update(delta_time);
 
     ImGuiIO& io = ImGui::GetIO();
 
@@ -892,6 +928,11 @@ void App::render_menu_bar() {
             ImGui::EndMenu();
         }
 
+        if (ImGui::BeginMenu("Scripts")) {
+            m_script_engine.render_scripts_menu();
+            ImGui::EndMenu();
+        }
+
         if (ImGui::BeginMenu(_TR("menu_help"))) {
             if (ImGui::MenuItem(_TR("help_about"))) { m_show_about = true; }
             ImGui::EndMenu();
@@ -912,6 +953,10 @@ void App::render_menu_bar() {
 
         ImGui::EndMainMenuBar();
     }
+}
+
+void App::render_maya_shelf() {
+    m_script_engine.render_maya_shelf();
 }
 
 void App::render_clip_panel() {
@@ -1145,6 +1190,7 @@ void App::load_settings() {
                 m_split_h = std::clamp(j.value("split_h", 0.46f), 0.15f, 0.85f);
                 m_split_top_v = std::clamp(j.value("split_top_v", 0.28f), 0.15f, 0.75f);
                 m_split_bottom_v = std::clamp(j.value("split_bottom_v", 0.65f), 0.20f, 0.85f);
+                m_timeline.set_track_header_width(j.value("track_header_w", 145.0f));
             }
         } catch (...) {}
     }
@@ -1164,6 +1210,7 @@ void App::save_settings() {
     j["split_h"] = m_split_h;
     j["split_top_v"] = m_split_top_v;
     j["split_bottom_v"] = m_split_bottom_v;
+    j["track_header_w"] = m_timeline.get_track_header_width();
 
     try {
         std::ofstream ofs(cfg_path);
@@ -1198,8 +1245,10 @@ void App::render_splitters() {
     bool mouse_down = ImGui::IsMouseDown(0);
 
     float menu_h = ImGui::GetFrameHeight();
+    float shelf_h = m_script_engine.is_shelf_visible() ? m_script_engine.get_shelf_height() : 0.0f;
+    float content_y = menu_h + shelf_h;
     float total_w = static_cast<float>(m_window_width);
-    float total_h = static_cast<float>(m_window_height) - menu_h;
+    float total_h = static_cast<float>(m_window_height) - content_y;
 
     float top_h = total_h * m_split_h;
     float left_top_w = total_w * m_split_top_v;
@@ -1208,7 +1257,7 @@ void App::render_splitters() {
     const float thickness = 6.0f;
 
     // 1. Horizontal Splitter (between Top Row and Bottom Row)
-    float split_y = menu_h + top_h;
+    float split_y = content_y + top_h;
     bool hover_h = (mouse_pos.x >= 0.0f && mouse_pos.x <= total_w &&
                     mouse_pos.y >= (split_y - thickness * 0.5f) && mouse_pos.y <= (split_y + thickness * 0.5f));
     if (m_dragging_split_h) {
@@ -1216,7 +1265,7 @@ void App::render_splitters() {
             m_dragging_split_h = false;
             save_settings();
         } else {
-            float new_ratio = (mouse_pos.y - menu_h) / total_h;
+            float new_ratio = (mouse_pos.y - content_y) / total_h;
             m_split_h = std::clamp(new_ratio, 0.15f, 0.85f);
         }
     } else if (hover_h && ImGui::IsMouseClicked(0)) {
@@ -1231,7 +1280,7 @@ void App::render_splitters() {
     // 2. Vertical Splitter Top (between Clips & Assets and Preview)
     float split_top_x = left_top_w;
     bool hover_vt = (mouse_pos.x >= (split_top_x - thickness * 0.5f) && mouse_pos.x <= (split_top_x + thickness * 0.5f) &&
-                     mouse_pos.y >= menu_h && mouse_pos.y <= split_y);
+                     mouse_pos.y >= content_y && mouse_pos.y <= split_y);
     if (m_dragging_split_top_v) {
         if (!mouse_down) {
             m_dragging_split_top_v = false;
@@ -1247,12 +1296,12 @@ void App::render_splitters() {
         ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
     }
     ImU32 col_vt = m_dragging_split_top_v ? IM_COL32(61, 174, 233, 255) : (hover_vt ? IM_COL32(61, 174, 233, 180) : IM_COL32(35, 40, 48, 200));
-    fg_draw->AddLine(ImVec2(split_top_x, menu_h), ImVec2(split_top_x, split_y), col_vt, (hover_vt || m_dragging_split_top_v) ? 3.0f : 1.5f);
+    fg_draw->AddLine(ImVec2(split_top_x, content_y), ImVec2(split_top_x, split_y), col_vt, (hover_vt || m_dragging_split_top_v) ? 3.0f : 1.5f);
 
     // 3. Vertical Splitter Bottom (between Timeline and Context Inspector)
     float split_bottom_x = left_bottom_w;
     bool hover_vb = (mouse_pos.x >= (split_bottom_x - thickness * 0.5f) && mouse_pos.x <= (split_bottom_x + thickness * 0.5f) &&
-                     mouse_pos.y >= split_y && mouse_pos.y <= (menu_h + total_h));
+                     mouse_pos.y >= split_y && mouse_pos.y <= (content_y + total_h));
     if (m_dragging_split_bottom_v) {
         if (!mouse_down) {
             m_dragging_split_bottom_v = false;
@@ -1268,7 +1317,7 @@ void App::render_splitters() {
         ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
     }
     ImU32 col_vb = m_dragging_split_bottom_v ? IM_COL32(61, 174, 233, 255) : (hover_vb ? IM_COL32(61, 174, 233, 180) : IM_COL32(35, 40, 48, 200));
-    fg_draw->AddLine(ImVec2(split_bottom_x, split_y), ImVec2(split_bottom_x, menu_h + total_h), col_vb, (hover_vb || m_dragging_split_bottom_v) ? 3.0f : 1.5f);
+    fg_draw->AddLine(ImVec2(split_bottom_x, split_y), ImVec2(split_bottom_x, content_y + total_h), col_vb, (hover_vb || m_dragging_split_bottom_v) ? 3.0f : 1.5f);
 }
 
 void App::render() {
@@ -1277,10 +1326,13 @@ void App::render() {
     ImGui::NewFrame();
 
     render_menu_bar();
+    render_maya_shelf();
 
     float menu_h = ImGui::GetFrameHeight();
+    float shelf_h = m_script_engine.is_shelf_visible() ? m_script_engine.get_shelf_height() : 0.0f;
+    float content_y = menu_h + shelf_h;
     float total_w = static_cast<float>(m_window_width);
-    float total_h = static_cast<float>(m_window_height) - menu_h;
+    float total_h = static_cast<float>(m_window_height) - content_y;
 
     float top_h = total_h * m_split_h;
     float bottom_h = total_h - top_h;
@@ -1292,27 +1344,30 @@ void App::render() {
     float right_bottom_w = total_w - left_bottom_w;
 
     // Panel 1: Clip Panel (Top-Left)
-    ImGui::SetNextWindowPos(ImVec2(0, menu_h), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImVec2(0, content_y), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(left_top_w, top_h), ImGuiCond_Always);
     render_clip_panel();
 
     // Panel 2: Preview Panel (Top-Right, wider)
-    ImGui::SetNextWindowPos(ImVec2(left_top_w, menu_h), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImVec2(left_top_w, content_y), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(right_top_w, top_h), ImGuiCond_Always);
     render_preview_panel();
 
     // Panel 3: Timeline Panel (Bottom-Left)
-    ImGui::SetNextWindowPos(ImVec2(0, menu_h + top_h), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImVec2(0, content_y + top_h), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(left_bottom_w, bottom_h), ImGuiCond_Always);
     render_timeline_panel();
 
     // Panel 4: Context Panel (Audio, Video, Image Tools & Transforms) (Bottom-Right)
-    ImGui::SetNextWindowPos(ImVec2(left_bottom_w, menu_h + top_h), ImGuiCond_Always);
+    ImGui::SetNextWindowPos(ImVec2(left_bottom_w, content_y + top_h), ImGuiCond_Always);
     ImGui::SetNextWindowSize(ImVec2(right_bottom_w, bottom_h), ImGuiCond_Always);
     render_context_panel();
 
     // Allow view section resizing via interactive splitters
     render_splitters();
+
+    // Render MEL-style Script Panels
+    m_script_engine.render_script_panels(total_w, total_h, content_y);
 
     // Export Manager dialog & progress bar
     m_export_manager.render_ui([this](const ExportConfig& cfg) {

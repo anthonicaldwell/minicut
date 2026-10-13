@@ -77,6 +77,10 @@ else()
     set(IMGUI_DIR "${imgui_SOURCE_DIR}")
 endif()
 
+# LuaJIT setup
+set(LUAJIT_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/luajit/include")
+set(LUAJIT_LIB "${CMAKE_CURRENT_SOURCE_DIR}/third_party/luajit/lib/libluajit-5.1.a")
+
 # Dear ImGui sources
 set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui.cpp
@@ -102,6 +106,7 @@ set(MINICUT_SOURCES
     src/NativeFileDialog.cpp
     src/TempManager.cpp
     src/LocaleManager.cpp
+    src/ScriptEngine.cpp
     ${IMGUI_SOURCES}
 )
 
@@ -116,6 +121,7 @@ target_include_directories(minicut PRIVATE
     ${GLEW_INCLUDE_DIRS}
     ${OPENGL_INCLUDE_DIR}
     ${AVCODEC_INCLUDE_DIR}
+    ${LUAJIT_INCLUDE_DIR}
 )
 
 if(NLOHMANN_JSON_INCLUDE_DIR)
@@ -137,6 +143,8 @@ target_link_libraries(minicut PRIVATE
     ${SWSCALE_LIB}
     ${SWRESAMPLE_LIB}
     ${AVUTIL_LIB}
+    ${LUAJIT_LIB}
+    dl
     pthread
     m
 )
@@ -161,6 +169,7 @@ add_executable(test_minicut
     src/KeyframeEditor.cpp
     src/TempManager.cpp
     src/LocaleManager.cpp
+    src/ScriptEngine.cpp
     ${IMGUI_SOURCES}
 )
 
@@ -173,6 +182,7 @@ target_include_directories(test_minicut PRIVATE
     ${GLEW_INCLUDE_DIRS}
     ${OPENGL_INCLUDE_DIR}
     ${AVCODEC_INCLUDE_DIR}
+    ${LUAJIT_INCLUDE_DIR}
 )
 
 if(NLOHMANN_JSON_INCLUDE_DIR)
@@ -194,6 +204,8 @@ target_link_libraries(test_minicut PRIVATE
     ${SWSCALE_LIB}
     ${SWRESAMPLE_LIB}
     ${AVUTIL_LIB}
+    ${LUAJIT_LIB}
+    dl
     pthread
     m
 )

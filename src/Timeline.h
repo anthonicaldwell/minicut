@@ -43,7 +43,13 @@ public:
     float get_zoom() const { return m_pixels_per_sec; }
     void set_zoom(float z) { m_pixels_per_sec = z; }
 
+    // Track control header width (resizable)
+    float get_track_header_width() const { return m_track_header_w; }
+    void set_track_header_width(float w) { m_track_header_w = std::clamp(w, 80.0f, 400.0f); }
+
 private:
+    float m_track_header_w = 145.0f;
+    bool m_dragging_track_header = false;
     float m_pixels_per_sec = 60.0f;
     float m_scroll_sec = 0.0f;
     float m_scroll_track_y = 0.0f;
