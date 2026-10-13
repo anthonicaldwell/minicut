@@ -11,6 +11,8 @@ find_package(OpenGL REQUIRED)
 
 pkg_check_modules(SDL2 REQUIRED sdl2)
 pkg_check_modules(GLEW REQUIRED glew)
+pkg_check_modules(FREETYPE REQUIRED freetype2)
+pkg_check_modules(LIBPNG REQUIRED libpng16)
 
 # Find FFmpeg components (Checking system standard paths and third_party fallback)
 set(FFMPEG_SEARCH_INCLUDE
@@ -115,6 +117,8 @@ set(MINICUT_SOURCES
     src/TempManager.cpp
     src/LocaleManager.cpp
     src/ScriptEngine.cpp
+    src/ArabicShaper.cpp
+    src/TextGenerator.cpp
     ${IMGUI_SOURCES}
 )
 
@@ -131,6 +135,8 @@ target_include_directories(minicut PRIVATE
     ${AVCODEC_INCLUDE_DIR}
     ${LUAJIT_INCLUDE_DIR}
     ${CURL_INCLUDE_DIR}
+    ${FREETYPE_INCLUDE_DIRS}
+    ${LIBPNG_INCLUDE_DIRS}
 )
 
 if(NLOHMANN_JSON_INCLUDE_DIR)
@@ -146,6 +152,8 @@ target_compile_definitions(minicut PRIVATE
 target_link_libraries(minicut PRIVATE
     ${SDL2_LIBRARIES}
     ${GLEW_LIBRARIES}
+    ${FREETYPE_LIBRARIES}
+    ${LIBPNG_LIBRARIES}
     OpenGL::GL
     ${AVFORMAT_LIB}
     ${AVCODEC_LIB}
@@ -180,6 +188,8 @@ add_executable(test_minicut
     src/TempManager.cpp
     src/LocaleManager.cpp
     src/ScriptEngine.cpp
+    src/ArabicShaper.cpp
+    src/TextGenerator.cpp
     ${IMGUI_SOURCES}
 )
 
@@ -194,6 +204,8 @@ target_include_directories(test_minicut PRIVATE
     ${AVCODEC_INCLUDE_DIR}
     ${LUAJIT_INCLUDE_DIR}
     ${CURL_INCLUDE_DIR}
+    ${FREETYPE_INCLUDE_DIRS}
+    ${LIBPNG_INCLUDE_DIRS}
 )
 
 if(NLOHMANN_JSON_INCLUDE_DIR)
@@ -209,6 +221,8 @@ target_compile_definitions(test_minicut PRIVATE
 target_link_libraries(test_minicut PRIVATE
     ${SDL2_LIBRARIES}
     ${GLEW_LIBRARIES}
+    ${FREETYPE_LIBRARIES}
+    ${LIBPNG_LIBRARIES}
     OpenGL::GL
     ${AVFORMAT_LIB}
     ${AVCODEC_LIB}

@@ -38,21 +38,24 @@
 ├── src/                        # Core C++ source files
 │   ├── main.cpp                # Application entry point with CLI argument forwarding
 │   ├── Common.h                # Core data models, transform blitting, and keyframe helpers
-│   ├── App.h / App.cpp         # Main application controller, SDL/GL loop, docking & splitters
-│   ├── Timeline.h / .cpp       # Multi-track timeline UI, scrubbing, snapping, split/trim, paste
-│   ├── ClipManager.h / .cpp    # Media pool/library panel, asset import & thumbnails
+│   ├── App.h / App.cpp         # Main application controller, SDL/GL loop, docking, dialogs & splitters
+│   ├── Timeline.h / .cpp       # Multi-track timeline UI, reordering, renaming, multi-select, keyframes
+│   ├── ClipManager.h / .cpp    # Media pool/library panel, 36px asset rows, text asset creation trigger
 │   ├── KeyframeEditor.h / .cpp # Context Inspector (Audio, Video, Image tools & curve graph)
 │   ├── ExportManager.h / .cpp  # FFmpeg asynchronous multi-track export pipeline to MP4
 │   ├── MediaDecoder.h / .cpp   # FFmpeg demuxing, video frame & audio decoding
 │   ├── AudioEngine.h / .cpp    # SDL2 audio callback & synchronized audio mixer
-│   ├── NativeFileDialog.h / .cpp # Non-blocking system file dialogs (kdialog / zenity)
+│   ├── NativeFileDialog.h / .cpp # Non-blocking system file dialogs (kdialog / zenity / portal)
 │   ├── ProjectSerializer.h / .cpp # JSON save/load system (.minicut) with transform/depth persistence
 │   ├── FileBrowser.h / .cpp    # In-app file dialog with navigation and system thumbnail cache
 │   ├── TempManager.h / .cpp    # Centralized ~/.config/minicut/temp manager & disk cleanup
-│   ├── LocaleManager.h / .cpp  # Multi-language translation manager with embedded fallbacks
+│   ├── LocaleManager.h / .cpp  # Multi-language translation manager with Arabic RTL shaping & fallbacks
+│   ├── ArabicShaper.h / .cpp   # Cursive glyph shaping (Presentation Forms B, ligatures) & bidi runs
+│   ├── TextGenerator.h / .cpp  # FreeType 2 & FT_Stroker text rasterizer, outline, spacing, PNG export
+│   ├── ScriptEngine.h / .cpp   # Embedded LuaJIT 5.1 runtime, libcurl net library, tool shelf dock
 │   └── MD5.h                   # Lightweight RFC 1321 MD5 hasher for FreeDesktop thumbnail URIs
 ├── tests/
-│   └── test_minicut.cpp        # Full test suite (16 unit, integration, and pipeline tests)
+│   └── test_minicut.cpp        # Full test suite (23 unit, integration, and pipeline tests)
 └── third_party/                # Embedded / fallback dependencies (FFmpeg headers, ImGui, JSON)
 ```
 
@@ -258,6 +261,63 @@
 - **Automated Directory Deployment**:
   - Installer (`./install.sh`) installs scripts, autorun scripts, shelf icons, and documentation to both `~/.config/minicut/` and system/user data directories.
 
+### T. Track Reordering & Renaming (`src/Timeline.h`, `src/Timeline.cpp`)
+- **Flexible Track Management**:
+  - Reorder tracks upward (`move_track_up`) or downward (`move_track_down`) via track header context menu items.
+  - Arbitrary track repositioning (`reorder_track`) and position swapping (`swap_tracks`).
+  - Track renaming via right-click context menu modal ("Rename Track") or double-clicking track label.
+  - Scriptable via `timeline.move_track_up(idx)`, `timeline.move_track_down(idx)`, `timeline.move_track(from, to)`, `timeline.swap_tracks(a, b)`, `timeline.set_track_name(idx, name)`, `timeline.get_track_name(idx)`.
+
+### U. Multilingual Internationalization & Bi-directional Arabic RTL Support (`src/LocaleManager.h`, `src/ArabicShaper.h`)
+- **Complete Localization**:
+  - Full translations for all menus, actions, track labels (`Video`, `Audio`), script shelf menus, and dialogs across English (`en`), Japanese (`ja`/`jp`), Korean (`ko`), Ukrainian (`uk`), and Arabic (`ar`).
+- **Contextual Arabic Presentation Forms & Bi-directional Shaping**:
+  - Integrated `ArabicShaper` provides standalone Unicode 15 Arabic glyph shaping:
+    - Presentation Forms B substitution (Isolated, Initial, Medial, Final).
+    - Lam-Alef ligature combinations (U+FEFB..U+FEFE).
+    - Transparent Tashkeel diacritic bypass.
+    - Bi-directional visual run reversal for Right-to-Left (RTL) rendering.
+  - Automatically activates for UI translations and Text Generator when Arabic (`ar`) is selected.
+  - Japanese (`ja`) and all other languages remain strictly Left-to-Right (LTR).
+
+### V. Scriptable File Dialogs (`src/ScriptEngine.cpp`, `src/NativeFileDialog.h`)
+- **Unified & Granular File Dialog API**:
+  - `gui.file_dialog([opts])`: Automatically selects native desktop dialog (`kdialog`, `zenity`, or desktop portal) or built-in ImGui file dialog according to the user's Settings preference.
+  - `gui.native_file_dialog([opts])`: Forces system-native file dialog.
+  - `gui.builtin_file_dialog([opts])`: Forces built-in ImGui file dialog.
+  - Supports both synchronous path return and asynchronous callback invocation: `gui.file_dialog({ title = "Select Media", filter = "*.mp4 *.png", callback = function(p) ... end })`.
+
+### W. Asset Browser Selection UI Standardization (`src/ClipManager.cpp`)
+- **Constant Item Height & Span Highlighting**:
+  - Asset browser rows are standardized to a constant 36px height with vertically centered 32x32 thumbnails.
+  - Selecting an asset highlights the entire row spanning all columns (`ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap`).
+
+### X. Timeline Multi-Selection & Batch Operations (`src/Timeline.h`, `src/Timeline.cpp`)
+- **Multi-Clip Selection**:
+  - Single click selects clip.
+  - `Ctrl + Click` toggles individual clip selection.
+  - `Shift + Click` or rubber-band marquee drag box selects multiple clips across lanes.
+  - Select All shortcut (`Ctrl + A`) and Lua API (`timeline.select_all()`).
+  - Dragging multiple clips moves all selected clips together while maintaining their relative temporal offsets.
+  - Batch operations: delete selected clips (`Delete` / `Backspace`), copy/cut, and scriptable via `timeline.get_selected_clips()`, `timeline.select_clips(ids)`, and `timeline.clear_selection()`.
+
+### Y. FreeType Text Asset Generator & Timeline Placement (`src/TextGenerator.h`, `src/App.cpp`)
+- **Interactive Text Dialog**:
+  - FreeType 2 and `FT_Stroker` outline text generation engine.
+  - Interactive popup modal (`+ Text` button or menu item):
+    - System font family detection and selection.
+    - Font point size, text color picker, background box toggle and color, outline toggle, outline color and width slider.
+    - Letter spacing, line spacing, and justification (Left, Center, Right).
+    - Multiline text entry with instant Arabic RTL shaping.
+    - Real-time OpenGL texture preview.
+    - "Add to Assets" exports transparent PNG to asset library.
+    - "Add to Timeline" creates asset and places clip at current playhead on active video track.
+  - Fully scriptable via `assets.create_text(text, opts)` and `timeline.place_text_clip(text, track, [time], [duration], [opts])`.
+
+### Z. View Splitters Over Dialogs Bug Fix (`src/App.cpp`)
+- **Suppressed View Handles**:
+  - View splitters (docking separator bars) automatically suppress drawing and interaction whenever any modal, popup, file browser, or dialog is active, preventing split handles from appearing over active dialog windows.
+
 ---
 
 ## 5. Build, Test, and Execution Commands
@@ -277,11 +337,11 @@ cmake --build build -j$(nproc)
 ```bash
 ./build/test_minicut
 ```
-*(All 18 unit, integration, and pipeline tests passing)*
+*(All 23 unit, integration, and pipeline tests passing)*
 
 ### Installation & Uninstallation
 ```bash
-# Install to ~/.local (binary, desktop launcher, icons, MIME types, locales, scripts):
+# Install to ~/.local (binary, desktop launcher, icons, MIME types, locales, scripts, docs):
 ./install.sh --user
 
 # Cleanly uninstall minicut core files (leaves system dependencies intact):

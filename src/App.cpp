@@ -223,6 +223,7 @@ bool App::init(int argc, char* argv[]) {
             return true;
         }
     );
+    m_script_engine.set_app(this);
 
     return true;
 }
@@ -754,13 +755,20 @@ void App::update(double delta_time) {
             m_media_decoder.request_frame(m_playhead_time, m_project);
         }
 
-        // Delete / Backspace: Delete selected clip
+        // Delete / Backspace: Delete selected clips
         if (ImGui::IsKeyPressed(ImGuiKey_Delete, false) || ImGui::IsKeyPressed(ImGuiKey_Backspace, false)) {
-            push_undo_state();
-            m_timeline.delete_selected_clip(m_project);
-            m_selected_clip_id.clear();
-            m_keyframe_editor.set_selected_clip("");
-            m_media_decoder.request_frame(m_playhead_time, m_project);
+            if (!m_timeline.get_selected_clip_ids().empty() || !m_selected_clip_id.empty()) {
+                push_undo_state();
+                m_timeline.delete_selected_clips(m_project);
+                m_selected_clip_id.clear();
+                m_keyframe_editor.set_selected_clip("");
+                m_media_decoder.request_frame(m_playhead_time, m_project);
+            }
+        }
+
+        // Ctrl + A: Select All clips
+        if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_A, false)) {
+            m_timeline.select_all(m_project);
         }
 
         // Ctrl + Z: Undo
@@ -776,13 +784,13 @@ void App::update(double delta_time) {
 
         // Ctrl + C: Copy
         if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_C, false)) {
-            m_timeline.copy_selected_clip(m_project);
+            m_timeline.copy_selected_clips(m_project);
         }
 
         // Ctrl + X: Cut
         if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_X, false)) {
             push_undo_state();
-            m_timeline.cut_selected_clip(m_project);
+            m_timeline.cut_selected_clips(m_project);
             m_selected_clip_id.clear();
             m_keyframe_editor.set_selected_clip("");
         }
@@ -869,14 +877,15 @@ void App::render_menu_bar() {
             if (ImGui::MenuItem(_TR("edit_undo"), "Ctrl+Z", false, !m_undo_stack.empty())) { undo(); }
             if (ImGui::MenuItem(_TR("edit_redo"), "Ctrl+Y", false, !m_redo_stack.empty())) { redo(); }
             ImGui::Separator();
-            if (ImGui::MenuItem(_TR("edit_cut"), "Ctrl+X", false, !m_selected_clip_id.empty())) {
+            bool has_sel = !m_timeline.get_selected_clip_ids().empty() || !m_selected_clip_id.empty();
+            if (ImGui::MenuItem(_TR("edit_cut"), "Ctrl+X", false, has_sel)) {
                 push_undo_state();
-                m_timeline.cut_selected_clip(m_project);
+                m_timeline.cut_selected_clips(m_project);
                 m_selected_clip_id.clear();
                 m_keyframe_editor.set_selected_clip("");
             }
-            if (ImGui::MenuItem(_TR("edit_copy"), "Ctrl+C", false, !m_selected_clip_id.empty())) {
-                m_timeline.copy_selected_clip(m_project);
+            if (ImGui::MenuItem(_TR("edit_copy"), "Ctrl+C", false, has_sel)) {
+                m_timeline.copy_selected_clips(m_project);
             }
             if (ImGui::MenuItem(_TR("edit_paste"), "Ctrl+V")) {
                 push_undo_state();
@@ -886,14 +895,20 @@ void App::render_menu_bar() {
                 m_media_decoder.request_frame(m_playhead_time, m_project);
             }
             ImGui::Separator();
+            if (ImGui::MenuItem(_TR("edit_select_all"), "Ctrl+A")) {
+                m_timeline.select_all(m_project);
+            }
             if (ImGui::MenuItem(_TR("edit_split"), "S", false, !m_selected_clip_id.empty())) {
                 push_undo_state();
                 m_timeline.split_selected_clip(m_project, m_playhead_time);
                 m_media_decoder.request_frame(m_playhead_time, m_project);
             }
-            if (ImGui::MenuItem(_TR("edit_delete"), "Del", false, !m_selected_clip_id.empty())) {
+            std::string del_label = (m_timeline.get_selected_clip_ids().size() > 1)
+                ? (std::string(_TR("edit_delete")) + " (" + std::to_string(m_timeline.get_selected_clip_ids().size()) + ")")
+                : std::string(_TR("edit_delete"));
+            if (ImGui::MenuItem(del_label.c_str(), "Del", false, has_sel)) {
                 push_undo_state();
-                m_timeline.delete_selected_clip(m_project);
+                m_timeline.delete_selected_clips(m_project);
                 m_selected_clip_id.clear();
                 m_keyframe_editor.set_selected_clip("");
                 m_media_decoder.request_frame(m_playhead_time, m_project);
@@ -906,6 +921,7 @@ void App::render_menu_bar() {
             if (ImGui::MenuItem(_TR("project_import_audio"))) { import_audio_browser(); }
             if (ImGui::MenuItem(_TR("project_import_image"))) { import_image_browser(); }
             if (ImGui::MenuItem(_TR("project_import_prefab"))) { import_prefab_browser(); }
+            if (ImGui::MenuItem(_TR("text_add_asset"))) { open_text_dialog(); }
             ImGui::Separator();
             if (ImGui::MenuItem(_TR("project_generate_demo"))) {
                 std::string test_v = "demo_colorbars.mp4";
@@ -942,13 +958,13 @@ void App::render_menu_bar() {
             ImGui::EndMenu();
         }
 
-        if (ImGui::BeginMenu("Scripts")) {
+        if (ImGui::BeginMenu(_TR("menu_scripts"))) {
             m_script_engine.render_scripts_menu();
             ImGui::EndMenu();
         }
 
         if (ImGui::BeginMenu(_TR("menu_help"))) {
-            if (ImGui::MenuItem("Lua API Reference (PDF)...")) {
+            if (ImGui::MenuItem(_TR("menu_help_lua_api"))) {
                 const char* home = std::getenv("HOME");
                 std::vector<std::string> candidates = {
                     "docs/minicut_lua_api.pdf",
@@ -1029,8 +1045,13 @@ void App::render_clip_panel() {
         // On import prefab
         [this]() {
             import_prefab_browser();
+        },
+        // On add text
+        [this]() {
+            open_text_dialog();
         }
     );
+
 
     ImGui::End();
 }
@@ -1278,6 +1299,15 @@ void App::cleanup_temp_files() {
 }
 
 void App::render_splitters() {
+    // Suppress splitters if any modal, popup, file browser, or dialog is currently open
+    if (m_show_about || m_show_text_dialog || m_file_browser.is_open() || m_clip_manager.is_importing() ||
+        ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
+        m_dragging_split_h = false;
+        m_dragging_split_top_v = false;
+        m_dragging_split_bottom_v = false;
+        return;
+    }
+
     ImDrawList* fg_draw = ImGui::GetForegroundDrawList();
     ImVec2 mouse_pos = ImGui::GetMousePos();
     bool mouse_down = ImGui::IsMouseDown(0);
@@ -1429,6 +1459,9 @@ void App::render() {
         }
     }
 
+    // Text Asset Dialog
+    render_text_dialog();
+
     // About Dialog
     render_about_dialog();
 
@@ -1461,6 +1494,10 @@ void App::cleanup() {
         glDeleteTextures(1, &m_preview_texture);
         m_preview_texture = 0;
     }
+    if (m_text_preview_texture) {
+        glDeleteTextures(1, &m_text_preview_texture);
+        m_text_preview_texture = 0;
+    }
 
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplSDL2_Shutdown();
@@ -1476,3 +1513,209 @@ void App::cleanup() {
     }
     SDL_Quit();
 }
+
+void App::open_text_dialog() {
+    m_show_text_dialog = true;
+    m_text_preview_dirty = true;
+    if (LocaleManager::instance().is_rtl()) {
+        m_text_config.justification = 2; // Right align for Arabic
+        m_text_config.font_path = TextGenerator::get_arabic_font_path();
+        if (m_text_input_buf[0] == '\0' || strcmp(m_text_input_buf, "Title Text") == 0) {
+            strncpy(m_text_input_buf, "عنوان نصي", sizeof(m_text_input_buf) - 1);
+        }
+    }
+}
+
+void App::update_text_preview() {
+    if (!m_text_preview_dirty) return;
+    m_text_preview_dirty = false;
+    m_text_config.text = m_text_input_buf;
+
+    std::vector<uint8_t> rgba;
+    int tw = 0, th = 0;
+    if (TextGenerator::render_to_rgba(m_text_config, tw, th, rgba) && tw > 0 && th > 0) {
+        if (!m_text_preview_texture) {
+            glGenTextures(1, &m_text_preview_texture);
+        }
+        glBindTexture(GL_TEXTURE_2D, m_text_preview_texture);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, tw, th, 0, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+        m_text_preview_w = tw;
+        m_text_preview_h = th;
+    }
+}
+
+void App::render_text_dialog() {
+    if (!m_show_text_dialog) return;
+
+    ImGui::SetNextWindowSize(ImVec2(620, 680), ImGuiCond_Appearing);
+    std::string title = std::string(_TR("text_dialog_title")) + "###TextGeneratorModal";
+    if (ImGui::Begin(title.c_str(), &m_show_text_dialog, ImGuiWindowFlags_NoCollapse)) {
+        // Font selector
+        auto fonts = TextGenerator::get_available_fonts();
+        int cur_font_idx = 0;
+        for (size_t i = 0; i < fonts.size(); ++i) {
+            if (fonts[i].second == m_text_config.font_path) {
+                cur_font_idx = static_cast<int>(i);
+                break;
+            }
+        }
+        const char* current_font_name = fonts.empty() ? "None" : fonts[cur_font_idx].first.c_str();
+        if (ImGui::BeginCombo(_TR("text_font"), current_font_name)) {
+            for (size_t i = 0; i < fonts.size(); ++i) {
+                bool is_selected = (cur_font_idx == static_cast<int>(i));
+                if (ImGui::Selectable(fonts[i].first.c_str(), is_selected)) {
+                    m_text_config.font_path = fonts[i].second;
+                    m_text_preview_dirty = true;
+                }
+                if (is_selected) ImGui::SetItemDefaultFocus();
+            }
+            ImGui::EndCombo();
+        }
+
+        // Font Size
+        if (ImGui::SliderFloat(_TR("text_font_size"), &m_text_config.font_size, 12.0f, 144.0f, "%.0f px")) {
+            m_text_preview_dirty = true;
+        }
+
+        // Font Color
+        if (ImGui::ColorEdit4(_TR("text_font_color"), m_text_config.font_color, ImGuiColorEditFlags_AlphaBar)) {
+            m_text_preview_dirty = true;
+        }
+
+        ImGui::Separator();
+
+        // Background
+        if (ImGui::Checkbox(_TR("text_use_background"), &m_text_config.use_bg)) {
+            m_text_preview_dirty = true;
+        }
+        if (m_text_config.use_bg) {
+            ImGui::SameLine();
+            if (ImGui::ColorEdit4(_TR("text_bg_color"), m_text_config.bg_color, ImGuiColorEditFlags_AlphaBar)) {
+                m_text_preview_dirty = true;
+            }
+        }
+
+        // Outline
+        if (ImGui::Checkbox(_TR("text_use_outline"), &m_text_config.use_outline)) {
+            m_text_preview_dirty = true;
+        }
+        if (m_text_config.use_outline) {
+            ImGui::SameLine();
+            if (ImGui::ColorEdit4(_TR("text_outline_color"), m_text_config.outline_color)) {
+                m_text_preview_dirty = true;
+            }
+            if (ImGui::SliderFloat(_TR("text_outline_width"), &m_text_config.outline_thickness, 0.5f, 15.0f, "%.1f px")) {
+                m_text_preview_dirty = true;
+            }
+        }
+
+        ImGui::Separator();
+
+        // Spacing
+        if (ImGui::SliderFloat(_TR("text_letter_spacing"), &m_text_config.letter_spacing, -5.0f, 30.0f, "%.1f px")) {
+            m_text_preview_dirty = true;
+        }
+        if (ImGui::SliderFloat(_TR("text_line_spacing"), &m_text_config.line_spacing, 0.8f, 3.0f, "%.2f")) {
+            m_text_preview_dirty = true;
+        }
+
+        // Justification
+        ImGui::Text("%s:", _TR("text_alignment"));
+        ImGui::SameLine();
+        if (ImGui::RadioButton(_TR("text_align_left"), &m_text_config.justification, 0)) { m_text_preview_dirty = true; }
+        ImGui::SameLine();
+        if (ImGui::RadioButton(_TR("text_align_center"), &m_text_config.justification, 1)) { m_text_preview_dirty = true; }
+        ImGui::SameLine();
+        if (ImGui::RadioButton(_TR("text_align_right"), &m_text_config.justification, 2)) { m_text_preview_dirty = true; }
+
+        ImGui::Separator();
+
+        // Text entry
+        ImGui::Text("%s:", _TR("text_entry_label"));
+        if (LocaleManager::instance().is_rtl()) {
+            ImGui::SameLine();
+            ImGui::TextDisabled("(RTL Arabic mode active)");
+        }
+        if (ImGui::InputTextMultiline("##text_input_content", m_text_input_buf, sizeof(m_text_input_buf), ImVec2(-1, 80))) {
+            m_text_preview_dirty = true;
+        }
+
+        // Live Preview Box
+        ImGui::Separator();
+        ImGui::Text("%s (%dx%d):", _TR("text_preview"), m_text_preview_w, m_text_preview_h);
+        update_text_preview();
+
+        ImVec2 avail = ImVec2(ImGui::GetContentRegionAvail().x, 140.0f);
+        ImGui::BeginChild("##text_preview_box", avail, true, ImGuiWindowFlags_NoScrollbar);
+        if (m_text_preview_texture && m_text_preview_w > 0 && m_text_preview_h > 0) {
+            float aspect = static_cast<float>(m_text_preview_w) / static_cast<float>(m_text_preview_h);
+            float disp_h = std::min(avail.y - 10.0f, static_cast<float>(m_text_preview_h));
+            float disp_w = disp_h * aspect;
+            if (disp_w > avail.x - 20.0f) {
+                disp_w = avail.x - 20.0f;
+                disp_h = disp_w / aspect;
+            }
+            float off_x = std::max(0.0f, (avail.x - disp_w) * 0.5f);
+            float off_y = std::max(0.0f, (avail.y - disp_h) * 0.5f);
+            ImGui::SetCursorPos(ImVec2(off_x, off_y));
+            ImGui::Image((ImTextureID)(intptr_t)m_text_preview_texture, ImVec2(disp_w, disp_h));
+        } else {
+            ImGui::TextDisabled("No preview");
+        }
+        ImGui::EndChild();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+
+        // Buttons
+        if (ImGui::Button(_TR("text_add_to_assets"), ImVec2(160, 32))) {
+            m_text_config.text = m_text_input_buf;
+            std::string id = TextGenerator::create_text_asset(m_project, m_text_config);
+            if (!id.empty()) {
+                m_clip_manager.select_asset(id, true, false);
+                set_status_notification("Text asset created: " + id);
+                on_project_modified();
+            }
+            m_show_text_dialog = false;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(_TR("text_add_to_timeline"), ImVec2(180, 32))) {
+            m_text_config.text = m_text_input_buf;
+            std::string id = TextGenerator::create_text_asset(m_project, m_text_config);
+            if (!id.empty()) {
+                m_clip_manager.select_asset(id, true, false);
+                add_asset_to_timeline(id, true, m_playhead_time);
+                set_status_notification("Text asset added to timeline at " + format_timecode(m_playhead_time, false));
+                on_project_modified();
+            }
+            m_show_text_dialog = false;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(_TR("dialog_cancel"), ImVec2(100, 32)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            m_show_text_dialog = false;
+        }
+
+        ImGui::End();
+    }
+}
+
+std::string App::create_text_asset(const std::string& text, const TextConfig& config, const std::string& name) {
+    TextConfig cfg = config;
+    cfg.text = text;
+    std::string asset_id = TextGenerator::create_text_asset(m_project, cfg, name);
+    if (!asset_id.empty()) {
+        m_clip_manager.select_asset(asset_id, true, false);
+        on_project_modified();
+    }
+    return asset_id;
+}
+
+void App::add_text_to_timeline(const std::string& asset_id, double insert_time) {
+    add_asset_to_timeline(asset_id, true, insert_time);
+}
+
+

@@ -60,6 +60,44 @@ std::string NativeFileDialog::run_process(const std::string& cmd) {
     return output;
 }
 
+std::string NativeFileDialog::open_file_sync(const std::string& title,
+                                             const std::string& default_path,
+                                             const std::string& filter_desc,
+                                             const std::string& filter_patterns) {
+    if (!is_available()) return "";
+
+    std::string start_dir = default_path.empty() ? fs::current_path().string() : default_path;
+    if (!fs::is_directory(start_dir)) {
+        start_dir = fs::path(start_dir).parent_path().string();
+    }
+    if (start_dir.empty()) start_dir = ".";
+
+    std::string cmd;
+    if (is_kdialog()) {
+        std::string kfilter;
+        if (!filter_patterns.empty()) {
+            kfilter = filter_patterns + " | " + filter_desc + "\n* | All Files (*)";
+        } else {
+            kfilter = "* | All Files (*)";
+        }
+        cmd = "/usr/bin/kdialog --title " + escape_shell(title) +
+              " --getopenfilename " + escape_shell(start_dir) +
+              " " + escape_shell(kfilter) + " 2>/dev/null";
+    } else {
+        cmd = "/usr/bin/zenity --file-selection --title=" + escape_shell(title) +
+              " --filename=" + escape_shell(start_dir + "/");
+        if (!filter_patterns.empty()) {
+            cmd += " --file-filter=" + escape_shell(filter_desc + " | " + filter_patterns);
+        }
+        cmd += " 2>/dev/null";
+    }
+
+    s_dialog_active.store(true);
+    std::string path = run_process(cmd);
+    s_dialog_active.store(false);
+    return path;
+}
+
 void NativeFileDialog::open_file(const std::string& title,
                                 const std::string& default_path,
                                 const std::string& filter_desc,
@@ -67,42 +105,47 @@ void NativeFileDialog::open_file(const std::string& title,
                                 std::function<void(const std::string&)> on_chosen) {
     if (!is_available()) return;
 
-    s_dialog_active.store(true);
     std::thread([title, default_path, filter_desc, filter_patterns, on_chosen]() {
-        std::string start_dir = default_path.empty() ? fs::current_path().string() : default_path;
-        if (!fs::is_directory(start_dir)) {
-            start_dir = fs::path(start_dir).parent_path().string();
-        }
-        if (start_dir.empty()) start_dir = ".";
-
-        std::string cmd;
-        if (is_kdialog()) {
-            std::string kfilter;
-            if (!filter_patterns.empty()) {
-                kfilter = filter_patterns + " | " + filter_desc + "\n* | All Files (*)";
-            } else {
-                kfilter = "* | All Files (*)";
-            }
-            cmd = "/usr/bin/kdialog --title " + escape_shell(title) +
-                  " --getopenfilename " + escape_shell(start_dir) +
-                  " " + escape_shell(kfilter) + " 2>/dev/null";
-        } else {
-            cmd = "/usr/bin/zenity --file-selection --title=" + escape_shell(title) +
-                  " --filename=" + escape_shell(start_dir + "/");
-            if (!filter_patterns.empty()) {
-                cmd += " --file-filter=" + escape_shell(filter_desc + " | " + filter_patterns);
-            }
-            cmd += " 2>/dev/null";
-        }
-
-        std::string path = run_process(cmd);
-        s_dialog_active.store(false);
-
+        std::string path = open_file_sync(title, default_path, filter_desc, filter_patterns);
         if (!path.empty() && on_chosen) {
             std::lock_guard<std::mutex> lock(s_mutex);
             s_pending_callbacks.push_back({on_chosen, path});
         }
     }).detach();
+}
+
+std::string NativeFileDialog::save_file_sync(const std::string& title,
+                                             const std::string& default_path,
+                                             const std::string& filter_desc,
+                                             const std::string& filter_patterns) {
+    if (!is_available()) return "";
+
+    std::string start_file = default_path.empty() ? (fs::current_path().string() + "/untitled.minicut") : default_path;
+
+    std::string cmd;
+    if (is_kdialog()) {
+        std::string kfilter;
+        if (!filter_patterns.empty()) {
+            kfilter = filter_patterns + " | " + filter_desc + "\n* | All Files (*)";
+        } else {
+            kfilter = "* | All Files (*)";
+        }
+        cmd = "/usr/bin/kdialog --title " + escape_shell(title) +
+              " --getsavefilename " + escape_shell(start_file) +
+              " " + escape_shell(kfilter) + " 2>/dev/null";
+    } else {
+        cmd = "/usr/bin/zenity --file-selection --save --confirm-overwrite --title=" + escape_shell(title) +
+              " --filename=" + escape_shell(start_file);
+        if (!filter_patterns.empty()) {
+            cmd += " --file-filter=" + escape_shell(filter_desc + " | " + filter_patterns);
+        }
+        cmd += " 2>/dev/null";
+    }
+
+    s_dialog_active.store(true);
+    std::string path = run_process(cmd);
+    s_dialog_active.store(false);
+    return path;
 }
 
 void NativeFileDialog::save_file(const std::string& title,
@@ -112,39 +155,15 @@ void NativeFileDialog::save_file(const std::string& title,
                                 std::function<void(const std::string&)> on_chosen) {
     if (!is_available()) return;
 
-    s_dialog_active.store(true);
     std::thread([title, default_path, filter_desc, filter_patterns, on_chosen]() {
-        std::string start_file = default_path.empty() ? (fs::current_path().string() + "/untitled.minicut") : default_path;
-
-        std::string cmd;
-        if (is_kdialog()) {
-            std::string kfilter;
-            if (!filter_patterns.empty()) {
-                kfilter = filter_patterns + " | " + filter_desc + "\n* | All Files (*)";
-            } else {
-                kfilter = "* | All Files (*)";
-            }
-            cmd = "/usr/bin/kdialog --title " + escape_shell(title) +
-                  " --getsavefilename " + escape_shell(start_file) +
-                  " " + escape_shell(kfilter) + " 2>/dev/null";
-        } else {
-            cmd = "/usr/bin/zenity --file-selection --save --confirm-overwrite --title=" + escape_shell(title) +
-                  " --filename=" + escape_shell(start_file);
-            if (!filter_patterns.empty()) {
-                cmd += " --file-filter=" + escape_shell(filter_desc + " | " + filter_patterns);
-            }
-            cmd += " 2>/dev/null";
-        }
-
-        std::string path = run_process(cmd);
-        s_dialog_active.store(false);
-
+        std::string path = save_file_sync(title, default_path, filter_desc, filter_patterns);
         if (!path.empty() && on_chosen) {
             std::lock_guard<std::mutex> lock(s_mutex);
             s_pending_callbacks.push_back({on_chosen, path});
         }
     }).detach();
 }
+
 
 void NativeFileDialog::select_directory(const std::string& title,
                                         const std::string& default_path,

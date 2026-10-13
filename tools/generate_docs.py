@@ -277,6 +277,11 @@ end</pre>
         <td><code>string (asset_id)</code></td>
         <td>Imports a static image file into the project's asset pool (default duration: 5.0s).</td>
     </tr>
+    <tr>
+        <td><code>assets.create_text(text, [opts])</code><br><code>project.create_text_asset(text, [opts])</code></td>
+        <td><code>string (asset_id)</code></td>
+        <td>Creates a text asset using FreeType 2 and FT_Stroker outline rendering, and adds it to the asset pool. Supports options table: <code>font</code>, <code>size</code>, <code>font_color</code>, <code>bg_color</code>, <code>outline_color</code>, <code>outline_width</code>, <code>letter_spacing</code>, <code>line_spacing</code>, <code>justification</code> (0=left, 1=center, 2=right). Full Arabic cursive shaping and RTL bidirectional layout are automatically handled.</td>
+    </tr>
 </tbody>
 </table>
 
@@ -400,6 +405,21 @@ end</pre>
         <td><code>void</code></td>
         <td>Displays hover tooltip over preceding item.</td>
     </tr>
+    <tr>
+        <td><code>gui.file_dialog([opts])</code></td>
+        <td><code>string | nil</code></td>
+        <td>Selects system native or built-in file dialog according to user settings. Accepts options table <code>{ title, default_path, filter, save, callback }</code> or positional arguments <code>(title, [path], [filter], [is_save], [callback])</code>. Returns path synchronously or delivers via callback.</td>
+    </tr>
+    <tr>
+        <td><code>gui.native_file_dialog([opts])</code></td>
+        <td><code>string | nil</code></td>
+        <td>Forces system native file dialog (kdialog, zenity, or desktop portal).</td>
+    </tr>
+    <tr>
+        <td><code>gui.builtin_file_dialog([opts])</code></td>
+        <td><code>string | nil</code></td>
+        <td>Forces minicut built-in Dear ImGui file dialog.</td>
+    </tr>
 </tbody>
 </table>
 
@@ -413,6 +433,11 @@ end</pre>
         <td><code>timeline.place_clip(path, track, t, dur)</code></td>
         <td><code>string (clip_id)</code></td>
         <td>Imports media and places clip onto track lane at timestamp <code>t</code>.</td>
+    </tr>
+    <tr>
+        <td><code>timeline.place_text_clip(text, track, [t], [dur], [opts])</code></td>
+        <td><code>string (clip_id)</code></td>
+        <td>Generates a text asset and immediately places it on track lane (defaults to current playhead and 5.0s duration).</td>
     </tr>
     <tr>
         <td><code>timeline.get_playhead()</code></td>
@@ -448,6 +473,56 @@ end</pre>
         <td><code>timeline.add_track(track_type)</code></td>
         <td><code>string (id)</code></td>
         <td>Appends a new track (<code>"video"</code> or <code>"audio"</code>).</td>
+    </tr>
+    <tr>
+        <td><code>timeline.move_track_up(track_idx)</code></td>
+        <td><code>void</code></td>
+        <td>Moves track up by one position in the stack.</td>
+    </tr>
+    <tr>
+        <td><code>timeline.move_track_down(track_idx)</code></td>
+        <td><code>void</code></td>
+        <td>Moves track down by one position in the stack.</td>
+    </tr>
+    <tr>
+        <td><code>timeline.move_track(from_idx, to_idx)</code></td>
+        <td><code>void</code></td>
+        <td>Reorders track from index <code>from_idx</code> to <code>to_idx</code>.</td>
+    </tr>
+    <tr>
+        <td><code>timeline.swap_tracks(idx_a, idx_b)</code></td>
+        <td><code>void</code></td>
+        <td>Swaps positions of two tracks.</td>
+    </tr>
+    <tr>
+        <td><code>timeline.set_track_name(track_idx, name)</code></td>
+        <td><code>void</code></td>
+        <td>Assigns a custom display name to track.</td>
+    </tr>
+    <tr>
+        <td><code>timeline.get_track_name(track_idx)</code></td>
+        <td><code>string</code></td>
+        <td>Returns custom name of track.</td>
+    </tr>
+    <tr>
+        <td><code>timeline.get_selected_clips()</code></td>
+        <td><code>table (array)</code></td>
+        <td>Returns array table of all selected clip IDs on the timeline.</td>
+    </tr>
+    <tr>
+        <td><code>timeline.select_clips(clip_ids_table)</code></td>
+        <td><code>void</code></td>
+        <td>Selects multiple clips simultaneously from table of IDs.</td>
+    </tr>
+    <tr>
+        <td><code>timeline.clear_selection()</code></td>
+        <td><code>void</code></td>
+        <td>Clears all selected clips.</td>
+    </tr>
+    <tr>
+        <td><code>timeline.select_all()</code></td>
+        <td><code>void</code></td>
+        <td>Selects all clips across all tracks.</td>
     </tr>
     <tr>
         <td><code>timeline.delete_clip(clip_id)</code></td>
@@ -702,6 +777,7 @@ end
 | `project.import_video(path)` | `string (asset_id)` | Imports video file into pool. |
 | `project.import_audio(path)` | `string (asset_id)` | Imports audio file into pool. |
 | `project.import_image(path, [dur])` | `string (asset_id)` | Imports image file into pool (default dur: 5.0s). |
+| `assets.create_text(text, [opts])`<br>`project.create_text_asset(text, [opts])` | `string (asset_id)` | Renders text asset via FreeType 2 and FT_Stroker. Supports font, size, colors, background, outline, letter/line spacing, justification, and Arabic RTL shaping. |
 
 ### 3.2. Network & Internet Library (`net`)
 
@@ -733,12 +809,16 @@ Powered by `libcurl`:
 | `gui.input_text(label, val)` | Text input box. |
 | `gui.progress_bar(fraction, [text])` | Progress bar (0.0 to 1.0). |
 | `gui.tooltip(text)` | Hover tooltip. |
+| `gui.file_dialog([opts])` | Opens file dialog choosing native vs built-in per user settings. Supports sync return or callback. |
+| `gui.native_file_dialog([opts])` | Forces system native file dialog (kdialog, zenity, or portal). |
+| `gui.builtin_file_dialog([opts])` | Forces built-in ImGui file dialog modal. |
 
 ### 3.4. Timeline & Tracks (`timeline`)
 
 | Function | Description |
 |---|---|
 | `timeline.place_clip(path, track, t, dur)` | Imports and places clip on timeline lane. |
+| `timeline.place_text_clip(text, track, [t], [dur], [opts])` | Creates a text asset and immediately places it on track lane. |
 | `timeline.get_playhead()` | Returns playhead time in seconds. |
 | `timeline.set_playhead(t)` | Seeks playhead and refreshes preview frame. |
 | `timeline.get_duration()` | Returns total project duration in seconds. |
@@ -746,6 +826,16 @@ Powered by `libcurl`:
 | `timeline.get_track_depth(track_idx)` | Returns Z-depth compositing order (0-100). |
 | `timeline.set_track_depth(track_idx, z)` | Sets Z-depth compositing order. |
 | `timeline.add_track(track_type)` | Adds new track (`"video"` or `"audio"`). |
+| `timeline.move_track_up(track_idx)` | Moves track up one position. |
+| `timeline.move_track_down(track_idx)` | Moves track down one position. |
+| `timeline.move_track(from_idx, to_idx)` | Moves track from index to index. |
+| `timeline.swap_tracks(idx_a, idx_b)` | Swaps two tracks. |
+| `timeline.set_track_name(track_idx, name)` | Renames track. |
+| `timeline.get_track_name(track_idx)` | Returns track name. |
+| `timeline.get_selected_clips()` | Returns table array of selected clip IDs. |
+| `timeline.select_clips(clip_ids_table)` | Selects multiple clips. |
+| `timeline.clear_selection()` | Deselects all clips. |
+| `timeline.select_all()` | Selects all clips across all tracks. |
 | `timeline.delete_clip(clip_id)` | Removes clip from timeline. |
 | `timeline.split_clip(clip_id, split_t)` | Splits clip at time. |
 

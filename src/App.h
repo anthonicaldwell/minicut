@@ -13,6 +13,7 @@
 #include "LocaleManager.h"
 #include "TempManager.h"
 #include "ScriptEngine.h"
+#include "TextGenerator.h"
 
 #include <SDL2/SDL.h>
 #include <GL/glew.h>
@@ -43,6 +44,14 @@ public:
     AudioEngine& get_audio_engine() { return m_audio_engine; }
     MediaDecoder& get_media_decoder() { return m_media_decoder; }
     ScriptEngine& get_script_engine() { return m_script_engine; }
+    FileBrowser& get_file_browser() { return m_file_browser; }
+    bool get_use_system_file_dialog() const { return m_use_system_file_dialog; }
+    void set_use_system_file_dialog(bool val) { m_use_system_file_dialog = val; }
+
+    // Text Generator Dialog
+    void open_text_dialog();
+    std::string create_text_asset(const std::string& text, const TextConfig& config, const std::string& name = "");
+    void add_text_to_timeline(const std::string& asset_id, double insert_time);
 
 private:
     void apply_kde_plasma_theme();
@@ -70,6 +79,8 @@ private:
 
     // Dialogs
     void render_about_dialog();
+    void render_text_dialog();
+    void update_text_preview();
 
     // FileBrowser Triggers
     void open_project_browser();
@@ -138,4 +149,13 @@ private:
     std::string m_status_notification;
     double m_status_notification_timer = 0.0;
     float m_menu_bar_height = 0.0f;
+
+    // Text Asset Dialog state
+    bool m_show_text_dialog = false;
+    TextConfig m_text_config;
+    char m_text_input_buf[1024] = "Title Text";
+    GLuint m_text_preview_texture = 0;
+    int m_text_preview_w = 0;
+    int m_text_preview_h = 0;
+    bool m_text_preview_dirty = true;
 };

@@ -17,6 +17,7 @@ public:
     bool set_locale(const std::string& lang_code);
     std::string current_locale() const { return m_current_locale; }
     std::string current_locale_name() const;
+    bool is_rtl() const { return m_current_locale == "ar"; }
 
     // Translation lookup: returns translated string or fallback
     std::string get(const std::string& key, const std::string& fallback = "") const;

@@ -63,6 +63,7 @@ end
 | `project.import_video(path)` | `string (asset_id)` | Imports video file into pool. |
 | `project.import_audio(path)` | `string (asset_id)` | Imports audio file into pool. |
 | `project.import_image(path, [dur])` | `string (asset_id)` | Imports image file into pool (default dur: 5.0s). |
+| `assets.create_text(text, [opts])`<br>`project.create_text_asset(text, [opts])` | `string (asset_id)` | Renders text asset via FreeType 2 and FT_Stroker. Supports font, size, colors, background, outline, letter/line spacing, justification, and Arabic RTL shaping. |
 
 ### 3.2. Network & Internet Library (`net`)
 
@@ -94,12 +95,16 @@ Powered by `libcurl`:
 | `gui.input_text(label, val)` | Text input box. |
 | `gui.progress_bar(fraction, [text])` | Progress bar (0.0 to 1.0). |
 | `gui.tooltip(text)` | Hover tooltip. |
+| `gui.file_dialog([opts])` | Opens file dialog choosing native vs built-in per user settings. Supports sync return or callback. |
+| `gui.native_file_dialog([opts])` | Forces system native file dialog (kdialog, zenity, or portal). |
+| `gui.builtin_file_dialog([opts])` | Forces built-in ImGui file dialog modal. |
 
 ### 3.4. Timeline & Tracks (`timeline`)
 
 | Function | Description |
 |---|---|
 | `timeline.place_clip(path, track, t, dur)` | Imports and places clip on timeline lane. |
+| `timeline.place_text_clip(text, track, [t], [dur], [opts])` | Creates a text asset and immediately places it on track lane. |
 | `timeline.get_playhead()` | Returns playhead time in seconds. |
 | `timeline.set_playhead(t)` | Seeks playhead and refreshes preview frame. |
 | `timeline.get_duration()` | Returns total project duration in seconds. |
@@ -107,6 +112,16 @@ Powered by `libcurl`:
 | `timeline.get_track_depth(track_idx)` | Returns Z-depth compositing order (0-100). |
 | `timeline.set_track_depth(track_idx, z)` | Sets Z-depth compositing order. |
 | `timeline.add_track(track_type)` | Adds new track (`"video"` or `"audio"`). |
+| `timeline.move_track_up(track_idx)` | Moves track up one position. |
+| `timeline.move_track_down(track_idx)` | Moves track down one position. |
+| `timeline.move_track(from_idx, to_idx)` | Moves track from index to index. |
+| `timeline.swap_tracks(idx_a, idx_b)` | Swaps two tracks. |
+| `timeline.set_track_name(track_idx, name)` | Renames track. |
+| `timeline.get_track_name(track_idx)` | Returns track name. |
+| `timeline.get_selected_clips()` | Returns table array of selected clip IDs. |
+| `timeline.select_clips(clip_ids_table)` | Selects multiple clips. |
+| `timeline.clear_selection()` | Deselects all clips. |
+| `timeline.select_all()` | Selects all clips across all tracks. |
 | `timeline.delete_clip(clip_id)` | Removes clip from timeline. |
 | `timeline.split_clip(clip_id, split_t)` | Splits clip at time. |
 

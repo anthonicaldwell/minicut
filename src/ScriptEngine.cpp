@@ -4,6 +4,10 @@
 #include "ClipManager.h"
 #include "MediaDecoder.h"
 #include "ProjectSerializer.h"
+#include "App.h"
+#include "NativeFileDialog.h"
+#include "TextGenerator.h"
+#include "LocaleManager.h"
 #include "imgui.h"
 #include <curl/curl.h>
 #include <iostream>
@@ -399,10 +403,11 @@ void ScriptEngine::render_shelf_dock(float menu_h) {
 
 void ScriptEngine::render_scripts_menu() {
     if (m_menu_scripts.empty()) {
-        ImGui::TextDisabled("No scripts in ~/.config/minicut/scripts/");
+        ImGui::TextDisabled("%s", _TR("scripts_no_scripts"));
     } else {
         for (auto& script : m_menu_scripts) {
-            if (ImGui::MenuItem(script.title.c_str(), nullptr, script.is_panel_open)) {
+            std::string disp_title = _TR(script.title.c_str());
+            if (ImGui::MenuItem(disp_title.c_str(), nullptr, script.is_panel_open)) {
                 if (!script.is_loaded) {
                     execute_script(script);
                 }
@@ -417,9 +422,10 @@ void ScriptEngine::render_scripts_menu() {
     ImGui::Separator();
 
     if (!m_autorun_scripts.empty()) {
-        if (ImGui::BeginMenu("Autorun Scripts (Shelf)")) {
+        if (ImGui::BeginMenu(_TR("scripts_autorun_menu"))) {
             for (auto& script : m_autorun_scripts) {
-                if (ImGui::MenuItem(script.title.c_str(), nullptr, script.is_panel_open)) {
+                std::string disp_title = _TR(script.title.c_str());
+                if (ImGui::MenuItem(disp_title.c_str(), nullptr, script.is_panel_open)) {
                     if (!script.is_loaded) {
                         execute_script(script);
                     }
@@ -434,18 +440,19 @@ void ScriptEngine::render_scripts_menu() {
         ImGui::Separator();
     }
 
-    if (ImGui::MenuItem("Reload All Scripts", "F5")) {
+    if (ImGui::MenuItem(_TR("scripts_reload"), "F5")) {
         reload_scripts();
         set_status("Reloaded all scripts");
     }
 
-    if (ImGui::BeginMenu("Directories")) {
+    if (ImGui::BeginMenu(_TR("scripts_directories"))) {
         ImGui::TextDisabled("Scripts: %s", m_scripts_dir.c_str());
         ImGui::TextDisabled("Autorun: %s", m_autorun_dir.c_str());
         ImGui::TextDisabled("Icons:   %s", m_icons_dir.c_str());
         ImGui::EndMenu();
     }
 }
+
 
 void ScriptEngine::render_script_panels(float total_w, float total_h, float top_offset) {
     auto render_panel_for_item = [&](ScriptItem& item) {
@@ -561,6 +568,9 @@ void ScriptEngine::register_lua_api() {
     lua_pushcfunction(m_L, lua_gui_spacing);          lua_setfield(m_L, -2, "spacing");
     lua_pushcfunction(m_L, lua_gui_tooltip);          lua_setfield(m_L, -2, "tooltip");
     lua_pushcfunction(m_L, lua_gui_set_next_item_width); lua_setfield(m_L, -2, "set_next_item_width");
+    lua_pushcfunction(m_L, lua_gui_file_dialog);         lua_setfield(m_L, -2, "file_dialog");
+    lua_pushcfunction(m_L, lua_gui_native_file_dialog);  lua_setfield(m_L, -2, "native_file_dialog");
+    lua_pushcfunction(m_L, lua_gui_builtin_file_dialog); lua_setfield(m_L, -2, "builtin_file_dialog");
     lua_setglobal(m_L, "gui");
 
     // 2. `timeline` Table
@@ -573,10 +583,22 @@ void ScriptEngine::register_lua_api() {
     lua_pushcfunction(m_L, lua_timeline_place_video);     lua_setfield(m_L, -2, "place_video");
     lua_pushcfunction(m_L, lua_timeline_place_audio);     lua_setfield(m_L, -2, "place_audio");
     lua_pushcfunction(m_L, lua_timeline_place_image);     lua_setfield(m_L, -2, "place_image");
+    lua_pushcfunction(m_L, lua_timeline_place_text_clip); lua_setfield(m_L, -2, "place_text_clip");
     lua_pushcfunction(m_L, lua_timeline_get_selected_clip); lua_setfield(m_L, -2, "get_selected_clip");
+    lua_pushcfunction(m_L, lua_timeline_get_selected_clips); lua_setfield(m_L, -2, "get_selected_clips");
     lua_pushcfunction(m_L, lua_timeline_select_clip);     lua_setfield(m_L, -2, "select_clip");
+    lua_pushcfunction(m_L, lua_timeline_select_clips);    lua_setfield(m_L, -2, "select_clips");
+    lua_pushcfunction(m_L, lua_timeline_clear_selection); lua_setfield(m_L, -2, "clear_selection");
+    lua_pushcfunction(m_L, lua_timeline_select_all);      lua_setfield(m_L, -2, "select_all");
     lua_pushcfunction(m_L, lua_timeline_delete_clip);     lua_setfield(m_L, -2, "delete_clip");
     lua_pushcfunction(m_L, lua_timeline_split_clip);      lua_setfield(m_L, -2, "split_clip");
+    // Track Reordering & Renaming
+    lua_pushcfunction(m_L, lua_timeline_move_track_up);   lua_setfield(m_L, -2, "move_track_up");
+    lua_pushcfunction(m_L, lua_timeline_move_track_down); lua_setfield(m_L, -2, "move_track_down");
+    lua_pushcfunction(m_L, lua_timeline_move_track);      lua_setfield(m_L, -2, "move_track");
+    lua_pushcfunction(m_L, lua_timeline_swap_tracks);     lua_setfield(m_L, -2, "swap_tracks");
+    lua_pushcfunction(m_L, lua_timeline_set_track_name);  lua_setfield(m_L, -2, "set_track_name");
+    lua_pushcfunction(m_L, lua_timeline_get_track_name);  lua_setfield(m_L, -2, "get_track_name");
     // Keyframing under timeline
     lua_pushcfunction(m_L, lua_timeline_add_keyframe);    lua_setfield(m_L, -2, "add_keyframe");
     lua_pushcfunction(m_L, lua_timeline_remove_keyframe); lua_setfield(m_L, -2, "remove_keyframe");
@@ -609,6 +631,7 @@ void ScriptEngine::register_lua_api() {
     lua_pushcfunction(m_L, lua_project_import_video); lua_setfield(m_L, -2, "import_video");
     lua_pushcfunction(m_L, lua_project_import_audio); lua_setfield(m_L, -2, "import_audio");
     lua_pushcfunction(m_L, lua_project_import_image); lua_setfield(m_L, -2, "import_image");
+    lua_pushcfunction(m_L, lua_assets_create_text);   lua_setfield(m_L, -2, "create_text_asset");
     lua_pushcfunction(m_L, lua_project_get_name);     lua_setfield(m_L, -2, "get_name");
     lua_pushcfunction(m_L, lua_project_set_name);     lua_setfield(m_L, -2, "set_name");
     lua_setglobal(m_L, "project");
@@ -617,14 +640,19 @@ void ScriptEngine::register_lua_api() {
     lua_pushcfunction(m_L, lua_project_save); lua_setglobal(m_L, "project_save");
     lua_pushcfunction(m_L, lua_project_load); lua_setglobal(m_L, "project_load");
 
-    // 5. `minicut` Table
+    // 5. `assets` Table
+    lua_newtable(m_L);
+    lua_pushcfunction(m_L, lua_assets_create_text); lua_setfield(m_L, -2, "create_text");
+    lua_setglobal(m_L, "assets");
+
+    // 6. `minicut` Table
     lua_newtable(m_L);
     lua_pushcfunction(m_L, lua_minicut_log);        lua_setfield(m_L, -2, "log");
     lua_pushcfunction(m_L, lua_minicut_set_status); lua_setfield(m_L, -2, "set_status");
     lua_pushcfunction(m_L, lua_minicut_push_undo);  lua_setfield(m_L, -2, "push_undo");
     lua_setglobal(m_L, "minicut");
 
-    // 6. `net` Table (HTTP, download, upload)
+    // 7. `net` Table (HTTP, download, upload)
     lua_newtable(m_L);
     lua_pushcfunction(m_L, lua_net_get);      lua_setfield(m_L, -2, "get");
     lua_pushcfunction(m_L, lua_net_post);     lua_setfield(m_L, -2, "post");
@@ -633,12 +661,13 @@ void ScriptEngine::register_lua_api() {
     lua_pushcfunction(m_L, lua_net_request);  lua_setfield(m_L, -2, "request");
     lua_setglobal(m_L, "net");
 
-    // 7. Global default `plugin` Table
+    // 8. Global default `plugin` Table
     lua_newtable(m_L);
     lua_pushstring(m_L, "default"); lua_setfield(m_L, -2, "id");
     lua_pushstring(m_L, "Default Plugin"); lua_setfield(m_L, -2, "title");
     lua_setglobal(m_L, "plugin");
 }
+
 
 static void invoke_lua_callback(lua_State* L, int arg_idx) {
     if (lua_isfunction(L, arg_idx)) {
@@ -2148,3 +2177,451 @@ int ScriptEngine::lua_net_request(lua_State* L) {
     push_http_response_table(L, resp);
     return 1;
 }
+
+// ----------------------------------------------------------------------------
+// File Dialog & Browser Lua APIs
+// ----------------------------------------------------------------------------
+
+struct DialogArgs {
+    std::string title = "Select File";
+    std::string filter_patterns = "*";
+    std::string filter_desc = "All Files (*)";
+    std::string default_path = "";
+    bool is_save = false;
+    int callback_ref = LUA_NOREF;
+};
+
+static DialogArgs parse_dialog_args(lua_State* L) {
+    DialogArgs args;
+    if (lua_istable(L, 1)) {
+        lua_getfield(L, 1, "title");
+        if (lua_isstring(L, -1)) args.title = lua_tostring(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "filter");
+        if (lua_isstring(L, -1)) {
+            args.filter_patterns = lua_tostring(L, -1);
+            args.filter_desc = args.filter_patterns;
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "path");
+        if (lua_isstring(L, -1)) args.default_path = lua_tostring(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "save");
+        if (lua_isboolean(L, -1)) args.is_save = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 1, "callback");
+        if (lua_isfunction(L, -1)) {
+            args.callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        } else {
+            lua_pop(L, 1);
+        }
+    } else {
+        if (lua_gettop(L) >= 1 && lua_isstring(L, 1)) args.title = lua_tostring(L, 1);
+        if (lua_gettop(L) >= 2 && lua_isstring(L, 2)) {
+            args.filter_patterns = lua_tostring(L, 2);
+            args.filter_desc = args.filter_patterns;
+        }
+        if (lua_gettop(L) >= 3 && lua_isstring(L, 3)) args.default_path = lua_tostring(L, 3);
+        if (lua_gettop(L) >= 4 && lua_isboolean(L, 4)) args.is_save = lua_toboolean(L, 4);
+        if (lua_gettop(L) >= 5 && lua_isfunction(L, 5)) {
+            lua_pushvalue(L, 5);
+            args.callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        } else if (lua_gettop(L) >= 2 && lua_isfunction(L, 2)) {
+            lua_pushvalue(L, 2);
+            args.callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        } else if (lua_gettop(L) >= 3 && lua_isfunction(L, 3)) {
+            lua_pushvalue(L, 3);
+            args.callback_ref = luaL_ref(L, LUA_REGISTRYINDEX);
+        }
+    }
+    return args;
+}
+
+static void fire_lua_dialog_callback(lua_State* L, int cb_ref, const std::string& path) {
+    if (cb_ref != LUA_NOREF && cb_ref != LUA_REFNIL) {
+        lua_rawgeti(L, LUA_REGISTRYINDEX, cb_ref);
+        lua_pushstring(L, path.c_str());
+        if (lua_pcall(L, 1, 0, 0) != 0) {
+            std::cerr << "[ScriptEngine] File dialog callback error: " << lua_tostring(L, -1) << std::endl;
+            lua_pop(L, 1);
+        }
+        luaL_unref(L, LUA_REGISTRYINDEX, cb_ref);
+    }
+}
+
+int ScriptEngine::lua_gui_native_file_dialog(lua_State* L) {
+    DialogArgs args = parse_dialog_args(L);
+    if (args.callback_ref != LUA_NOREF) {
+        int ref = args.callback_ref;
+        if (args.is_save) {
+            NativeFileDialog::save_file(args.title, args.default_path, args.filter_desc, args.filter_patterns,
+                [L, ref](const std::string& path) {
+                    fire_lua_dialog_callback(L, ref, path);
+                });
+        } else {
+            NativeFileDialog::open_file(args.title, args.default_path, args.filter_desc, args.filter_patterns,
+                [L, ref](const std::string& path) {
+                    fire_lua_dialog_callback(L, ref, path);
+                });
+        }
+        lua_pushboolean(L, true);
+        return 1;
+    } else {
+        std::string res;
+        if (args.is_save) {
+            res = NativeFileDialog::save_file_sync(args.title, args.default_path, args.filter_desc, args.filter_patterns);
+        } else {
+            res = NativeFileDialog::open_file_sync(args.title, args.default_path, args.filter_desc, args.filter_patterns);
+        }
+        lua_pushstring(L, res.c_str());
+        return 1;
+    }
+}
+
+int ScriptEngine::lua_gui_builtin_file_dialog(lua_State* L) {
+    DialogArgs args = parse_dialog_args(L);
+    if (!s_engine_instance || !s_engine_instance->m_app) {
+        if (args.callback_ref != LUA_NOREF) luaL_unref(L, LUA_REGISTRYINDEX, args.callback_ref);
+        lua_pushstring(L, "");
+        return 1;
+    }
+
+    std::vector<FileFilter> filters;
+    if (!args.filter_patterns.empty() && args.filter_patterns != "*") {
+        FileFilter ff;
+        ff.name = args.filter_desc;
+        std::stringstream ss(args.filter_patterns);
+        std::string item;
+        while (std::getline(ss, item, ';')) {
+            if (!item.empty() && item[0] == '*') item = item.substr(1);
+            if (!item.empty()) ff.exts.push_back(item);
+        }
+        filters.push_back(ff);
+    }
+
+    int ref = args.callback_ref;
+    s_engine_instance->m_app->get_file_browser().open(
+        args.title,
+        args.is_save ? FileBrowserMode::SaveFile : FileBrowserMode::OpenFile,
+        filters,
+        args.default_path,
+        "",
+        [L, ref](const std::string& chosen) {
+            if (ref != LUA_NOREF) {
+                fire_lua_dialog_callback(L, ref, chosen);
+            }
+        }
+    );
+
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+int ScriptEngine::lua_gui_file_dialog(lua_State* L) {
+    bool use_sys = true;
+    if (s_engine_instance && s_engine_instance->m_app) {
+        use_sys = s_engine_instance->m_app->get_use_system_file_dialog();
+    }
+    if (use_sys && NativeFileDialog::is_available()) {
+        return lua_gui_native_file_dialog(L);
+    } else {
+        return lua_gui_builtin_file_dialog(L);
+    }
+}
+
+// ----------------------------------------------------------------------------
+// Timeline Multi-Selection & Track Management Lua APIs
+// ----------------------------------------------------------------------------
+
+int ScriptEngine::lua_timeline_get_selected_clips(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_timeline) {
+        lua_newtable(L); return 1;
+    }
+    const auto& ids = s_engine_instance->m_timeline->get_selected_clip_ids();
+    lua_newtable(L);
+    for (size_t i = 0; i < ids.size(); ++i) {
+        lua_pushstring(L, ids[i].c_str());
+        lua_rawseti(L, -2, static_cast<int>(i + 1));
+    }
+    return 1;
+}
+
+int ScriptEngine::lua_timeline_select_clips(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_timeline) return 0;
+    if (lua_istable(L, 1)) {
+        s_engine_instance->m_timeline->clear_selection();
+        int len = (int)lua_objlen(L, 1);
+        for (int i = 1; i <= len; ++i) {
+            lua_rawgeti(L, 1, i);
+            if (lua_isstring(L, -1)) {
+                s_engine_instance->m_timeline->select_clip(lua_tostring(L, -1), false, true);
+            }
+            lua_pop(L, 1);
+        }
+    } else if (lua_isstring(L, 1)) {
+        std::string id = lua_tostring(L, 1);
+        bool toggle = lua_toboolean(L, 2);
+        bool add = lua_toboolean(L, 3);
+        s_engine_instance->m_timeline->select_clip(id, toggle, add);
+    }
+    return 0;
+}
+
+int ScriptEngine::lua_timeline_clear_selection(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_timeline) {
+        s_engine_instance->m_timeline->clear_selection();
+    }
+    return 0;
+}
+
+int ScriptEngine::lua_timeline_select_all(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_timeline && s_engine_instance->m_project) {
+        s_engine_instance->m_timeline->select_all(*s_engine_instance->m_project);
+    }
+    return 0;
+}
+
+int ScriptEngine::lua_timeline_move_track_up(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_timeline || !s_engine_instance->m_project) {
+        lua_pushboolean(L, false); return 1;
+    }
+    int idx = (int)luaL_checkinteger(L, 1);
+    s_engine_instance->push_undo_state();
+    s_engine_instance->m_timeline->move_track_up(*s_engine_instance->m_project, idx);
+    s_engine_instance->notify_project_modified();
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+int ScriptEngine::lua_timeline_move_track_down(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_timeline || !s_engine_instance->m_project) {
+        lua_pushboolean(L, false); return 1;
+    }
+    int idx = (int)luaL_checkinteger(L, 1);
+    s_engine_instance->push_undo_state();
+    s_engine_instance->m_timeline->move_track_down(*s_engine_instance->m_project, idx);
+    s_engine_instance->notify_project_modified();
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+int ScriptEngine::lua_timeline_move_track(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_timeline || !s_engine_instance->m_project) {
+        lua_pushboolean(L, false); return 1;
+    }
+    int from_idx = (int)luaL_checkinteger(L, 1);
+    int to_idx = (int)luaL_checkinteger(L, 2);
+    s_engine_instance->push_undo_state();
+    s_engine_instance->m_timeline->reorder_track(*s_engine_instance->m_project, from_idx, to_idx);
+    s_engine_instance->notify_project_modified();
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+int ScriptEngine::lua_timeline_swap_tracks(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_timeline || !s_engine_instance->m_project) {
+        lua_pushboolean(L, false); return 1;
+    }
+    int idx1 = (int)luaL_checkinteger(L, 1);
+    int idx2 = (int)luaL_checkinteger(L, 2);
+    s_engine_instance->push_undo_state();
+    s_engine_instance->m_timeline->swap_tracks(*s_engine_instance->m_project, idx1, idx2);
+    s_engine_instance->notify_project_modified();
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+int ScriptEngine::lua_timeline_set_track_name(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_timeline || !s_engine_instance->m_project) {
+        lua_pushboolean(L, false); return 1;
+    }
+    int idx = (int)luaL_checkinteger(L, 1);
+    const char* name = luaL_checkstring(L, 2);
+    s_engine_instance->push_undo_state();
+    s_engine_instance->m_timeline->set_track_name(*s_engine_instance->m_project, idx, name ? name : "");
+    s_engine_instance->notify_project_modified();
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+int ScriptEngine::lua_timeline_get_track_name(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_timeline || !s_engine_instance->m_project) {
+        lua_pushstring(L, ""); return 1;
+    }
+    int idx = (int)luaL_checkinteger(L, 1);
+    std::string name = s_engine_instance->m_timeline->get_track_name(*s_engine_instance->m_project, idx);
+    lua_pushstring(L, name.c_str());
+    return 1;
+}
+
+// ----------------------------------------------------------------------------
+// Text Asset Creation & Timeline Placement Lua APIs
+// ----------------------------------------------------------------------------
+
+int ScriptEngine::lua_assets_create_text(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        lua_pushstring(L, ""); return 1;
+    }
+    const char* text_str = luaL_checkstring(L, 1);
+    TextConfig cfg;
+    cfg.text = text_str ? text_str : "";
+
+    std::string asset_name = "";
+    if (lua_gettop(L) >= 2 && lua_istable(L, 2)) {
+        lua_getfield(L, 2, "font");
+        if (lua_isstring(L, -1)) cfg.font_path = lua_tostring(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "size");
+        if (lua_isnumber(L, -1)) cfg.font_size = (float)lua_tonumber(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "color");
+        if (lua_istable(L, -1)) {
+            for (int i = 0; i < 4; ++i) {
+                lua_rawgeti(L, -1, i + 1);
+                if (lua_isnumber(L, -1)) cfg.font_color[i] = (float)lua_tonumber(L, -1);
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "bg");
+        if (lua_isboolean(L, -1)) cfg.use_bg = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "bg_color");
+        if (lua_istable(L, -1)) {
+            for (int i = 0; i < 4; ++i) {
+                lua_rawgeti(L, -1, i + 1);
+                if (lua_isnumber(L, -1)) cfg.bg_color[i] = (float)lua_tonumber(L, -1);
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "outline");
+        if (lua_isboolean(L, -1)) cfg.use_outline = lua_toboolean(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "outline_color");
+        if (lua_istable(L, -1)) {
+            for (int i = 0; i < 4; ++i) {
+                lua_rawgeti(L, -1, i + 1);
+                if (lua_isnumber(L, -1)) cfg.outline_color[i] = (float)lua_tonumber(L, -1);
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "outline_width");
+        if (lua_isnumber(L, -1)) cfg.outline_thickness = (float)lua_tonumber(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "letter_spacing");
+        if (lua_isnumber(L, -1)) cfg.letter_spacing = (float)lua_tonumber(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "line_spacing");
+        if (lua_isnumber(L, -1)) cfg.line_spacing = (float)lua_tonumber(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "justification");
+        if (lua_isnumber(L, -1)) cfg.justification = (int)lua_tointeger(L, -1);
+        else if (lua_isstring(L, -1)) {
+            std::string j = lua_tostring(L, -1);
+            if (j == "center") cfg.justification = 1;
+            else if (j == "right") cfg.justification = 2;
+            else cfg.justification = 0;
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "name");
+        if (lua_isstring(L, -1)) asset_name = lua_tostring(L, -1);
+        lua_pop(L, 1);
+    }
+
+    std::string asset_id = TextGenerator::create_text_asset(*s_engine_instance->m_project, cfg, asset_name);
+    if (!asset_id.empty()) {
+        s_engine_instance->notify_project_modified();
+    }
+    lua_pushstring(L, asset_id.c_str());
+    return 1;
+}
+
+int ScriptEngine::lua_timeline_place_text_clip(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        lua_pushstring(L, ""); return 1;
+    }
+    const char* text_or_asset_id = luaL_checkstring(L, 1);
+    int track_idx = (int)luaL_optinteger(L, 2, 0);
+    double start_time = luaL_optnumber(L, 3, s_engine_instance->get_playhead_time());
+    double duration = luaL_optnumber(L, 4, 5.0);
+
+    Project& proj = *s_engine_instance->m_project;
+    std::string asset_id;
+
+    if (proj.find_video_asset(text_or_asset_id) != nullptr) {
+        asset_id = text_or_asset_id;
+    } else {
+        TextConfig cfg;
+        cfg.text = text_or_asset_id;
+        if (lua_gettop(L) >= 5 && lua_istable(L, 5)) {
+            lua_getfield(L, 5, "font");
+            if (lua_isstring(L, -1)) cfg.font_path = lua_tostring(L, -1);
+            lua_pop(L, 1);
+
+            lua_getfield(L, 5, "size");
+            if (lua_isnumber(L, -1)) cfg.font_size = (float)lua_tonumber(L, -1);
+            lua_pop(L, 1);
+
+            lua_getfield(L, 5, "justification");
+            if (lua_isnumber(L, -1)) cfg.justification = (int)lua_tointeger(L, -1);
+            lua_pop(L, 1);
+        }
+        asset_id = TextGenerator::create_text_asset(proj, cfg);
+    }
+
+    if (asset_id.empty()) {
+        lua_pushstring(L, ""); return 1;
+    }
+
+    if (track_idx < 0 || track_idx >= static_cast<int>(proj.tracks.size()) || proj.tracks[track_idx].type != "video") {
+        track_idx = -1;
+        for (size_t t = 0; t < proj.tracks.size(); ++t) {
+            if (proj.tracks[t].type == "video") {
+                track_idx = static_cast<int>(t);
+                break;
+            }
+        }
+        if (track_idx == -1) {
+            Track trk;
+            trk.id = "track_v" + std::to_string(proj.tracks.size() + 1);
+            trk.name = "Video " + std::to_string(proj.tracks.size() + 1);
+            trk.type = "video";
+            proj.tracks.push_back(trk);
+            track_idx = static_cast<int>(proj.tracks.size() - 1);
+        }
+    }
+
+    s_engine_instance->push_undo_state();
+    std::string ts = std::to_string(std::chrono::system_clock::now().time_since_epoch().count() % 1000000);
+    Clip clp;
+    clp.id = "clip_txt_" + ts;
+    clp.asset_id = asset_id;
+    clp.start_time = start_time;
+    clp.duration = duration;
+    clp.offset = 0.0;
+    proj.tracks[track_idx].clips.push_back(clp);
+
+    s_engine_instance->set_selected_clip_id(clp.id);
+    s_engine_instance->notify_project_modified();
+
+    lua_pushstring(L, clp.id.c_str());
+    return 1;
+}
+

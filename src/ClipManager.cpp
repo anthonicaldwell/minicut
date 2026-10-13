@@ -733,7 +733,8 @@ void ClipManager::render_ui(Project& project, double playhead_time,
                             const std::function<void()>& on_import_video,
                             const std::function<void()>& on_import_image,
                             const std::function<void()>& on_import_audio,
-                            const std::function<void()>& on_import_prefab) {
+                            const std::function<void()>& on_import_prefab,
+                            const std::function<void()>& on_add_text) {
     poll_async_imports(project);
 
     // Keyboard shortcut deletion and enter-to-add
@@ -772,6 +773,10 @@ void ClipManager::render_ui(Project& project, double playhead_time,
     ImGui::SameLine();
     if (ImGui::Button(_TR("project_import_prefab"))) {
         if (on_import_prefab) on_import_prefab();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(_TR("text_add_asset"))) {
+        if (on_add_text) on_add_text();
     }
 
     // Active Import Progress Banner
@@ -840,23 +845,13 @@ void ClipManager::render_ui(Project& project, double playhead_time,
                     continue;
                 }
 
-                ImGui::TableNextRow();
+                const float row_height = 36.0f;
+                ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
                 bool is_selected = (m_selected_asset_id == v.id && m_selected_is_video && !m_selected_is_prefab);
 
                 ImGui::TableSetColumnIndex(0);
-                if (v.thumbnail_texture) {
-                    ImGui::Image((ImTextureID)(intptr_t)v.thumbnail_texture, ImVec2(40, 24));
-                } else if (v.is_image) {
-                    ImGui::TextColored(ImVec4(0.9f, 0.65f, 0.2f, 1.0f), "[IMG]");
-                } else {
-                    ImGui::TextColored(ImVec4(0.3f, 0.7f, 1.0f, 1.0f), "[VID]");
-                }
-
-                ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%s", v.id.c_str());
-
-                ImGui::TableSetColumnIndex(2);
-                if (ImGui::Selectable(filename.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns)) {
+                std::string sel_id = "##sel_v_" + v.id;
+                if (ImGui::Selectable(sel_id.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap, ImVec2(0, row_height))) {
                     m_selected_asset_id = v.id;
                     m_selected_is_video = true;
                     m_selected_is_prefab = false;
@@ -891,6 +886,21 @@ void ClipManager::render_ui(Project& project, double playhead_time,
                     ImGui::EndDragDropSource();
                 }
 
+                ImGui::SameLine(0.0f, 4.0f);
+                if (v.thumbnail_texture) {
+                    ImGui::Image((ImTextureID)(intptr_t)v.thumbnail_texture, ImVec2(40, 24));
+                } else if (v.is_image) {
+                    ImGui::TextColored(ImVec4(0.9f, 0.65f, 0.2f, 1.0f), "[IMG]");
+                } else {
+                    ImGui::TextColored(ImVec4(0.3f, 0.7f, 1.0f, 1.0f), "[VID]");
+                }
+
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%s", v.id.c_str());
+
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextUnformatted(filename.c_str());
+
                 ImGui::TableSetColumnIndex(3);
                 ImGui::Text("%s", format_timecode(v.duration, false).c_str());
 
@@ -909,17 +919,13 @@ void ClipManager::render_ui(Project& project, double playhead_time,
                     continue;
                 }
 
-                ImGui::TableNextRow();
+                const float row_height = 36.0f;
+                ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
                 bool is_selected = (m_selected_asset_id == a.id && !m_selected_is_video && !m_selected_is_prefab);
 
                 ImGui::TableSetColumnIndex(0);
-                ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.5f, 1.0f), "[AUD]");
-
-                ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%s", a.id.c_str());
-
-                ImGui::TableSetColumnIndex(2);
-                if (ImGui::Selectable(filename.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns)) {
+                std::string sel_id = "##sel_a_" + a.id;
+                if (ImGui::Selectable(sel_id.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap, ImVec2(0, row_height))) {
                     m_selected_asset_id = a.id;
                     m_selected_is_video = false;
                     m_selected_is_prefab = false;
@@ -954,6 +960,15 @@ void ClipManager::render_ui(Project& project, double playhead_time,
                     ImGui::EndDragDropSource();
                 }
 
+                ImGui::SameLine(0.0f, 4.0f);
+                ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.5f, 1.0f), "[AUD]");
+
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%s", a.id.c_str());
+
+                ImGui::TableSetColumnIndex(2);
+                ImGui::TextUnformatted(filename.c_str());
+
                 ImGui::TableSetColumnIndex(3);
                 ImGui::Text("%s", format_timecode(a.duration, false).c_str());
 
@@ -971,22 +986,13 @@ void ClipManager::render_ui(Project& project, double playhead_time,
                     continue;
                 }
 
-                ImGui::TableNextRow();
+                const float row_height = 36.0f;
+                ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
                 bool is_selected = (m_selected_asset_id == pf.id && m_selected_is_prefab);
 
                 ImGui::TableSetColumnIndex(0);
-                if (pf.thumbnail_texture) {
-                    ImGui::Image((ImTextureID)(intptr_t)pf.thumbnail_texture, ImVec2(40, 24));
-                } else {
-                    ImGui::TextColored(ImVec4(0.85f, 0.45f, 1.0f, 1.0f), "[PF]");
-                }
-
-                ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%s", pf.id.c_str());
-
-                ImGui::TableSetColumnIndex(2);
-                std::string display_name = "[Prefab] " + pf.name;
-                if (ImGui::Selectable(display_name.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns)) {
+                std::string sel_id = "##sel_pf_" + pf.id;
+                if (ImGui::Selectable(sel_id.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap, ImVec2(0, row_height))) {
                     m_selected_asset_id = pf.id;
                     m_selected_is_prefab = true;
                 }
@@ -1016,6 +1022,20 @@ void ClipManager::render_ui(Project& project, double playhead_time,
                     ImGui::Text("Insert prefab %s at playhead", pf.name.c_str());
                     ImGui::EndDragDropSource();
                 }
+
+                ImGui::SameLine(0.0f, 4.0f);
+                if (pf.thumbnail_texture) {
+                    ImGui::Image((ImTextureID)(intptr_t)pf.thumbnail_texture, ImVec2(40, 24));
+                } else {
+                    ImGui::TextColored(ImVec4(0.85f, 0.45f, 1.0f, 1.0f), "[PF]");
+                }
+
+                ImGui::TableSetColumnIndex(1);
+                ImGui::Text("%s", pf.id.c_str());
+
+                ImGui::TableSetColumnIndex(2);
+                std::string display_name = "[Prefab] " + pf.name;
+                ImGui::TextUnformatted(display_name.c_str());
 
                 ImGui::TableSetColumnIndex(3);
                 ImGui::Text("%s", format_timecode(pf.duration, false).c_str());

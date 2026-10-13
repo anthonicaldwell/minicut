@@ -11,6 +11,7 @@
 
 class Timeline;
 class ClipManager;
+class App;
 
 struct ScriptItem {
     std::string id;            // Unique identifier, e.g. "quick_placement"
@@ -87,6 +88,8 @@ public:
     }
     ClipManager* get_clip_manager() { return m_clip_manager; }
     Timeline* get_timeline() { return m_timeline; }
+    void set_app(App* app) { m_app = app; }
+    App* get_app() { return m_app; }
 
 private:
     void register_lua_api();
@@ -114,6 +117,9 @@ private:
     static int lua_gui_spacing(lua_State* L);
     static int lua_gui_tooltip(lua_State* L);
     static int lua_gui_set_next_item_width(lua_State* L);
+    static int lua_gui_file_dialog(lua_State* L);
+    static int lua_gui_native_file_dialog(lua_State* L);
+    static int lua_gui_builtin_file_dialog(lua_State* L);
 
     // Timeline Placement & Navigation
     static int lua_timeline_get_playhead(lua_State* L);
@@ -124,10 +130,26 @@ private:
     static int lua_timeline_place_video(lua_State* L);
     static int lua_timeline_place_audio(lua_State* L);
     static int lua_timeline_place_image(lua_State* L);
+    static int lua_timeline_place_text_clip(lua_State* L);
     static int lua_timeline_get_selected_clip(lua_State* L);
+    static int lua_timeline_get_selected_clips(lua_State* L);
     static int lua_timeline_select_clip(lua_State* L);
+    static int lua_timeline_select_clips(lua_State* L);
+    static int lua_timeline_clear_selection(lua_State* L);
+    static int lua_timeline_select_all(lua_State* L);
     static int lua_timeline_delete_clip(lua_State* L);
     static int lua_timeline_split_clip(lua_State* L);
+
+    // Track Reordering & Renaming
+    static int lua_timeline_move_track_up(lua_State* L);
+    static int lua_timeline_move_track_down(lua_State* L);
+    static int lua_timeline_move_track(lua_State* L);
+    static int lua_timeline_swap_tracks(lua_State* L);
+    static int lua_timeline_set_track_name(lua_State* L);
+    static int lua_timeline_get_track_name(lua_State* L);
+
+    // Assets API
+    static int lua_assets_create_text(lua_State* L);
 
     // Keyframing
     static int lua_timeline_add_keyframe(lua_State* L);
@@ -177,6 +199,7 @@ private:
     ClipManager* m_clip_manager = nullptr;
     double* m_playhead_time = nullptr;
     std::string* m_selected_clip_id = nullptr;
+    App* m_app = nullptr;
 
     std::function<void()> m_on_push_undo;
     std::function<void()> m_on_project_modified;

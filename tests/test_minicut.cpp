@@ -10,6 +10,8 @@
 #include "LocaleManager.h"
 #include "FileBrowser.h"
 #include "ScriptEngine.h"
+#include "ArabicShaper.h"
+#include "TextGenerator.h"
 #include <iostream>
 #include <cassert>
 #include <filesystem>
@@ -668,12 +670,15 @@ void test_locale_manager() {
     // 5. Arabic
     lm.set_locale("ar");
     assert(lm.current_locale() == "ar");
-    assert(lm.get("menu_file") == "ملف");
-    assert(lm.get("timeline_play") == "تشغيل");
+    assert(lm.is_rtl());
+    assert(lm.get("menu_file") == ArabicShaper::process("ملف"));
+    assert(lm.get("timeline_play") == ArabicShaper::process("تشغيل"));
 
     // Reset to en
     lm.set_locale("en");
+    assert(!lm.is_rtl());
     std::cout << "[PASS] LocaleManager tests passed." << std::endl;
+
 }
 
 void test_track_render_depth() {
@@ -902,6 +907,228 @@ void test_script_engine_lua_api() {
     std::cout << "[PASS] ScriptEngine & LuaAPI integration tests passed." << std::endl;
 }
 
+void test_arabic_shaping() {
+    std::cout << "[TEST] Running Arabic shaping and RTL tests..." << std::endl;
+    // 1. Basic conversions
+    std::string text = "مرحبا";
+    auto u32 = ArabicShaper::utf8_to_utf32(text);
+    assert(u32.size() == 5);
+    auto back_utf8 = ArabicShaper::utf32_to_utf8(u32);
+    assert(back_utf8 == text);
+
+    // 2. Shaping Arabic string
+    std::string shaped = ArabicShaper::process("سلام");
+    assert(!shaped.empty());
+    assert(shaped != "سلام");
+
+    // 3. Non-Arabic strings (Japanese and English) remain untouched and strictly LTR
+    std::string ja_text = "こんにちは世界";
+    std::string ja_shaped = ArabicShaper::process(ja_text);
+    assert(ja_shaped == ja_text);
+
+    std::string en_text = "Hello World 123";
+    std::string en_shaped = ArabicShaper::process(en_text);
+    assert(en_shaped == en_text);
+
+    // 4. LocaleManager is_rtl() check
+    LocaleManager& lm = LocaleManager::instance();
+    lm.set_locale("en");
+    assert(!lm.is_rtl());
+    lm.set_locale("ja");
+    assert(!lm.is_rtl()); // Japanese MUST remain LTR
+    lm.set_locale("ko");
+    assert(!lm.is_rtl());
+    lm.set_locale("ar");
+    assert(lm.is_rtl());   // Arabic triggers RTL
+    lm.set_locale("en");   // Reset to default English
+
+    std::cout << "[PASS] Arabic shaping and RTL tests passed." << std::endl;
+}
+
+void test_text_generator() {
+    std::cout << "[TEST] Running TextGenerator rendering and asset creation tests..." << std::endl;
+    auto fonts = TextGenerator::get_available_fonts();
+    assert(!fonts.empty());
+
+    TextConfig cfg;
+    cfg.text = "Minicut Title\nLine Two";
+    cfg.font_size = 36.0f;
+    cfg.use_bg = true;
+    cfg.use_outline = true;
+    cfg.outline_thickness = 2.0f;
+
+    int w = 0, h = 0;
+    std::vector<uint8_t> rgba;
+    bool ok = TextGenerator::render_to_rgba(cfg, w, h, rgba);
+    assert(ok);
+    assert(w > 0 && h > 0);
+    assert(rgba.size() == static_cast<size_t>(w * h * 4));
+
+    // Test PNG file export
+    std::string png_path = "test_text_output.png";
+    int pw = 0, ph = 0;
+    bool save_ok = TextGenerator::save_to_png(cfg, png_path, pw, ph);
+    assert(save_ok);
+    assert(fs::exists(png_path));
+    assert(fs::file_size(png_path) > 100);
+    fs::remove(png_path);
+
+    // Test Project Asset creation
+    Project proj;
+    std::string asset_id = TextGenerator::create_text_asset(proj, cfg, "Title Asset");
+    assert(!asset_id.empty());
+    assert(!proj.video_assets.empty());
+    assert(proj.video_assets.front().id == asset_id);
+    assert(proj.video_assets.front().is_image == true);
+
+    std::cout << "[PASS] TextGenerator tests passed." << std::endl;
+}
+
+void test_track_reordering_and_renaming() {
+    std::cout << "[TEST] Running track reordering and renaming tests..." << std::endl;
+    Project proj;
+    Timeline tl;
+
+    Track t0; t0.id = "t0"; t0.type = "video"; t0.name = "Video 1";
+    Track t1; t1.id = "t1"; t1.type = "audio"; t1.name = "Audio 1";
+    Track t2; t2.id = "t2"; t2.type = "video"; t2.name = "Video 2";
+    proj.tracks = { t0, t1, t2 };
+
+    // 1. Move down: track 0 moves to index 1
+    tl.move_track_down(proj, 0);
+    assert(proj.tracks[0].id == "t1");
+    assert(proj.tracks[1].id == "t0");
+    assert(proj.tracks[2].id == "t2");
+
+    // 2. Move up: track 1 moves back to index 0
+    tl.move_track_up(proj, 1);
+    assert(proj.tracks[0].id == "t0");
+    assert(proj.tracks[1].id == "t1");
+    assert(proj.tracks[2].id == "t2");
+
+    // 3. Swap tracks 0 and 2
+    tl.swap_tracks(proj, 0, 2);
+    assert(proj.tracks[0].id == "t2");
+    assert(proj.tracks[1].id == "t1");
+    assert(proj.tracks[2].id == "t0");
+
+    // 4. Reorder track 2 to index 0
+    tl.reorder_track(proj, 2, 0);
+    assert(proj.tracks[0].id == "t0");
+    assert(proj.tracks[1].id == "t2");
+    assert(proj.tracks[2].id == "t1");
+
+    // 5. Track Renaming
+    tl.set_track_name(proj, 0, "Main B-Roll");
+    assert(tl.get_track_name(proj, 0) == "Main B-Roll");
+    assert(proj.tracks[0].name == "Main B-Roll");
+
+    // 6. Localized Display Name
+    assert(Timeline::get_display_track_name(proj.tracks[0]) == "Main B-Roll");
+    assert(Timeline::get_display_track_name(proj.tracks[1]) == "Video 2");
+
+    std::cout << "[PASS] Track reordering and renaming tests passed." << std::endl;
+}
+
+void test_timeline_multiselect() {
+    std::cout << "[TEST] Running timeline multi-selection tests..." << std::endl;
+    Project proj;
+    Timeline tl;
+
+    Track trk; trk.id = "v1"; trk.type = "video";
+    Clip c1; c1.id = "c1"; c1.start_time = 0.0; c1.duration = 5.0;
+    Clip c2; c2.id = "c2"; c2.start_time = 5.0; c2.duration = 5.0;
+    Clip c3; c3.id = "c3"; c3.start_time = 10.0; c3.duration = 5.0;
+    trk.clips = { c1, c2, c3 };
+    proj.tracks = { trk };
+
+    // Single select
+    tl.select_clip("c1", false, false);
+    assert(tl.get_selected_clip_ids().size() == 1);
+    assert(tl.is_clip_selected("c1"));
+
+    // Add to selection
+    tl.select_clip("c2", false, true);
+    assert(tl.get_selected_clip_ids().size() == 2);
+    assert(tl.is_clip_selected("c1"));
+    assert(tl.is_clip_selected("c2"));
+
+    // Toggle off c1
+    tl.select_clip("c1", true, false);
+    assert(tl.get_selected_clip_ids().size() == 1);
+    assert(!tl.is_clip_selected("c1"));
+    assert(tl.is_clip_selected("c2"));
+
+    // Select All
+    tl.select_all(proj);
+    assert(tl.get_selected_clip_ids().size() == 3);
+    assert(tl.is_clip_selected("c1"));
+    assert(tl.is_clip_selected("c2"));
+    assert(tl.is_clip_selected("c3"));
+
+    // Delete selected clips
+    tl.delete_selected_clips(proj);
+    assert(proj.tracks[0].clips.empty());
+    assert(tl.get_selected_clip_ids().empty());
+
+    std::cout << "[PASS] Timeline multi-selection tests passed." << std::endl;
+}
+
+void test_extended_lua_api() {
+    std::cout << "[TEST] Running extended Lua API tests (file dialog, text, tracks)..." << std::endl;
+    ScriptEngine se;
+    Project proj;
+    Timeline tl;
+    ClipManager cm;
+    double playhead = 0.0;
+    std::string sel_clip;
+
+    Track vt; vt.id = "v1"; vt.type = "video"; vt.name = "Video 1";
+    Track at; at.id = "a1"; at.type = "audio"; at.name = "Audio 1";
+    proj.tracks = { vt, at };
+
+    se.init(&proj, &tl, &cm, &playhead, &sel_clip);
+
+    // 1. Text asset creation via assets.create_text
+    se.run_string("txt_id = assets.create_text('Sample Lower Third', { size = 36, justification = 1 })");
+    se.run_string("assert(txt_id ~= nil and txt_id ~= '')");
+    assert(!proj.video_assets.empty());
+
+    // 2. Timeline text placement via timeline.place_text_clip
+    se.run_string("clip_id = timeline.place_text_clip('Live News Alert', 0, 2.0, 5.0)");
+    se.run_string("assert(clip_id ~= nil and clip_id ~= '')");
+    assert(!proj.tracks[0].clips.empty());
+    assert(proj.tracks[0].clips.front().start_time == 2.0);
+
+    // 3. Track reordering via Lua
+    se.run_string("timeline.move_track_down(0)");
+    assert(proj.tracks[0].id == "a1");
+    assert(proj.tracks[1].id == "v1");
+
+    se.run_string("timeline.move_track_up(1)");
+    assert(proj.tracks[0].id == "v1");
+    assert(proj.tracks[1].id == "a1");
+
+    // 4. Track renaming via Lua
+    se.run_string("timeline.set_track_name(0, 'Main Camera')");
+    se.run_string("assert(timeline.get_track_name(0) == 'Main Camera')");
+    assert(proj.tracks[0].name == "Main Camera");
+
+    // 5. Multi-selection via Lua
+    se.run_string("timeline.select_clips({ 'c_test1', 'c_test2' })");
+    se.run_string("sel_tbl = timeline.get_selected_clips()");
+    se.run_string("assert(#sel_tbl == 2)");
+    se.run_string("timeline.clear_selection()");
+    se.run_string("assert(#timeline.get_selected_clips() == 0)");
+
+    // 6. File dialog presence in Lua environment
+    se.run_string("assert(type(gui.file_dialog) == 'function')");
+    se.run_string("assert(type(gui.native_file_dialog) == 'function')");
+    se.run_string("assert(type(gui.builtin_file_dialog) == 'function')");
+
+    std::cout << "[PASS] Extended Lua API tests passed." << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Running minicut Comprehensive Test Suite" << std::endl;
@@ -925,9 +1152,15 @@ int main() {
     test_filebrowser_system_thumbnail();
     test_track_header_resizing();
     test_script_engine_lua_api();
+    test_arabic_shaping();
+    test_text_generator();
+    test_track_reordering_and_renaming();
+    test_timeline_multiselect();
+    test_extended_lua_api();
 
     std::cout << "========================================" << std::endl;
     std::cout << "ALL MINICUT UNIT & PIPELINE TESTS PASSED" << std::endl;
     std::cout << "========================================" << std::endl;
     return 0;
 }
+

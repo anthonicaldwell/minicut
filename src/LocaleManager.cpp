@@ -1,4 +1,5 @@
 #include "LocaleManager.h"
+#include "ArabicShaper.h"
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <filesystem>
@@ -84,6 +85,13 @@ bool LocaleManager::set_locale(const std::string& lang_code) {
 
     // 2. Try loading JSON file to override or supplement
     load_locale_file(code);
+
+    // 3. If Arabic (RTL), shape all translations for right-to-left cursive presentation
+    if (m_current_locale == "ar") {
+        for (auto& [k, v] : m_translations) {
+            v = ArabicShaper::process(v, true);
+        }
+    }
     return true;
 }
 
@@ -196,7 +204,25 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"inspector_track_depth", "Track Render Depth (0-100)"},
         {"inspector_fade_in", "Fade In (1s)"}, {"inspector_fade_out", "Fade Out (1s)"},
         {"inspector_ducking", "Audio Ducking"},
-        {"status_temp_cleaned", "Temporary files cleaned"}, {"status_no_temp", "No temporary files to clean"}
+        {"status_temp_cleaned", "Temporary files cleaned"}, {"status_no_temp", "No temporary files to clean"},
+        {"track_video", "Video"}, {"track_audio", "Audio"},
+        {"timeline_move_up", "Move Track Up"}, {"timeline_move_down", "Move Track Down"},
+        {"timeline_rename_track", "Rename Track"}, {"timeline_track_name", "Track Name"},
+        {"edit_select_all", "Select All"},
+        {"dialog_ok", "OK"}, {"dialog_cancel", "Cancel"},
+        {"text_add_asset", "+ Text"}, {"text_dialog_title", "Create Text Asset"},
+        {"text_font", "Font"}, {"text_font_size", "Font Size"}, {"text_font_color", "Font Color"},
+        {"text_use_background", "Background"}, {"text_bg_color", "Background Color"},
+        {"text_use_outline", "Outline"}, {"text_outline_color", "Outline Color"},
+        {"text_outline_width", "Outline Width"}, {"text_letter_spacing", "Letter Spacing"},
+        {"text_line_spacing", "Line Spacing"}, {"text_alignment", "Justification"},
+        {"text_align_left", "Left"}, {"text_align_center", "Center"}, {"text_align_right", "Right"},
+        {"text_entry_label", "Text Entry"}, {"text_preview", "Preview"},
+        {"text_add_to_assets", "Add to Assets"}, {"text_add_to_timeline", "Add to Timeline"},
+        {"menu_scripts", "Scripts"}, {"scripts_no_scripts", "No scripts found"},
+        {"scripts_autorun_menu", "Autorun Scripts (Shelf)"}, {"scripts_reload", "Reload All Scripts"},
+        {"scripts_directories", "Directories"},
+        {"menu_help_lua_api", "Lua API Reference (PDF)..."}
     };
 
     // Japanese
@@ -229,7 +255,25 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"inspector_track_depth", "トラック描画深度 (0-100)"},
         {"inspector_fade_in", "フェードイン (1秒)"}, {"inspector_fade_out", "フェードアウト (1秒)"},
         {"inspector_ducking", "オーディオダッキング"},
-        {"status_temp_cleaned", "一時ファイルを削除しました"}, {"status_no_temp", "削除する一時ファイルはありません"}
+        {"status_temp_cleaned", "一時ファイルを削除しました"}, {"status_no_temp", "削除する一時ファイルはありません"},
+        {"track_video", "ビデオ"}, {"track_audio", "オーディオ"},
+        {"timeline_move_up", "トラックを上に移動"}, {"timeline_move_down", "トラックを下に移動"},
+        {"timeline_rename_track", "トラック名の変更"}, {"timeline_track_name", "トラック名"},
+        {"edit_select_all", "すべて選択"},
+        {"dialog_ok", "OK"}, {"dialog_cancel", "キャンセル"},
+        {"text_add_asset", "+ テキスト"}, {"text_dialog_title", "テキストアセットの作成"},
+        {"text_font", "フォント"}, {"text_font_size", "フォントサイズ"}, {"text_font_color", "文字色"},
+        {"text_use_background", "背景"}, {"text_bg_color", "背景色"},
+        {"text_use_outline", "アウトライン"}, {"text_outline_color", "アウトライン色"},
+        {"text_outline_width", "アウトライン幅"}, {"text_letter_spacing", "文字間隔"},
+        {"text_line_spacing", "行間隔"}, {"text_alignment", "配置"},
+        {"text_align_left", "左揃え"}, {"text_align_center", "中央揃え"}, {"text_align_right", "右揃え"},
+        {"text_entry_label", "テキスト入力"}, {"text_preview", "プレビュー"},
+        {"text_add_to_assets", "アセットに追加"}, {"text_add_to_timeline", "タイムラインに追加"},
+        {"menu_scripts", "スクリプト"}, {"scripts_no_scripts", "スクリプトが見つかりません"},
+        {"scripts_autorun_menu", "自動実行スクリプト"}, {"scripts_reload", "すべてのスクリプトを再読込"},
+        {"scripts_directories", "ディレクトリ"},
+        {"menu_help_lua_api", "Lua APIリファレンスマニュアル (PDF)..."}
     };
     m_embedded["jp"] = m_embedded["ja"];
 
@@ -263,7 +307,25 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"inspector_track_depth", "트랙 렌더링 깊이 (0-100)"},
         {"inspector_fade_in", "페이드 인 (1초)"}, {"inspector_fade_out", "페이드 아웃 (1초)"},
         {"inspector_ducking", "오디오 더킹"},
-        {"status_temp_cleaned", "임시 파일을 정리했습니다"}, {"status_no_temp", "정리할 임시 파일이 없습니다"}
+        {"status_temp_cleaned", "임시 파일을 정리했습니다"}, {"status_no_temp", "정리할 임시 파일이 없습니다"},
+        {"track_video", "비디오"}, {"track_audio", "오디오"},
+        {"timeline_move_up", "트랙 위로 이동"}, {"timeline_move_down", "트랙 아래로 이동"},
+        {"timeline_rename_track", "트랙 이름 바꾸기"}, {"timeline_track_name", "트랙 이름"},
+        {"edit_select_all", "모두 선택"},
+        {"dialog_ok", "확인"}, {"dialog_cancel", "취소"},
+        {"text_add_asset", "+ 텍스트"}, {"text_dialog_title", "텍스트 에셋 생성"},
+        {"text_font", "글꼴"}, {"text_font_size", "글꼴 크기"}, {"text_font_color", "글자 색상"},
+        {"text_use_background", "배경"}, {"text_bg_color", "배경 색상"},
+        {"text_use_outline", "외곽선"}, {"text_outline_color", "외곽선 색상"},
+        {"text_outline_width", "외곽선 두께"}, {"text_letter_spacing", "자간"},
+        {"text_line_spacing", "줄 간격"}, {"text_alignment", "정렬"},
+        {"text_align_left", "왼쪽"}, {"text_align_center", "가운데"}, {"text_align_right", "오른쪽"},
+        {"text_entry_label", "텍스트 입력"}, {"text_preview", "미리보기"},
+        {"text_add_to_assets", "에셋에 추가"}, {"text_add_to_timeline", "타임라인에 추가"},
+        {"menu_scripts", "스크립트"}, {"scripts_no_scripts", "스크립트가 없습니다"},
+        {"scripts_autorun_menu", "자동 실행 스크립트"}, {"scripts_reload", "모든 스크립트 다시 로드"},
+        {"scripts_directories", "디렉터리"},
+        {"menu_help_lua_api", "Lua API 참조 매뉴얼 (PDF)..."}
     };
 
     // Ukrainian
@@ -296,7 +358,25 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"inspector_track_depth", "Глибина рендерингу доріжки (0-100)"},
         {"inspector_fade_in", "Плавне наростання (1с)"}, {"inspector_fade_out", "Плавне затухання (1с)"},
         {"inspector_ducking", "Аудіо-дакінг"},
-        {"status_temp_cleaned", "Тимчасові файли успішно очищено"}, {"status_no_temp", "Немає тимчасових файлів для очищення"}
+        {"status_temp_cleaned", "Тимчасові файли успішно очищено"}, {"status_no_temp", "Немає тимчасових файлів для очищення"},
+        {"track_video", "Відео"}, {"track_audio", "Аудіо"},
+        {"timeline_move_up", "Перемістити доріжку вгору"}, {"timeline_move_down", "Перемістити доріжку вниз"},
+        {"timeline_rename_track", "Перейменувати доріжку"}, {"timeline_track_name", "Назва доріжки"},
+        {"edit_select_all", "Виділити все"},
+        {"dialog_ok", "Гаразд"}, {"dialog_cancel", "Скасувати"},
+        {"text_add_asset", "+ Текст"}, {"text_dialog_title", "Створення текстового ресурсу"},
+        {"text_font", "Шрифт"}, {"text_font_size", "Розмір шрифту"}, {"text_font_color", "Колір шрифту"},
+        {"text_use_background", "Тло"}, {"text_bg_color", "Колір тла"},
+        {"text_use_outline", "Контур"}, {"text_outline_color", "Колір контуру"},
+        {"text_outline_width", "Товщина контуру"}, {"text_letter_spacing", "Міжсимвольний інтервал"},
+        {"text_line_spacing", "Міжрядковий інтервал"}, {"text_alignment", "Вирівнювання"},
+        {"text_align_left", "Ліворуч"}, {"text_align_center", "По центру"}, {"text_align_right", "Праворуч"},
+        {"text_entry_label", "Введення тексту"}, {"text_preview", "Попередній перегляд"},
+        {"text_add_to_assets", "Додати до ресурсів"}, {"text_add_to_timeline", "Додати на таймлайн"},
+        {"menu_scripts", "Скрипти"}, {"scripts_no_scripts", "Скрипти відсутні"},
+        {"scripts_autorun_menu", "Скрипти автозапуску"}, {"scripts_reload", "Перезавантажити всі скрипти"},
+        {"scripts_directories", "Каталоги"},
+        {"menu_help_lua_api", "Довідник Lua API (PDF)..."}
     };
 
     // Arabic
@@ -329,6 +409,24 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"inspector_track_depth", "عمق عرض المسار (0-100)"},
         {"inspector_fade_in", "تلاشي للداخل (1 ثانية)"}, {"inspector_fade_out", "تلاشي للخارج (1 ثانية)"},
         {"inspector_ducking", "تخفيض الصوت التلقائي"},
-        {"status_temp_cleaned", "تم تنظيف الملفات المؤقتة بنجاح"}, {"status_no_temp", "لا توجد ملفات مؤقتة للتنظيف"}
+        {"status_temp_cleaned", "تم تنظيف الملفات المؤقتة بنجاح"}, {"status_no_temp", "لا توجد ملفات مؤقتة للتنظيف"},
+        {"track_video", "فيديو"}, {"track_audio", "صوت"},
+        {"timeline_move_up", "تحريك المسار لأعلى"}, {"timeline_move_down", "تحريك المسار لأسفل"},
+        {"timeline_rename_track", "إعادة تسمية المسار"}, {"timeline_track_name", "اسم المسار"},
+        {"edit_select_all", "تحديد الكل"},
+        {"dialog_ok", "موافق"}, {"dialog_cancel", "إلغاء"},
+        {"text_add_asset", "+ نص"}, {"text_dialog_title", "إنشاء عنصر نصي"},
+        {"text_font", "الخط"}, {"text_font_size", "حجم الخط"}, {"text_font_color", "لون الخط"},
+        {"text_use_background", "خلفية"}, {"text_bg_color", "لون الخلفية"},
+        {"text_use_outline", "تحديد الحواف"}, {"text_outline_color", "لون التحديد"},
+        {"text_outline_width", "سمك التحديد"}, {"text_letter_spacing", "تباعد الحروف"},
+        {"text_line_spacing", "تباعد الأسطر"}, {"text_alignment", "المحاذاة"},
+        {"text_align_left", "يسار"}, {"text_align_center", "وسط"}, {"text_align_right", "يمين"},
+        {"text_entry_label", "إدخال النص"}, {"text_preview", "معاينة"},
+        {"text_add_to_assets", "إضافة إلى الوسائط"}, {"text_add_to_timeline", "إضافة إلى المخطط الزمني"},
+        {"menu_scripts", "البرمجيات (Scripts)"}, {"scripts_no_scripts", "لا توجد سكربتات في المجلد"},
+        {"scripts_autorun_menu", "سكربتات التشغيل التلقائي"}, {"scripts_reload", "إعادة تحميل كافة السكربتات"},
+        {"scripts_directories", "المسارات والمجلدات"},
+        {"menu_help_lua_api", "دليل واجهة برمجة Lua (PDF)..."}
     };
 }

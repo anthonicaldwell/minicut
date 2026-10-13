@@ -18,11 +18,21 @@ public:
                           const std::string& filter_patterns,
                           std::function<void(const std::string&)> on_chosen);
 
+    static std::string open_file_sync(const std::string& title,
+                                      const std::string& default_path = "",
+                                      const std::string& filter_desc = "",
+                                      const std::string& filter_patterns = "");
+
     static void save_file(const std::string& title,
                           const std::string& default_path,
                           const std::string& filter_desc,
                           const std::string& filter_patterns,
                           std::function<void(const std::string&)> on_chosen);
+
+    static std::string save_file_sync(const std::string& title,
+                                      const std::string& default_path = "",
+                                      const std::string& filter_desc = "",
+                                      const std::string& filter_patterns = "");
 
     static void select_directory(const std::string& title,
                                  const std::string& default_path,

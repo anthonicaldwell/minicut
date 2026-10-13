@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Common.h"
+#include <imgui.h>
 #include <string>
 #include <functional>
 
@@ -20,13 +21,33 @@ public:
     bool split_selected_clip(Project& project, double playhead_time);
     bool split_clip_at(Project& project, const std::string& clip_id, double playhead_time);
     bool delete_selected_clip(Project& project);
+    bool delete_selected_clips(Project& project);
     void copy_selected_clip(const Project& project);
+    void copy_selected_clips(const Project& project);
     void cut_selected_clip(Project& project);
+    void cut_selected_clips(Project& project);
     bool paste_clip(Project& project, double target_time, int target_track_idx = -1);
 
-    // Track management
+    // Multi-Selection support
+    const std::vector<std::string>& get_selected_clip_ids() const { return m_selected_clip_ids; }
+    bool is_clip_selected(const std::string& clip_id) const;
+    void select_clip(const std::string& clip_id, bool toggle = false, bool add_to_selection = false);
+    void deselect_clip(const std::string& clip_id);
+    void clear_selection();
+    void select_all(const Project& project);
+
+    // Track management & reordering
     void add_track(Project& project, const std::string& type);
     void delete_track(Project& project, int track_idx);
+    void move_track_up(Project& project, int track_idx);
+    void move_track_down(Project& project, int track_idx);
+    void swap_tracks(Project& project, int idx1, int idx2);
+    void reorder_track(Project& project, int from_idx, int to_idx);
+
+    // Track renaming
+    void set_track_name(Project& project, int track_idx, const std::string& name);
+    std::string get_track_name(const Project& project, int track_idx) const;
+    static std::string get_display_track_name(const Track& track);
 
     int get_active_track_idx() const { return m_active_track_idx; }
     void set_active_track_idx(int idx) { m_active_track_idx = idx; }
@@ -58,6 +79,17 @@ private:
     int m_hovered_track_idx = -1;
     double m_mouse_hover_time = 0.0;
 
+    // Multi-Selection State
+    std::vector<std::string> m_selected_clip_ids;
+    bool m_is_box_selecting = false;
+    ImVec2 m_box_select_start = ImVec2(0, 0);
+    ImVec2 m_box_select_cur = ImVec2(0, 0);
+
+    // Track rename modal state
+    int m_rename_track_idx = -1;
+    char m_rename_track_buf[128] = {0};
+    bool m_open_rename_modal = false;
+
     // Scrollbar and pan state
     bool m_dragging_scrollbar = false;
     float m_scrollbar_drag_orig_scroll = 0.0f;
@@ -66,10 +98,11 @@ private:
     // Clipboard
     bool m_has_clipboard = false;
     Clip m_clipboard_clip;
+    std::vector<Clip> m_clipboard_clips;
     std::vector<Keyframe> m_clipboard_keyframes;
 
     // Drag / Trim states
-    enum class DragMode { None, MoveClip, TrimLeft, TrimRight, ScrubPlayhead };
+    enum class DragMode { None, MoveClip, TrimLeft, TrimRight, ScrubPlayhead, BoxSelect };
     DragMode m_drag_mode = DragMode::None;
     std::string m_drag_clip_id;
     int m_drag_track_idx = -1;
@@ -77,6 +110,8 @@ private:
     double m_drag_orig_start_time = 0.0;
     double m_drag_orig_duration = 0.0;
     double m_drag_orig_offset = 0.0;
+    std::unordered_map<std::string, double> m_drag_multi_orig_times;
 
     double snap_time(double t, const Project& project, const std::string& exclude_clip_id);
+    void render_rename_modal(Project& project, const std::function<void()>& on_project_changed);
 };
