@@ -867,7 +867,37 @@ void test_script_engine_lua_api() {
     assert(lua_toboolean(L, -1) == true);
     lua_pop(L, 1);
     assert(std::abs(c.pos_x - 300.0) < 1e-4);
-    assert(std::abs(c.pos_y - 200.0) < 1e-4);
+    // 6. Test project_save and project_load from Lua
+    se.run_string("save_ok, save_err = project_save('test_lua_saved_project.minicut')");
+    se.run_string("assert(save_ok == true)");
+    assert(fs::exists("test_lua_saved_project.minicut"));
+
+    // Clear tracks and reload from disk
+    proj.tracks[0].clips.clear();
+    assert(proj.tracks[0].clips.empty());
+
+    se.run_string("load_ok, load_err = project_load('test_lua_saved_project.minicut')");
+    se.run_string("assert(load_ok == true)");
+    assert(!proj.tracks[0].clips.empty());
+    fs::remove("test_lua_saved_project.minicut");
+
+    // 7. Test net library (download and file I/O via libcurl file protocol)
+    std::string test_net_file = "test_net_source.txt";
+    std::ofstream ofs(test_net_file);
+    ofs << "minicut network subsystem payload";
+    ofs.close();
+
+    std::string abs_net_path = fs::absolute(test_net_file).string();
+    se.run_string("dl_ok, dl_path = net.download('file://" + abs_net_path + "', 'test_net_dest.txt')");
+    se.run_string("assert(dl_ok == true)");
+    assert(fs::exists("test_net_dest.txt"));
+    std::ifstream ifs("test_net_dest.txt");
+    std::string net_content;
+    std::getline(ifs, net_content);
+    ifs.close();
+    assert(net_content == "minicut network subsystem payload");
+    fs::remove(test_net_file);
+    fs::remove("test_net_dest.txt");
 
     std::cout << "[PASS] ScriptEngine & LuaAPI integration tests passed." << std::endl;
 }

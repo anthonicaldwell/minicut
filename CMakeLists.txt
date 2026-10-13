@@ -81,6 +81,14 @@ endif()
 set(LUAJIT_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/luajit/include")
 set(LUAJIT_LIB "${CMAKE_CURRENT_SOURCE_DIR}/third_party/luajit/lib/libluajit-5.1.a")
 
+# libcurl setup
+set(CURL_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/curl/include")
+find_library(CURL_LIB NAMES curl PATHS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/curl/lib" /usr/lib/x86_64-linux-gnu /usr/lib)
+if(NOT CURL_LIB)
+    message(FATAL_ERROR "libcurl library not found")
+endif()
+message(STATUS "Found libcurl: ${CURL_LIB}")
+
 # Dear ImGui sources
 set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui.cpp
@@ -122,6 +130,7 @@ target_include_directories(minicut PRIVATE
     ${OPENGL_INCLUDE_DIR}
     ${AVCODEC_INCLUDE_DIR}
     ${LUAJIT_INCLUDE_DIR}
+    ${CURL_INCLUDE_DIR}
 )
 
 if(NLOHMANN_JSON_INCLUDE_DIR)
@@ -144,6 +153,7 @@ target_link_libraries(minicut PRIVATE
     ${SWRESAMPLE_LIB}
     ${AVUTIL_LIB}
     ${LUAJIT_LIB}
+    ${CURL_LIB}
     dl
     pthread
     m
@@ -183,6 +193,7 @@ target_include_directories(test_minicut PRIVATE
     ${OPENGL_INCLUDE_DIR}
     ${AVCODEC_INCLUDE_DIR}
     ${LUAJIT_INCLUDE_DIR}
+    ${CURL_INCLUDE_DIR}
 )
 
 if(NLOHMANN_JSON_INCLUDE_DIR)
@@ -205,6 +216,7 @@ target_link_libraries(test_minicut PRIVATE
     ${SWRESAMPLE_LIB}
     ${AVUTIL_LIB}
     ${LUAJIT_LIB}
+    ${CURL_LIB}
     dl
     pthread
     m

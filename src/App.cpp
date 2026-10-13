@@ -208,7 +208,20 @@ bool App::init(int argc, char* argv[]) {
         [this]() { on_project_modified(); },
         [this](double t) { set_playhead_time(t); },
         [this](const std::string& msg, double d) { set_status_notification(msg, d); },
-        [this](const std::string& id) { set_selected_clip_id(id); }
+        [this](const std::string& id) { set_selected_clip_id(id); },
+        [this](const std::string& path) -> bool {
+            std::string target = path.empty() ? m_project.file_path : path;
+            if (target.empty()) target = "untitled.minicut";
+            save_project(target);
+            set_status_notification("Project saved: " + target);
+            return true;
+        },
+        [this](const std::string& path) -> bool {
+            if (path.empty()) return false;
+            open_project(path);
+            set_status_notification("Project loaded: " + path);
+            return true;
+        }
     );
 
     return true;
@@ -839,6 +852,7 @@ void App::update(double delta_time) {
 
 void App::render_menu_bar() {
     if (ImGui::BeginMainMenuBar()) {
+        m_menu_bar_height = ImGui::GetWindowSize().y;
         if (ImGui::BeginMenu(_TR("menu_file"))) {
             if (ImGui::MenuItem(_TR("file_new"), "Ctrl+N")) { new_project(); }
             if (ImGui::MenuItem(_TR("file_open"), "Ctrl+O")) { open_project_browser(); }
@@ -934,6 +948,23 @@ void App::render_menu_bar() {
         }
 
         if (ImGui::BeginMenu(_TR("menu_help"))) {
+            if (ImGui::MenuItem("Lua API Reference (PDF)...")) {
+                const char* home = std::getenv("HOME");
+                std::vector<std::string> candidates = {
+                    "docs/minicut_lua_api.pdf",
+                    "../docs/minicut_lua_api.pdf",
+                    home ? (std::string(home) + "/.config/minicut/docs/minicut_lua_api.pdf") : "",
+                    home ? (std::string(home) + "/.local/share/minicut/docs/minicut_lua_api.pdf") : "",
+                    "/home/kaiju/.local/bin/docs/minicut_lua_api.pdf"
+                };
+                for (const auto& p : candidates) {
+                    if (!p.empty() && fs::exists(p)) {
+                        std::string cmd = "xdg-open \"" + p + "\" >/dev/null 2>&1 &";
+                        std::system(cmd.c_str());
+                        break;
+                    }
+                }
+            }
             if (ImGui::MenuItem(_TR("help_about"))) { m_show_about = true; }
             ImGui::EndMenu();
         }
@@ -956,7 +987,8 @@ void App::render_menu_bar() {
 }
 
 void App::render_maya_shelf() {
-    m_script_engine.render_maya_shelf();
+    float menu_h = m_menu_bar_height > 0.0f ? m_menu_bar_height : ImGui::GetFrameHeight();
+    m_script_engine.render_maya_shelf(menu_h);
 }
 
 void App::render_clip_panel() {
@@ -1186,6 +1218,9 @@ void App::load_settings() {
                 ifs >> j;
                 m_use_system_file_dialog = j.value("use_system_file_dialog", true);
                 std::string lang = j.value("language", "en");
+                if (lang != "en" && lang != "ja" && lang != "jp" && lang != "ko" && lang != "uk" && lang != "ar") {
+                    lang = "en";
+                }
                 LocaleManager::instance().set_locale(lang);
                 m_split_h = std::clamp(j.value("split_h", 0.46f), 0.15f, 0.85f);
                 m_split_top_v = std::clamp(j.value("split_top_v", 0.28f), 0.15f, 0.75f);
@@ -1193,6 +1228,9 @@ void App::load_settings() {
                 m_timeline.set_track_header_width(j.value("track_header_w", 145.0f));
             }
         } catch (...) {}
+    } else {
+        LocaleManager::instance().set_locale("en");
+        save_settings();
     }
 }
 
@@ -1328,7 +1366,7 @@ void App::render() {
     render_menu_bar();
     render_maya_shelf();
 
-    float menu_h = ImGui::GetFrameHeight();
+    float menu_h = m_menu_bar_height > 0.0f ? m_menu_bar_height : ImGui::GetFrameHeight();
     float shelf_h = m_script_engine.is_shelf_visible() ? m_script_engine.get_shelf_height() : 0.0f;
     float content_y = menu_h + shelf_h;
     float total_w = static_cast<float>(m_window_width);

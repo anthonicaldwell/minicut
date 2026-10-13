@@ -231,6 +231,8 @@
     - `timeline.*`: Clip placement (`place_clip(path, track, time, duration)`), playhead navigation, track queries.
     - `clip.*`: Clip transform and property controls (`set_pos`, `get_pos`, `set_scale`, `get_scale`, `set_rotation`, `set_opacity`, `set_volume`).
     - `clip.add_keyframe` / `clip.remove_keyframe`: Keyframe animation access directly from scripts.
+    - `project.*` & Global: `project_save([path])` / `project_load(path)` for headless and automated project workflow.
+    - `net.*`: Built-in internet, download, and upload capabilities powered by embedded `libcurl` (`net.get`, `net.post`, `net.download`, `net.upload`, `net.request`).
 - **MEL-Style Script Architecture**:
   - Base script pattern supported:
     ```lua
@@ -245,13 +247,16 @@
     ```
   - Executed scripts automatically spawn dockable panels to the right of the preview and timeline panels.
 - **Maya-Style Shelf Dock**:
-  - Rendered horizontally directly below the main menu bar.
+  - Rendered horizontally directly below the main menu bar (44px height with stylish slate background and subtle dividing line).
   - Scripts located in `~/.config/minicut/autorun/` are loaded at startup and create an icon button on the dock. Clicking runs the script and opens its tool panel.
   - Custom PNG icons loaded from `~/.config/minicut/icons/<script_name>.png`, with stylish 2-letter fallback badges.
 - **Top-Level Scripts Menu**:
   - Scripts placed in `~/.config/minicut/scripts/` automatically populate the top-level **Scripts** menu in the main menu bar.
+- **PDF API Reference Manual**:
+  - Publication-quality PDF manual generated at `docs/minicut_lua_api.pdf` and installed to `~/.config/minicut/docs/minicut_lua_api.pdf`.
+  - Directly accessible from the **Help -> Lua API Reference (PDF)...** menu item.
 - **Automated Directory Deployment**:
-  - Installer (`./install.sh`) installs scripts, autorun scripts, and shelf icons to both `~/.config/minicut/` and system/user data directories.
+  - Installer (`./install.sh`) installs scripts, autorun scripts, shelf icons, and documentation to both `~/.config/minicut/` and system/user data directories.
 
 ---
 

@@ -3,13 +3,16 @@
 #include "Timeline.h"
 #include "ClipManager.h"
 #include "MediaDecoder.h"
+#include "ProjectSerializer.h"
 #include "imgui.h"
+#include <curl/curl.h>
 #include <iostream>
 #include <fstream>
 #include <filesystem>
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <sstream>
 
 namespace fs = std::filesystem;
 
@@ -35,7 +38,9 @@ bool ScriptEngine::init(Project* project,
                         std::function<void()> on_project_modified,
                         std::function<void(double)> on_set_playhead,
                         std::function<void(const std::string&, double)> on_set_status,
-                        std::function<void(const std::string&)> on_select_clip) {
+                        std::function<void(const std::string&)> on_select_clip,
+                        std::function<bool(const std::string&)> on_save_project,
+                        std::function<bool(const std::string&)> on_load_project) {
     m_project = project;
     m_timeline = timeline;
     m_clip_manager = clip_manager;
@@ -46,8 +51,12 @@ bool ScriptEngine::init(Project* project,
     m_on_set_playhead = on_set_playhead;
     m_on_set_status = on_set_status;
     m_on_select_clip = on_select_clip;
+    m_on_save_project = on_save_project;
+    m_on_load_project = on_load_project;
 
     s_engine_instance = this;
+
+    curl_global_init(CURL_GLOBAL_ALL);
 
     // Determine paths
     const char* home = std::getenv("HOME");
@@ -84,6 +93,7 @@ void ScriptEngine::shutdown() {
         lua_close(m_L);
         m_L = nullptr;
     }
+    curl_global_cleanup();
 }
 
 void ScriptEngine::clear_textures() {
@@ -288,11 +298,13 @@ void ScriptEngine::update(double delta_time) {
     (void)delta_time;
 }
 
-void ScriptEngine::render_maya_shelf() {
+void ScriptEngine::render_maya_shelf(float menu_h) {
     if (!m_shelf_visible) return;
 
     ImGuiIO& io = ImGui::GetIO();
-    float menu_h = ImGui::GetFrameHeight();
+    if (menu_h <= 0.0f) {
+        menu_h = ImGui::GetFrameHeight();
+    }
     float total_w = io.DisplaySize.x;
 
     ImGui::SetNextWindowPos(ImVec2(0, menu_h), ImGuiCond_Always);
@@ -302,21 +314,24 @@ void ScriptEngine::render_maya_shelf() {
                              ImGuiWindowFlags_NoResize |
                              ImGuiWindowFlags_NoMove |
                              ImGuiWindowFlags_NoScrollbar |
-                             ImGuiWindowFlags_NoSavedSettings |
-                             ImGuiWindowFlags_MenuBar;
+                             ImGuiWindowFlags_NoScrollWithMouse |
+                             ImGuiWindowFlags_NoSavedSettings;
 
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 4));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 6.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, 4.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.12f, 0.13f, 0.15f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.13f, 0.14f, 0.16f, 1.0f));
 
     if (ImGui::Begin("##MayaShelfDock", nullptr, flags)) {
         // Shelf Header Label (Maya style tab)
+        ImGui::AlignTextToFramePadding();
         ImGui::TextColored(ImVec4(0.24f, 0.68f, 0.91f, 1.0f), "SHELF");
         ImGui::SameLine();
         ImGui::TextDisabled("|");
         ImGui::SameLine();
 
         if (m_autorun_scripts.empty()) {
+            ImGui::AlignTextToFramePadding();
             ImGui::TextDisabled("No autorun scripts in ~/.config/minicut/autorun/");
         } else {
             for (auto& script : m_autorun_scripts) {
@@ -324,8 +339,10 @@ void ScriptEngine::render_maya_shelf() {
 
                 bool clicked = false;
                 if (script.icon_texture != 0) {
-                    ImVec4 bg_col = script.is_panel_open ? ImVec4(0.24f, 0.68f, 0.91f, 0.4f) : ImVec4(0, 0, 0, 0);
-                    clicked = ImGui::ImageButton(("##btn_" + script.id).c_str(), (ImTextureID)(intptr_t)script.icon_texture, ImVec2(22, 22), ImVec2(0,0), ImVec2(1,1), bg_col);
+                    ImVec4 bg_col = script.is_panel_open ? ImVec4(0.24f, 0.68f, 0.91f, 0.45f) : ImVec4(0.18f, 0.20f, 0.23f, 0.6f);
+                    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(2, 2));
+                    clicked = ImGui::ImageButton(("##btn_" + script.id).c_str(), (ImTextureID)(intptr_t)script.icon_texture, ImVec2(28, 28), ImVec2(0,0), ImVec2(1,1), bg_col);
+                    ImGui::PopStyleVar();
                 } else {
                     // Maya style initial abbreviation
                     std::string abbr = script.title.substr(0, 2);
@@ -334,7 +351,7 @@ void ScriptEngine::render_maya_shelf() {
                     if (script.is_panel_open) {
                         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.24f, 0.68f, 0.91f, 0.6f));
                     }
-                    clicked = ImGui::Button(abbr.c_str(), ImVec2(28, 24));
+                    clicked = ImGui::Button(abbr.c_str(), ImVec2(32, 28));
                     if (script.is_panel_open) {
                         ImGui::PopStyleColor();
                     }
@@ -360,20 +377,24 @@ void ScriptEngine::render_maya_shelf() {
         }
 
         // Shelf action controls on far right
-        float right_w = 80.0f;
+        float right_w = 85.0f;
         if (ImGui::GetContentRegionAvail().x > right_w) {
             ImGui::SetCursorPosX(total_w - right_w);
-            if (ImGui::SmallButton("⟳ Reload")) {
+            if (ImGui::Button("⟳ Reload", ImVec2(75, 28))) {
                 reload_scripts();
                 set_status("Scripts and Maya shelf reloaded");
             }
         }
 
+        // Bottom border line for Maya dock separation
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        dl->AddLine(ImVec2(0, menu_h + m_shelf_height - 1.0f), ImVec2(total_w, menu_h + m_shelf_height - 1.0f), IM_COL32(45, 50, 58, 255), 1.0f);
+
         ImGui::End();
     }
 
     ImGui::PopStyleColor();
-    ImGui::PopStyleVar(2);
+    ImGui::PopStyleVar(3);
 }
 
 void ScriptEngine::render_scripts_menu() {
@@ -583,12 +604,18 @@ void ScriptEngine::register_lua_api() {
 
     // 4. `project` Table
     lua_newtable(m_L);
+    lua_pushcfunction(m_L, lua_project_save);         lua_setfield(m_L, -2, "save");
+    lua_pushcfunction(m_L, lua_project_load);         lua_setfield(m_L, -2, "load");
     lua_pushcfunction(m_L, lua_project_import_video); lua_setfield(m_L, -2, "import_video");
     lua_pushcfunction(m_L, lua_project_import_audio); lua_setfield(m_L, -2, "import_audio");
     lua_pushcfunction(m_L, lua_project_import_image); lua_setfield(m_L, -2, "import_image");
     lua_pushcfunction(m_L, lua_project_get_name);     lua_setfield(m_L, -2, "get_name");
     lua_pushcfunction(m_L, lua_project_set_name);     lua_setfield(m_L, -2, "set_name");
     lua_setglobal(m_L, "project");
+
+    // Global project_save() and project_load() aliases
+    lua_pushcfunction(m_L, lua_project_save); lua_setglobal(m_L, "project_save");
+    lua_pushcfunction(m_L, lua_project_load); lua_setglobal(m_L, "project_load");
 
     // 5. `minicut` Table
     lua_newtable(m_L);
@@ -597,7 +624,16 @@ void ScriptEngine::register_lua_api() {
     lua_pushcfunction(m_L, lua_minicut_push_undo);  lua_setfield(m_L, -2, "push_undo");
     lua_setglobal(m_L, "minicut");
 
-    // 6. Global default `plugin` Table
+    // 6. `net` Table (HTTP, download, upload)
+    lua_newtable(m_L);
+    lua_pushcfunction(m_L, lua_net_get);      lua_setfield(m_L, -2, "get");
+    lua_pushcfunction(m_L, lua_net_post);     lua_setfield(m_L, -2, "post");
+    lua_pushcfunction(m_L, lua_net_download); lua_setfield(m_L, -2, "download");
+    lua_pushcfunction(m_L, lua_net_upload);   lua_setfield(m_L, -2, "upload");
+    lua_pushcfunction(m_L, lua_net_request);  lua_setfield(m_L, -2, "request");
+    lua_setglobal(m_L, "net");
+
+    // 7. Global default `plugin` Table
     lua_newtable(m_L);
     lua_pushstring(m_L, "default"); lua_setfield(m_L, -2, "id");
     lua_pushstring(m_L, "Default Plugin"); lua_setfield(m_L, -2, "title");
@@ -1525,4 +1561,590 @@ int ScriptEngine::lua_minicut_push_undo(lua_State* L) {
         s_engine_instance->push_undo_state();
     }
     return 0;
+}
+
+// ----------------------------------------------------------------------------
+// Project Save & Load Implementation
+// ----------------------------------------------------------------------------
+
+int ScriptEngine::lua_project_save(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "Project engine not initialized");
+        return 2;
+    }
+    const char* path = luaL_optstring(L, 1, nullptr);
+    std::string target_path;
+    if (path && std::strlen(path) > 0) {
+        target_path = path;
+    } else if (!s_engine_instance->m_project->file_path.empty()) {
+        target_path = s_engine_instance->m_project->file_path;
+    } else {
+        target_path = "untitled.minicut";
+    }
+
+    bool success = false;
+    if (s_engine_instance->m_on_save_project) {
+        success = s_engine_instance->m_on_save_project(target_path);
+    } else {
+        success = ProjectSerializer::save_to_file(*s_engine_instance->m_project, target_path);
+        if (success) {
+            s_engine_instance->m_project->file_path = target_path;
+            s_engine_instance->notify_project_modified();
+        }
+    }
+
+    if (success) {
+        lua_pushboolean(L, 1);
+        lua_pushstring(L, target_path.c_str());
+    } else {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, ("Failed to save project to: " + target_path).c_str());
+    }
+    return 2;
+}
+
+int ScriptEngine::lua_project_load(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "Project engine not initialized");
+        return 2;
+    }
+    const char* path = luaL_checkstring(L, 1);
+    if (!path || std::strlen(path) == 0) {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "No project filepath specified");
+        return 2;
+    }
+
+    bool success = false;
+    if (s_engine_instance->m_on_load_project) {
+        success = s_engine_instance->m_on_load_project(path);
+    } else {
+        success = ProjectSerializer::load_from_file(*s_engine_instance->m_project, path);
+        if (success) {
+            s_engine_instance->m_project->file_path = path;
+            s_engine_instance->notify_project_modified();
+        }
+    }
+
+    if (success) {
+        lua_pushboolean(L, 1);
+        lua_pushstring(L, path);
+    } else {
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, ("Failed to load project from: " + std::string(path)).c_str());
+    }
+    return 2;
+}
+
+// ----------------------------------------------------------------------------
+// Net API Implementation (libcurl)
+// ----------------------------------------------------------------------------
+
+struct HttpResponse {
+    long status_code = 0;
+    std::string body;
+    std::vector<std::string> headers;
+    std::string error;
+    bool success = false;
+};
+
+static size_t curl_string_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    size_t total = size * nmemb;
+    auto* s = static_cast<std::string*>(userdata);
+    s->append(ptr, total);
+    return total;
+}
+
+static size_t curl_file_write_cb(char* ptr, size_t size, size_t nmemb, void* userdata) {
+    size_t total = size * nmemb;
+    FILE* fp = static_cast<FILE*>(userdata);
+    return std::fwrite(ptr, 1, total, fp);
+}
+
+static size_t curl_header_write_cb(char* buffer, size_t size, size_t nitems, void* userdata) {
+    size_t total = size * nitems;
+    auto* headers = static_cast<std::vector<std::string>*>(userdata);
+    std::string h(buffer, total);
+    while (!h.empty() && (h.back() == '\r' || h.back() == '\n')) h.pop_back();
+    if (!h.empty()) {
+        headers->push_back(h);
+    }
+    return total;
+}
+
+static void push_http_response_table(lua_State* L, const HttpResponse& resp) {
+    lua_newtable(L);
+    lua_pushinteger(L, resp.status_code);
+    lua_setfield(L, -2, "status");
+
+    lua_pushboolean(L, (resp.status_code >= 200 && resp.status_code < 300) ? 1 : 0);
+    lua_setfield(L, -2, "ok");
+
+    lua_pushlstring(L, resp.body.data(), resp.body.size());
+    lua_setfield(L, -2, "body");
+
+    lua_newtable(L);
+    for (size_t i = 0; i < resp.headers.size(); ++i) {
+        lua_pushstring(L, resp.headers[i].c_str());
+        lua_rawseti(L, -2, static_cast<int>(i + 1));
+        auto colon = resp.headers[i].find(':');
+        if (colon != std::string::npos) {
+            std::string k = resp.headers[i].substr(0, colon);
+            std::string v = resp.headers[i].substr(colon + 1);
+            while (!k.empty() && k.back() == ' ') k.pop_back();
+            while (!v.empty() && v.front() == ' ') v.erase(v.begin());
+            lua_pushstring(L, v.c_str());
+            lua_setfield(L, -2, k.c_str());
+        }
+    }
+    lua_setfield(L, -2, "headers");
+}
+
+int ScriptEngine::lua_net_get(lua_State* L) {
+    const char* url = luaL_checkstring(L, 1);
+    long timeout = 30;
+    curl_slist* header_list = nullptr;
+
+    if (lua_istable(L, 2)) {
+        lua_getfield(L, 2, "timeout");
+        if (lua_isnumber(L, -1)) timeout = static_cast<long>(lua_tonumber(L, -1));
+        lua_pop(L, 1);
+
+        lua_getfield(L, 2, "headers");
+        if (lua_istable(L, -1)) {
+            lua_pushnil(L);
+            while (lua_next(L, -2) != 0) {
+                if (lua_isstring(L, -2) && lua_isstring(L, -1)) {
+                    std::string h = std::string(lua_tostring(L, -2)) + ": " + lua_tostring(L, -1);
+                    header_list = curl_slist_append(header_list, h.c_str());
+                } else if (lua_isstring(L, -1)) {
+                    header_list = curl_slist_append(header_list, lua_tostring(L, -1));
+                }
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+    }
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        if (header_list) curl_slist_free_all(header_list);
+        lua_pushnil(L);
+        lua_pushstring(L, "Failed to initialize CURL");
+        return 2;
+    }
+
+    HttpResponse resp;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "minicut-editor/1.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_string_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curl_header_write_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &resp.headers);
+    if (header_list) {
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp.status_code);
+        resp.success = true;
+    } else {
+        resp.error = curl_easy_strerror(res);
+    }
+
+    curl_easy_cleanup(curl);
+    if (header_list) curl_slist_free_all(header_list);
+
+    if (!resp.success) {
+        lua_pushnil(L);
+        lua_pushstring(L, resp.error.c_str());
+        return 2;
+    }
+
+    push_http_response_table(L, resp);
+    return 1;
+}
+
+int ScriptEngine::lua_net_post(lua_State* L) {
+    const char* url = luaL_checkstring(L, 1);
+    std::string post_data;
+    if (lua_isstring(L, 2)) {
+        size_t len = 0;
+        const char* p = lua_tolstring(L, 2, &len);
+        if (p) post_data.assign(p, len);
+    } else if (lua_istable(L, 2)) {
+        // Form urlencode table
+        std::ostringstream ss;
+        bool first = true;
+        lua_pushnil(L);
+        while (lua_next(L, 2) != 0) {
+            if (!first) ss << "&";
+            first = false;
+            if (lua_isstring(L, -2)) ss << lua_tostring(L, -2) << "=";
+            if (lua_isstring(L, -1)) ss << lua_tostring(L, -1);
+            lua_pop(L, 1);
+        }
+        post_data = ss.str();
+    }
+
+    long timeout = 30;
+    curl_slist* header_list = nullptr;
+    if (lua_istable(L, 3)) {
+        lua_getfield(L, 3, "timeout");
+        if (lua_isnumber(L, -1)) timeout = static_cast<long>(lua_tonumber(L, -1));
+        lua_pop(L, 1);
+
+        lua_getfield(L, 3, "headers");
+        if (lua_istable(L, -1)) {
+            lua_pushnil(L);
+            while (lua_next(L, -2) != 0) {
+                if (lua_isstring(L, -2) && lua_isstring(L, -1)) {
+                    std::string h = std::string(lua_tostring(L, -2)) + ": " + lua_tostring(L, -1);
+                    header_list = curl_slist_append(header_list, h.c_str());
+                } else if (lua_isstring(L, -1)) {
+                    header_list = curl_slist_append(header_list, lua_tostring(L, -1));
+                }
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+    }
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        if (header_list) curl_slist_free_all(header_list);
+        lua_pushnil(L);
+        lua_pushstring(L, "Failed to initialize CURL");
+        return 2;
+    }
+
+    HttpResponse resp;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, post_data.data());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(post_data.size()));
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "minicut-editor/1.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_string_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curl_header_write_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &resp.headers);
+    if (header_list) {
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp.status_code);
+        resp.success = true;
+    } else {
+        resp.error = curl_easy_strerror(res);
+    }
+
+    curl_easy_cleanup(curl);
+    if (header_list) curl_slist_free_all(header_list);
+
+    if (!resp.success) {
+        lua_pushnil(L);
+        lua_pushstring(L, resp.error.c_str());
+        return 2;
+    }
+
+    push_http_response_table(L, resp);
+    return 1;
+}
+
+int ScriptEngine::lua_net_download(lua_State* L) {
+    const char* url = luaL_checkstring(L, 1);
+    const char* dest_path = luaL_checkstring(L, 2);
+    long timeout = 60;
+    curl_slist* header_list = nullptr;
+
+    if (lua_istable(L, 3)) {
+        lua_getfield(L, 3, "timeout");
+        if (lua_isnumber(L, -1)) timeout = static_cast<long>(lua_tonumber(L, -1));
+        lua_pop(L, 1);
+
+        lua_getfield(L, 3, "headers");
+        if (lua_istable(L, -1)) {
+            lua_pushnil(L);
+            while (lua_next(L, -2) != 0) {
+                if (lua_isstring(L, -2) && lua_isstring(L, -1)) {
+                    std::string h = std::string(lua_tostring(L, -2)) + ": " + lua_tostring(L, -1);
+                    header_list = curl_slist_append(header_list, h.c_str());
+                } else if (lua_isstring(L, -1)) {
+                    header_list = curl_slist_append(header_list, lua_tostring(L, -1));
+                }
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+    }
+
+    FILE* fp = std::fopen(dest_path, "wb");
+    if (!fp) {
+        if (header_list) curl_slist_free_all(header_list);
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, ("Failed to open local destination file: " + std::string(dest_path)).c_str());
+        return 2;
+    }
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        std::fclose(fp);
+        if (header_list) curl_slist_free_all(header_list);
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, "Failed to initialize CURL");
+        return 2;
+    }
+
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "minicut-editor/1.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_file_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+    if (header_list) {
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    long http_code = 0;
+    curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
+
+    curl_easy_cleanup(curl);
+    std::fclose(fp);
+    if (header_list) curl_slist_free_all(header_list);
+
+    if (res != CURLE_OK) {
+        std::remove(dest_path);
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, curl_easy_strerror(res));
+        return 2;
+    }
+
+    if (http_code >= 400) {
+        std::remove(dest_path);
+        lua_pushboolean(L, 0);
+        lua_pushstring(L, ("HTTP error " + std::to_string(http_code)).c_str());
+        return 2;
+    }
+
+    lua_pushboolean(L, 1);
+    lua_pushstring(L, dest_path);
+    return 2;
+}
+
+int ScriptEngine::lua_net_upload(lua_State* L) {
+    const char* url = luaL_checkstring(L, 1);
+    const char* filepath = luaL_checkstring(L, 2);
+    const char* field_name = "file";
+    long timeout = 120;
+    curl_slist* header_list = nullptr;
+
+    std::vector<std::pair<std::string, std::string>> extra_fields;
+
+    if (lua_istable(L, 3)) {
+        lua_getfield(L, 3, "field_name");
+        if (lua_isstring(L, -1)) field_name = lua_tostring(L, -1);
+        lua_pop(L, 1);
+
+        lua_getfield(L, 3, "timeout");
+        if (lua_isnumber(L, -1)) timeout = static_cast<long>(lua_tonumber(L, -1));
+        lua_pop(L, 1);
+
+        lua_getfield(L, 3, "extra_fields");
+        if (lua_istable(L, -1)) {
+            lua_pushnil(L);
+            while (lua_next(L, -2) != 0) {
+                if (lua_isstring(L, -2) && lua_isstring(L, -1)) {
+                    extra_fields.push_back({ lua_tostring(L, -2), lua_tostring(L, -1) });
+                }
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+
+        lua_getfield(L, 3, "headers");
+        if (lua_istable(L, -1)) {
+            lua_pushnil(L);
+            while (lua_next(L, -2) != 0) {
+                if (lua_isstring(L, -2) && lua_isstring(L, -1)) {
+                    std::string h = std::string(lua_tostring(L, -2)) + ": " + lua_tostring(L, -1);
+                    header_list = curl_slist_append(header_list, h.c_str());
+                } else if (lua_isstring(L, -1)) {
+                    header_list = curl_slist_append(header_list, lua_tostring(L, -1));
+                }
+                lua_pop(L, 1);
+            }
+        }
+        lua_pop(L, 1);
+    }
+
+    if (!fs::exists(filepath)) {
+        if (header_list) curl_slist_free_all(header_list);
+        lua_pushnil(L);
+        lua_pushstring(L, ("Upload file does not exist: " + std::string(filepath)).c_str());
+        return 2;
+    }
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        if (header_list) curl_slist_free_all(header_list);
+        lua_pushnil(L);
+        lua_pushstring(L, "Failed to initialize CURL");
+        return 2;
+    }
+
+    curl_mime* mime = curl_mime_init(curl);
+    curl_mimepart* part = curl_mime_addpart(mime);
+    curl_mime_name(part, field_name);
+    curl_mime_filedata(part, filepath);
+
+    for (const auto& kv : extra_fields) {
+        curl_mimepart* p = curl_mime_addpart(mime);
+        curl_mime_name(p, kv.first.c_str());
+        curl_mime_data(p, kv.second.c_str(), CURL_ZERO_TERMINATED);
+    }
+
+    HttpResponse resp;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_MIMEPOST, mime);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "minicut-editor/1.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_string_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curl_header_write_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &resp.headers);
+    if (header_list) {
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp.status_code);
+        resp.success = true;
+    } else {
+        resp.error = curl_easy_strerror(res);
+    }
+
+    curl_mime_free(mime);
+    curl_easy_cleanup(curl);
+    if (header_list) curl_slist_free_all(header_list);
+
+    if (!resp.success) {
+        lua_pushnil(L);
+        lua_pushstring(L, resp.error.c_str());
+        return 2;
+    }
+
+    push_http_response_table(L, resp);
+    return 1;
+}
+
+int ScriptEngine::lua_net_request(lua_State* L) {
+    if (!lua_istable(L, 1)) {
+        lua_pushnil(L);
+        lua_pushstring(L, "net.request expects options table");
+        return 2;
+    }
+
+    lua_getfield(L, 1, "url");
+    const char* url = lua_tostring(L, -1);
+    if (!url) {
+        lua_pop(L, 1);
+        lua_pushnil(L);
+        lua_pushstring(L, "net.request missing url field");
+        return 2;
+    }
+    lua_pop(L, 1);
+
+    std::string method = "GET";
+    lua_getfield(L, 1, "method");
+    if (lua_isstring(L, -1)) method = lua_tostring(L, -1);
+    lua_pop(L, 1);
+    std::transform(method.begin(), method.end(), method.begin(), ::toupper);
+
+    std::string body;
+    lua_getfield(L, 1, "body");
+    if (lua_isstring(L, -1)) {
+        size_t len = 0;
+        const char* b = lua_tolstring(L, -1, &len);
+        if (b) body.assign(b, len);
+    }
+    lua_pop(L, 1);
+
+    long timeout = 30;
+    lua_getfield(L, 1, "timeout");
+    if (lua_isnumber(L, -1)) timeout = static_cast<long>(lua_tonumber(L, -1));
+    lua_pop(L, 1);
+
+    curl_slist* header_list = nullptr;
+    lua_getfield(L, 1, "headers");
+    if (lua_istable(L, -1)) {
+        lua_pushnil(L);
+        while (lua_next(L, -2) != 0) {
+            if (lua_isstring(L, -2) && lua_isstring(L, -1)) {
+                std::string h = std::string(lua_tostring(L, -2)) + ": " + lua_tostring(L, -1);
+                header_list = curl_slist_append(header_list, h.c_str());
+            } else if (lua_isstring(L, -1)) {
+                header_list = curl_slist_append(header_list, lua_tostring(L, -1));
+            }
+            lua_pop(L, 1);
+        }
+    }
+    lua_pop(L, 1);
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        if (header_list) curl_slist_free_all(header_list);
+        lua_pushnil(L);
+        lua_pushstring(L, "Failed to initialize CURL");
+        return 2;
+    }
+
+    HttpResponse resp;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, method.c_str());
+    if (!body.empty()) {
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.data());
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(body.size()));
+    }
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "minicut-editor/1.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_string_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curl_header_write_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &resp.headers);
+    if (header_list) {
+        curl_easy_setopt(curl, CURLOPT_HTTPHEADER, header_list);
+    }
+
+    CURLcode res = curl_easy_perform(curl);
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp.status_code);
+        resp.success = true;
+    } else {
+        resp.error = curl_easy_strerror(res);
+    }
+
+    curl_easy_cleanup(curl);
+    if (header_list) curl_slist_free_all(header_list);
+
+    if (!resp.success) {
+        lua_pushnil(L);
+        lua_pushstring(L, resp.error.c_str());
+        return 2;
+    }
+
+    push_http_response_table(L, resp);
+    return 1;
 }

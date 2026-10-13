@@ -148,6 +148,14 @@ if [ -d "icons" ]; then
     cp -rf icons/* "$DATA_DIR/icons/"
 fi
 
+if [ -d "docs" ]; then
+    echo "Installing documentation to $HOME/.config/minicut/docs/ and $DATA_DIR/docs/..."
+    mkdir -p "$HOME/.config/minicut/docs"
+    cp -rf docs/* "$HOME/.config/minicut/docs/"
+    mkdir -p "$DATA_DIR/docs"
+    cp -rf docs/* "$DATA_DIR/docs/"
+fi
+
 # Refresh desktop, MIME, and icon databases
 if command -v update-mime-database > /dev/null 2>&1; then
     update-mime-database "$MIME_BASE_DIR" 2>/dev/null || true

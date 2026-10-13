@@ -137,4 +137,5 @@ private:
     bool m_use_system_file_dialog = true;
     std::string m_status_notification;
     double m_status_notification_timer = 0.0;
+    float m_menu_bar_height = 0.0f;
 };

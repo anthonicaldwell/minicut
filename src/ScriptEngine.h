@@ -38,7 +38,9 @@ public:
               std::function<void()> on_project_modified = nullptr,
               std::function<void(double)> on_set_playhead = nullptr,
               std::function<void(const std::string&, double)> on_set_status = nullptr,
-              std::function<void(const std::string&)> on_select_clip = nullptr);
+              std::function<void(const std::string&)> on_select_clip = nullptr,
+              std::function<bool(const std::string&)> on_save_project = nullptr,
+              std::function<bool(const std::string&)> on_load_project = nullptr);
 
     void shutdown();
 
@@ -50,11 +52,12 @@ public:
 
     // Frame update & UI Rendering
     void update(double delta_time);
-    void render_maya_shelf();
+    void render_maya_shelf(float menu_h = 0.0f);
     void render_scripts_menu();
     void render_script_panels(float total_w, float total_h, float top_offset);
 
     float get_shelf_height() const { return m_shelf_height; }
+    void set_shelf_height(float h) { m_shelf_height = h; }
     bool is_shelf_visible() const { return m_shelf_visible; }
     void set_shelf_visible(bool visible) { m_shelf_visible = visible; }
 
@@ -149,6 +152,8 @@ private:
     static int lua_clip_get_info(lua_State* L);
 
     // Project & Minicut
+    static int lua_project_save(lua_State* L);
+    static int lua_project_load(lua_State* L);
     static int lua_project_import_video(lua_State* L);
     static int lua_project_import_audio(lua_State* L);
     static int lua_project_import_image(lua_State* L);
@@ -157,6 +162,13 @@ private:
     static int lua_minicut_log(lua_State* L);
     static int lua_minicut_set_status(lua_State* L);
     static int lua_minicut_push_undo(lua_State* L);
+
+    // Net API (HTTP requests, file downloads, file uploads)
+    static int lua_net_get(lua_State* L);
+    static int lua_net_post(lua_State* L);
+    static int lua_net_download(lua_State* L);
+    static int lua_net_upload(lua_State* L);
+    static int lua_net_request(lua_State* L);
 
     lua_State* m_L = nullptr;
 
@@ -171,6 +183,8 @@ private:
     std::function<void(double)> m_on_set_playhead;
     std::function<void(const std::string&, double)> m_on_set_status;
     std::function<void(const std::string&)> m_on_select_clip;
+    std::function<bool(const std::string&)> m_on_save_project;
+    std::function<bool(const std::string&)> m_on_load_project;
 
     std::vector<ScriptItem> m_autorun_scripts;
     std::vector<ScriptItem> m_menu_scripts;
@@ -179,7 +193,7 @@ private:
     std::string m_autorun_dir;
     std::string m_icons_dir;
 
-    float m_shelf_height = 36.0f;
+    float m_shelf_height = 44.0f;
     bool m_shelf_visible = true;
 
     std::string m_current_render_script_id;

@@ -63,11 +63,14 @@ void LocaleManager::init(const std::string& locales_dir) {
         }
     }
 
+    if (m_current_locale.empty()) {
+        m_current_locale = "en";
+    }
     set_locale(m_current_locale);
 }
 
 bool LocaleManager::set_locale(const std::string& lang_code) {
-    std::string code = lang_code;
+    std::string code = lang_code.empty() ? "en" : lang_code;
     if (code == "jp") code = "ja"; // Alias support
 
     m_current_locale = code;
