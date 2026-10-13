@@ -215,6 +215,44 @@
 - **Context-Aware Pasting (BUG 3 Fixed)**:
   - Pasting (`Ctrl+V` or right-click "Paste") pastes clips into the hovered or context-clicked track lane rather than defaulting to track 0.
 
+### R. Track Control Section Resizability & Clipping Fix (`src/Timeline.h`, `src/Timeline.cpp`)
+- **Interactive Horizontal Splitter**:
+  - Track control header width is now dynamic (`m_track_header_w`, clamped between 80px and 400px, default 145px).
+  - Users can resize the track header horizontally by dragging the vertical splitter line between the track headers and timeline lanes.
+  - Changes are persisted in `~/.config/minicut/settings.json` (`track_header_w`).
+- **No Canvas Bleed/Overlap**:
+  - Track header controls (`M`, `S`, `Z:%d`, name) are strictly clipped using `draw_list->PushClipRect` so they never bleed into or overlap timeline lanes even when resized to narrow dimensions.
+
+### S. LuaJIT Scripting Subsystem, Maya-Style Shelf Dock & MEL Panels (`src/ScriptEngine.h`, `src/ScriptEngine.cpp`)
+- **Embedded LuaJIT Engine**:
+  - Full Lua 5.1 / LuaJIT scripting runtime embedded into minicut.
+  - Comprehensive LuaAPI exposed to scripts:
+    - `gui.*`: ImGui UI elements (`gui.button`, `gui.text`, `gui.slider_float`, `gui.drag_float`, `gui.input_text`, `gui.checkbox`, `gui.same_line`, `gui.separator`, etc.).
+    - `timeline.*`: Clip placement (`place_clip(path, track, time, duration)`), playhead navigation, track queries.
+    - `clip.*`: Clip transform and property controls (`set_pos`, `get_pos`, `set_scale`, `get_scale`, `set_rotation`, `set_opacity`, `set_volume`).
+    - `clip.add_keyframe` / `clip.remove_keyframe`: Keyframe animation access directly from scripts.
+- **MEL-Style Script Architecture**:
+  - Base script pattern supported:
+    ```lua
+    function logic_callback()
+        -- timeline and clip manipulation logic
+    end
+
+    function plugin:init_panel()
+        -- GUI controls
+        gui.button("Execute Action", logic_callback)
+    end
+    ```
+  - Executed scripts automatically spawn dockable panels to the right of the preview and timeline panels.
+- **Maya-Style Shelf Dock**:
+  - Rendered horizontally directly below the main menu bar.
+  - Scripts located in `~/.config/minicut/autorun/` are loaded at startup and create an icon button on the dock. Clicking runs the script and opens its tool panel.
+  - Custom PNG icons loaded from `~/.config/minicut/icons/<script_name>.png`, with stylish 2-letter fallback badges.
+- **Top-Level Scripts Menu**:
+  - Scripts placed in `~/.config/minicut/scripts/` automatically populate the top-level **Scripts** menu in the main menu bar.
+- **Automated Directory Deployment**:
+  - Installer (`./install.sh`) installs scripts, autorun scripts, and shelf icons to both `~/.config/minicut/` and system/user data directories.
+
 ---
 
 ## 5. Build, Test, and Execution Commands
@@ -234,13 +272,14 @@ cmake --build build -j$(nproc)
 ```bash
 ./build/test_minicut
 ```
-*(All 16 unit, integration, and pipeline tests passing)*
+*(All 18 unit, integration, and pipeline tests passing)*
 
 ### Installation & Uninstallation
 ```bash
-# Install to ~/.local (binary, desktop launcher, icons, MIME types, locales):
+# Install to ~/.local (binary, desktop launcher, icons, MIME types, locales, scripts):
 ./install.sh --user
 
 # Cleanly uninstall minicut core files (leaves system dependencies intact):
 ./uninstall.sh
 ```
+
