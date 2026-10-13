@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=minicut
+GenericName=Video Editor
+Comment=Lightweight Multi-Track Desktop Video Editor
+Exec=minicut %F
+Icon=minicut
+Terminal=false
+Categories=AudioVideo;Video;AudioVideoEditing;Qt;KDE;
+MimeType=application/x-minicut;video/mp4;video/x-matroska;video/quicktime;
+Keywords=video;editor;cut;clip;ffmpeg;render;multitrack;
+StartupWMClass=minicut
+StartupNotify=true

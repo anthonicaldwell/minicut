@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mime-info xmlns="http://www.freedesktop.org/standards/shared-mime-info">
+    <mime-type type="application/x-minicut">
+        <comment>minicut Project</comment>
+        <comment xml:lang="en">minicut Project</comment>
+        <glob pattern="*.minicut"/>
+        <icon name="minicut"/>
+    </mime-type>
+</mime-info>
