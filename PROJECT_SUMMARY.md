@@ -301,22 +301,43 @@
   - Dragging multiple clips moves all selected clips together while maintaining their relative temporal offsets.
   - Batch operations: delete selected clips (`Delete` / `Backspace`), copy/cut, and scriptable via `timeline.get_selected_clips()`, `timeline.select_clips(ids)`, and `timeline.clear_selection()`.
 
-### Y. FreeType Text Asset Generator & Timeline Placement (`src/TextGenerator.h`, `src/App.cpp`)
-- **Interactive Text Dialog**:
-  - FreeType 2 and `FT_Stroker` outline text generation engine.
+### Y. FreeType Text Asset Generator & Multilingual Live Preview (`src/TextGenerator.h`, `src/App.cpp`)
+- **Interactive Multilingual Text Dialog**:
+  - FreeType 2 and `FT_Stroker` outline text generation engine with automatic CJK fallback fonts (`NotoSansCJK`, `DroidSansFallbackFull`).
+  - Multiline text entry with instant Arabic cursive RTL shaping and live typing preview (preview texture updates actively on every keystroke).
+  - Renders valid non-empty bitmaps to asset pool and timeline clips.
   - Interactive popup modal (`+ Text` button or menu item):
     - System font family detection and selection.
     - Font point size, text color picker, background box toggle and color, outline toggle, outline color and width slider.
     - Letter spacing, line spacing, and justification (Left, Center, Right).
-    - Multiline text entry with instant Arabic RTL shaping.
-    - Real-time OpenGL texture preview.
     - "Add to Assets" exports transparent PNG to asset library.
     - "Add to Timeline" creates asset and places clip at current playhead on active video track.
   - Fully scriptable via `assets.create_text(text, opts)` and `timeline.place_text_clip(text, track, [time], [duration], [opts])`.
 
-### Z. View Splitters Over Dialogs Bug Fix (`src/App.cpp`)
-- **Suppressed View Handles**:
-  - View splitters (docking separator bars) automatically suppress drawing and interaction whenever any modal, popup, file browser, or dialog is active, preventing split handles from appearing over active dialog windows.
+### Z. JavaScript Scripting Engine (Duktape 2.7.0) (`src/ScriptEngine.cpp`, `src/ScriptEngine.h`)
+- **Complete Dual-Language Scripting Engine**:
+  - Embedded Duktape 2.7.0 JavaScript engine running alongside LuaJIT 2.1.
+  - Native UTF-8 Unicode string support, providing a robust solution for multi-lingual automation.
+  - Full API parity across all modules (`gui`, `timeline`, `clip`, `project`, `assets`, `minicut`, `console`, `net`).
+  - Supports `.js` plugins in both `~/.config/minicut/autorun/` and `~/.config/minicut/scripts/`.
+
+### AA. Dock Shelf Renaming & Localization
+- Renamed "Shelf" header to "Dock" (localized: "DOCK" in English, "ドック" in Japanese, "도크" in Korean, "ДОК" in Ukrainian, "منصة" in Arabic) with the `#3daee9` blue accent color preserved.
+
+### BB. Comprehensive Multi-Lingual API Documentation
+- Automatic documentation generation (`tools/generate_docs.py`) generating both HTML and high-quality printable PDF manuals via LibreOffice:
+  - `minicut_lua_api.pdf` (English LuaJIT API reference)
+  - `minicut_lua_api_ja.pdf` (Japanese LuaJIT API reference)
+  - `minicut_js_api.pdf` (English JavaScript API reference)
+  - `minicut_js_api_ja.pdf` (Japanese JavaScript API reference)
+- Deployed to `~/.config/minicut/docs/` and integrated into the Help menu (`Help -> Lua Script API (PDF)` / `Help -> JavaScript API (PDF)`), automatically opening the Japanese document when Japanese language is selected.
+
+### CC. Additional Enhancements
+- **View Splitter Suppression**: Split handles and docking dividers are suppressed whenever any modal, popup, file browser, text editor, or export dialog is active.
+- **Clickable Directories**: Clicking folders under `Scripts -> Directories` opens the respective directory in the desktop file manager (`xdg-open`).
+- **OGG, OGV, and OGM Format Support**: Support added for `.ogv` (video), `.ogm` (video), and `.ogg` (audio) in file filters, drag-and-drop import, and desktop MIME types.
+- **Window Title Bar**: Dynamically updates to `"Minicut - <Project Title>"` or `"Minicut - New Project"`.
+- **System Portability**: Clean CMake configuration with multi-arch library detection for Debian/Ubuntu, Arch, Fedora, openSUSE, x86_64, and ARM64. Displays "Built for Linux" and `minicut v1.2.0` in Help/About.
 
 ---
 
@@ -337,7 +358,12 @@ cmake --build build -j$(nproc)
 ```bash
 ./build/test_minicut
 ```
-*(All 23 unit, integration, and pipeline tests passing)*
+*(All 27 unit, integration, and pipeline tests passing)*
+
+### Generating API Documentation
+```bash
+python3 tools/generate_docs.py
+```
 
 ### Installation & Uninstallation
 ```bash
@@ -347,4 +373,5 @@ cmake --build build -j$(nproc)
 # Cleanly uninstall minicut core files (leaves system dependencies intact):
 ./uninstall.sh
 ```
+
 
