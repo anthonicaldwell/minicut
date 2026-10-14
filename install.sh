@@ -43,18 +43,18 @@ done
 if [ "$INSTALL_MODE" = "system" ]; then
     BIN_DIR="/usr/local/bin"
     APP_DIR="/usr/local/share/applications"
-    ICON_DIR="/usr/local/share/icons/hicolor/256x256/apps"
     MIME_DIR="/usr/local/share/mime/packages"
     MIME_BASE_DIR="/usr/local/share/mime"
     ICON_BASE_DIR="/usr/local/share/icons/hicolor"
+    PIXMAPS_DIR="/usr/local/share/pixmaps"
     DATA_DIR="/usr/local/share/minicut"
 else
     BIN_DIR="$HOME/.local/bin"
     APP_DIR="$HOME/.local/share/applications"
-    ICON_DIR="$HOME/.local/share/icons/hicolor/256x256/apps"
     MIME_DIR="$HOME/.local/share/mime/packages"
     MIME_BASE_DIR="$HOME/.local/share/mime"
     ICON_BASE_DIR="$HOME/.local/share/icons/hicolor"
+    PIXMAPS_DIR="$HOME/.local/share/pixmaps"
     DATA_DIR="$HOME/.local/share/minicut"
 fi
 
@@ -72,7 +72,8 @@ fi
 # Ensure directories exist
 mkdir -p "$BIN_DIR"
 mkdir -p "$APP_DIR"
-mkdir -p "$ICON_DIR"
+mkdir -p "$ICON_BASE_DIR"
+mkdir -p "$PIXMAPS_DIR"
 mkdir -p "$MIME_DIR"
 
 # Install binary
@@ -80,10 +81,24 @@ echo "Installing binary to $BIN_DIR/minicut..."
 cp -f "build/minicut" "$BIN_DIR/minicut"
 chmod +x "$BIN_DIR/minicut"
 
-# Install icon
+# Install icons across standard resolutions for KDE Plasma / FreeDesktop compliance
 if [ -f "minicut.png" ]; then
-    echo "Installing icon to $ICON_DIR/minicut.png..."
-    cp -f "minicut.png" "$ICON_DIR/minicut.png"
+    echo "Installing icons to $ICON_BASE_DIR and $PIXMAPS_DIR..."
+    cp -f "minicut.png" "$PIXMAPS_DIR/minicut.png"
+    for size in 256x256 128x128 64x64 48x48 32x32; do
+        target_dir="$ICON_BASE_DIR/$size/apps"
+        mkdir -p "$target_dir"
+        if [ "$size" = "256x256" ]; then
+            cp -f "minicut.png" "$target_dir/minicut.png"
+        elif command -v convert > /dev/null 2>&1; then
+            convert "minicut.png" -resize "$size" "$target_dir/minicut.png" 2>/dev/null || cp -f "minicut.png" "$target_dir/minicut.png"
+        elif command -v ffmpeg > /dev/null 2>&1; then
+            dim="${size%x*}"
+            ffmpeg -y -i "minicut.png" -vf "scale=${dim}:${dim}" "$target_dir/minicut.png" >/dev/null 2>&1 || cp -f "minicut.png" "$target_dir/minicut.png"
+        else
+            cp -f "minicut.png" "$target_dir/minicut.png"
+        fi
+    done
 fi
 
 # Install desktop file with exact binary path for flawless launcher & task manager association
@@ -97,7 +112,7 @@ Name=minicut
 GenericName=Video Editor
 Comment=Lightweight Multi-Track Desktop Video Editor
 Exec=$BIN_DIR/minicut %F
-Icon=$ICON_DIR/minicut.png
+Icon=minicut
 Terminal=false
 Categories=AudioVideo;Video;AudioVideoEditing;Qt;KDE;
 MimeType=application/x-minicut;video/mp4;video/x-matroska;video/quicktime;video/ogg;audio/ogg;

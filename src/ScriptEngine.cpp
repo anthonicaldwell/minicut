@@ -8,6 +8,7 @@
 #include "NativeFileDialog.h"
 #include "TextGenerator.h"
 #include "LocaleManager.h"
+#include "SettingsLogic.h"
 #include "imgui.h"
 #include <curl/curl.h>
 #include <iostream>
@@ -204,20 +205,42 @@ void ScriptEngine::scan_directories() {
 
 void ScriptEngine::load_autorun_icons() {
     std::error_code ec;
+    const char* home = std::getenv("HOME");
+    std::vector<std::string> search_dirs = {
+        m_icons_dir,
+        m_autorun_dir,
+        m_scripts_dir
+    };
+    if (home) {
+        search_dirs.push_back(std::string(home) + "/.local/share/minicut/icons");
+    }
+    search_dirs.push_back("/usr/local/share/minicut/icons");
+    search_dirs.push_back("/usr/share/minicut/icons");
+    search_dirs.push_back("icons");
+
     for (auto& item : m_autorun_scripts) {
-        std::vector<std::string> candidates = {
-            m_icons_dir + "/" + item.id + ".png",
-            m_icons_dir + "/" + item.id + ".jpg",
-            m_icons_dir + "/" + item.id + ".jpeg"
-        };
-        for (const auto& icon_path : candidates) {
-            if (fs::exists(icon_path, ec)) {
-                GLuint tex = MediaDecoder::create_thumbnail_texture(icon_path, 0.0);
-                if (tex != 0) {
-                    item.icon_texture = tex;
-                    break;
+        item.icon_checked = true;
+        if (item.icon_texture != 0) continue;
+
+        for (const auto& dir : search_dirs) {
+            std::vector<std::string> candidates = {
+                dir + "/" + item.id + ".png",
+                dir + "/" + item.id + ".jpg",
+                dir + "/" + item.id + ".jpeg",
+                dir + "/" + item.filename + ".png"
+            };
+            bool loaded = false;
+            for (const auto& icon_path : candidates) {
+                if (fs::exists(icon_path, ec)) {
+                    GLuint tex = MediaDecoder::create_thumbnail_texture(icon_path, 0.0);
+                    if (tex != 0) {
+                        item.icon_texture = tex;
+                        loaded = true;
+                        break;
+                    }
                 }
             }
+            if (loaded) break;
         }
     }
 }
@@ -338,12 +361,15 @@ void ScriptEngine::render_shelf_dock(float menu_h) {
                              ImGuiWindowFlags_NoMove |
                              ImGuiWindowFlags_NoScrollbar |
                              ImGuiWindowFlags_NoScrollWithMouse |
-                             ImGuiWindowFlags_NoSavedSettings;
+                             ImGuiWindowFlags_NoSavedSettings |
+                             ImGuiWindowFlags_NoBringToFrontOnFocus;
 
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8.0f, 6.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(6.0f, 4.0f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.13f, 0.14f, 0.16f, 1.0f));
+    bool is_light = SettingsLogic::instance().get_light_theme();
+    ImVec4 dock_bg = is_light ? ImVec4(0.92f, 0.93f, 0.94f, 1.0f) : ImVec4(0.13f, 0.14f, 0.16f, 1.0f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, dock_bg);
 
     if (ImGui::Begin("##ToolShelfDock", nullptr, flags)) {
         // Dock Header Label
@@ -357,6 +383,17 @@ void ScriptEngine::render_shelf_dock(float menu_h) {
             ImGui::AlignTextToFramePadding();
             ImGui::TextDisabled("No autorun scripts in ~/.config/minicut/autorun/");
         } else {
+            bool needs_load = false;
+            for (const auto& s : m_autorun_scripts) {
+                if (!s.icon_checked && s.icon_texture == 0) {
+                    needs_load = true;
+                    break;
+                }
+            }
+            if (needs_load) {
+                load_autorun_icons();
+            }
+
             for (auto& script : m_autorun_scripts) {
                 ImGui::PushID(script.id.c_str());
 
@@ -612,6 +649,12 @@ void ScriptEngine::register_lua_api() {
     lua_pushcfunction(m_L, lua_gui_file_dialog);         lua_setfield(m_L, -2, "file_dialog");
     lua_pushcfunction(m_L, lua_gui_native_file_dialog);  lua_setfield(m_L, -2, "native_file_dialog");
     lua_pushcfunction(m_L, lua_gui_builtin_file_dialog); lua_setfield(m_L, -2, "builtin_file_dialog");
+    lua_pushcfunction(m_L, lua_gui_popout_preview);      lua_setfield(m_L, -2, "popout_preview");
+    lua_pushcfunction(m_L, lua_gui_is_preview_popped_out); lua_setfield(m_L, -2, "is_preview_popped_out");
+    lua_pushcfunction(m_L, lua_gui_set_preview_aspect_mode); lua_setfield(m_L, -2, "set_preview_aspect_mode");
+    lua_pushcfunction(m_L, lua_gui_get_preview_aspect_mode); lua_setfield(m_L, -2, "get_preview_aspect_mode");
+    lua_pushcfunction(m_L, lua_gui_set_transform_tool);  lua_setfield(m_L, -2, "set_transform_tool");
+    lua_pushcfunction(m_L, lua_gui_get_transform_tool);  lua_setfield(m_L, -2, "get_transform_tool");
     lua_setglobal(m_L, "gui");
 
     // 2. `timeline` Table
@@ -663,6 +706,9 @@ void ScriptEngine::register_lua_api() {
     lua_pushcfunction(m_L, lua_clip_get_time);     lua_setfield(m_L, -2, "get_time");
     lua_pushcfunction(m_L, lua_clip_set_time);     lua_setfield(m_L, -2, "set_time");
     lua_pushcfunction(m_L, lua_clip_get_info);     lua_setfield(m_L, -2, "get_info");
+    lua_pushcfunction(m_L, lua_clip_get_transform); lua_setfield(m_L, -2, "get_transform");
+    lua_pushcfunction(m_L, lua_clip_set_transform); lua_setfield(m_L, -2, "set_transform");
+    lua_pushcfunction(m_L, lua_clip_reset_transform); lua_setfield(m_L, -2, "reset_transform");
     lua_setglobal(m_L, "clip");
 
     // 4. `project` Table
@@ -702,7 +748,15 @@ void ScriptEngine::register_lua_api() {
     lua_pushcfunction(m_L, lua_net_request);  lua_setfield(m_L, -2, "request");
     lua_setglobal(m_L, "net");
 
-    // 8. Global default `plugin` Table
+    // 8. `export` Table (Audio mixing progress, video rendering progress, status)
+    lua_newtable(m_L);
+    lua_pushcfunction(m_L, lua_export_get_audio_progress); lua_setfield(m_L, -2, "get_audio_progress");
+    lua_pushcfunction(m_L, lua_export_get_progress);       lua_setfield(m_L, -2, "get_progress");
+    lua_pushcfunction(m_L, lua_export_is_exporting);       lua_setfield(m_L, -2, "is_exporting");
+    lua_pushcfunction(m_L, lua_export_get_status);         lua_setfield(m_L, -2, "get_status");
+    lua_setglobal(m_L, "export");
+
+    // 9. Global default `plugin` Table
     lua_newtable(m_L);
     lua_pushstring(m_L, "default"); lua_setfield(m_L, -2, "id");
     lua_pushstring(m_L, "Default Plugin"); lua_setfield(m_L, -2, "title");
@@ -1557,6 +1611,127 @@ int ScriptEngine::lua_clip_get_info(lua_State* L) {
     return 1;
 }
 
+int ScriptEngine::lua_clip_get_transform(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        lua_newtable(L);
+        return 1;
+    }
+    const char* clip_id = luaL_checkstring(L, 1);
+    const Clip* c = s_engine_instance->m_project->find_clip(clip_id);
+    lua_newtable(L);
+    if (c) {
+        lua_pushnumber(L, c->pos_x);    lua_setfield(L, -2, "x");
+        lua_pushnumber(L, c->pos_y);    lua_setfield(L, -2, "y");
+        lua_pushnumber(L, c->scale);    lua_setfield(L, -2, "scale");
+        lua_pushnumber(L, c->rotation); lua_setfield(L, -2, "rotation");
+    }
+    return 1;
+}
+
+int ScriptEngine::lua_clip_set_transform(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_project) return 0;
+    const char* clip_id = luaL_checkstring(L, 1);
+    Clip* c = s_engine_instance->m_project->find_clip_mut(clip_id);
+    if (c) {
+        s_engine_instance->push_undo_state();
+        double rel_t = c->clip_relative_time(s_engine_instance->get_playhead_time());
+        if (lua_isnumber(L, 2)) {
+            c->pos_x = lua_tonumber(L, 2);
+            if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "pos_x").empty()) {
+                s_engine_instance->m_project->set_or_add_keyframe(c->id, "pos_x", rel_t, c->pos_x);
+            }
+        }
+        if (lua_isnumber(L, 3)) {
+            c->pos_y = lua_tonumber(L, 3);
+            if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "pos_y").empty()) {
+                s_engine_instance->m_project->set_or_add_keyframe(c->id, "pos_y", rel_t, c->pos_y);
+            }
+        }
+        if (lua_isnumber(L, 4)) {
+            c->scale = std::max(0.01, lua_tonumber(L, 4));
+            if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "scale").empty()) {
+                s_engine_instance->m_project->set_or_add_keyframe(c->id, "scale", rel_t, c->scale);
+            }
+        }
+        if (lua_isnumber(L, 5)) {
+            c->rotation = lua_tonumber(L, 5);
+            if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "rotation").empty()) {
+                s_engine_instance->m_project->set_or_add_keyframe(c->id, "rotation", rel_t, c->rotation);
+            }
+        }
+        s_engine_instance->notify_project_modified();
+    }
+    return 0;
+}
+
+int ScriptEngine::lua_clip_reset_transform(lua_State* L) {
+    if (!s_engine_instance || !s_engine_instance->m_project) return 0;
+    const char* clip_id = luaL_checkstring(L, 1);
+    Clip* c = s_engine_instance->m_project->find_clip_mut(clip_id);
+    if (c) {
+        s_engine_instance->push_undo_state();
+        double rel_t = c->clip_relative_time(s_engine_instance->get_playhead_time());
+        c->pos_x = 0.0;
+        c->pos_y = 0.0;
+        c->scale = 1.0;
+        c->rotation = 0.0;
+        if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "pos_x").empty()) {
+            s_engine_instance->m_project->set_or_add_keyframe(c->id, "pos_x", rel_t, 0.0);
+        }
+        if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "pos_y").empty()) {
+            s_engine_instance->m_project->set_or_add_keyframe(c->id, "pos_y", rel_t, 0.0);
+        }
+        if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "scale").empty()) {
+            s_engine_instance->m_project->set_or_add_keyframe(c->id, "scale", rel_t, 1.0);
+        }
+        if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "rotation").empty()) {
+            s_engine_instance->m_project->set_or_add_keyframe(c->id, "rotation", rel_t, 0.0);
+        }
+        s_engine_instance->notify_project_modified();
+    }
+    return 0;
+}
+
+// ----------------------------------------------------------------------------
+// Export Progress & Status Lua APIs
+// ----------------------------------------------------------------------------
+
+int ScriptEngine::lua_export_get_audio_progress(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        lua_pushnumber(L, s_engine_instance->m_app->get_export_manager().get_audio_progress());
+    } else {
+        lua_pushnumber(L, 0.0);
+    }
+    return 1;
+}
+
+int ScriptEngine::lua_export_get_progress(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        lua_pushnumber(L, s_engine_instance->m_app->get_export_manager().get_progress());
+    } else {
+        lua_pushnumber(L, 0.0);
+    }
+    return 1;
+}
+
+int ScriptEngine::lua_export_is_exporting(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        lua_pushboolean(L, s_engine_instance->m_app->get_export_manager().is_exporting());
+    } else {
+        lua_pushboolean(L, false);
+    }
+    return 1;
+}
+
+int ScriptEngine::lua_export_get_status(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        lua_pushstring(L, s_engine_instance->m_app->get_export_manager().get_status_text().c_str());
+    } else {
+        lua_pushstring(L, "Idle");
+    }
+    return 1;
+}
+
 // ----------------------------------------------------------------------------
 // Project & Minicut Utilities C-API
 // ----------------------------------------------------------------------------
@@ -2374,6 +2549,65 @@ int ScriptEngine::lua_gui_file_dialog(lua_State* L) {
     }
 }
 
+int ScriptEngine::lua_gui_popout_preview(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        bool pop = lua_toboolean(L, 1);
+        s_engine_instance->m_app->set_preview_popped_out(pop);
+    }
+    return 0;
+}
+
+int ScriptEngine::lua_gui_is_preview_popped_out(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        lua_pushboolean(L, s_engine_instance->m_app->is_preview_popped_out());
+    } else {
+        lua_pushboolean(L, false);
+    }
+    return 1;
+}
+
+int ScriptEngine::lua_gui_set_preview_aspect_mode(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        int idx = static_cast<int>(luaL_checkinteger(L, 1));
+        s_engine_instance->m_app->set_preview_aspect_idx(idx);
+    }
+    return 0;
+}
+
+int ScriptEngine::lua_gui_get_preview_aspect_mode(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        lua_pushinteger(L, s_engine_instance->m_app->get_preview_aspect_idx());
+    } else {
+        lua_pushinteger(L, 0);
+    }
+    return 1;
+}
+
+int ScriptEngine::lua_gui_set_transform_tool(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        const char* tool_str = luaL_checkstring(L, 1);
+        if (tool_str) {
+            std::string s = tool_str;
+            std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+            if (s == "none" || s == "off" || s == "false" || s == "0") {
+                s_engine_instance->m_app->set_preview_transform_enabled(false);
+            } else {
+                s_engine_instance->m_app->set_preview_transform_enabled(true);
+            }
+        }
+    }
+    return 0;
+}
+
+int ScriptEngine::lua_gui_get_transform_tool(lua_State* L) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        lua_pushstring(L, s_engine_instance->m_app->is_preview_transform_enabled() ? "transform" : "none");
+    } else {
+        lua_pushstring(L, "transform");
+    }
+    return 1;
+}
+
 // ----------------------------------------------------------------------------
 // Timeline Multi-Selection & Track Management Lua APIs
 // ----------------------------------------------------------------------------
@@ -3041,6 +3275,65 @@ duk_ret_t ScriptEngine::js_gui_builtin_file_dialog(duk_context* ctx) {
     return js_gui_file_dialog(ctx);
 }
 
+duk_ret_t ScriptEngine::js_gui_popout_preview(duk_context* ctx) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        bool pop = duk_get_boolean(ctx, 0);
+        s_engine_instance->m_app->set_preview_popped_out(pop);
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_is_preview_popped_out(duk_context* ctx) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        duk_push_boolean(ctx, s_engine_instance->m_app->is_preview_popped_out());
+    } else {
+        duk_push_boolean(ctx, false);
+    }
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_gui_set_preview_aspect_mode(duk_context* ctx) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        int idx = duk_get_int(ctx, 0);
+        s_engine_instance->m_app->set_preview_aspect_idx(idx);
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_get_preview_aspect_mode(duk_context* ctx) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        duk_push_int(ctx, s_engine_instance->m_app->get_preview_aspect_idx());
+    } else {
+        duk_push_int(ctx, 0);
+    }
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_gui_set_transform_tool(duk_context* ctx) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        const char* tool_str = duk_get_string(ctx, 0);
+        if (tool_str) {
+            std::string s = tool_str;
+            std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+            if (s == "none" || s == "off" || s == "false" || s == "0") {
+                s_engine_instance->m_app->set_preview_transform_enabled(false);
+            } else {
+                s_engine_instance->m_app->set_preview_transform_enabled(true);
+            }
+        }
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_get_transform_tool(duk_context* ctx) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        duk_push_string(ctx, s_engine_instance->m_app->is_preview_transform_enabled() ? "transform" : "none");
+    } else {
+        duk_push_string(ctx, "transform");
+    }
+    return 1;
+}
+
 // ----------------------------------------------------------------------------
 // JS Timeline Dispatchers
 // ----------------------------------------------------------------------------
@@ -3675,6 +3968,127 @@ duk_ret_t ScriptEngine::js_clip_get_info(duk_context* ctx) {
     return 1;
 }
 
+duk_ret_t ScriptEngine::js_clip_get_transform(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        duk_push_object(ctx);
+        return 1;
+    }
+    const char* clip_id = duk_get_string(ctx, 0);
+    const Clip* c = clip_id ? s_engine_instance->m_project->find_clip(clip_id) : nullptr;
+    duk_push_object(ctx);
+    if (c) {
+        duk_push_number(ctx, c->pos_x);    duk_put_prop_string(ctx, -2, "x");
+        duk_push_number(ctx, c->pos_y);    duk_put_prop_string(ctx, -2, "y");
+        duk_push_number(ctx, c->scale);    duk_put_prop_string(ctx, -2, "scale");
+        duk_push_number(ctx, c->rotation); duk_put_prop_string(ctx, -2, "rotation");
+    }
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_clip_set_transform(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) return 0;
+    const char* clip_id = duk_get_string(ctx, 0);
+    Clip* c = clip_id ? s_engine_instance->m_project->find_clip_mut(clip_id) : nullptr;
+    if (c) {
+        s_engine_instance->push_undo_state();
+        double rel_t = c->clip_relative_time(s_engine_instance->get_playhead_time());
+        if (duk_is_number(ctx, 1)) {
+            c->pos_x = duk_get_number(ctx, 1);
+            if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "pos_x").empty()) {
+                s_engine_instance->m_project->set_or_add_keyframe(c->id, "pos_x", rel_t, c->pos_x);
+            }
+        }
+        if (duk_is_number(ctx, 2)) {
+            c->pos_y = duk_get_number(ctx, 2);
+            if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "pos_y").empty()) {
+                s_engine_instance->m_project->set_or_add_keyframe(c->id, "pos_y", rel_t, c->pos_y);
+            }
+        }
+        if (duk_is_number(ctx, 3)) {
+            c->scale = std::max(0.01, duk_get_number(ctx, 3));
+            if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "scale").empty()) {
+                s_engine_instance->m_project->set_or_add_keyframe(c->id, "scale", rel_t, c->scale);
+            }
+        }
+        if (duk_is_number(ctx, 4)) {
+            c->rotation = duk_get_number(ctx, 4);
+            if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "rotation").empty()) {
+                s_engine_instance->m_project->set_or_add_keyframe(c->id, "rotation", rel_t, c->rotation);
+            }
+        }
+        s_engine_instance->notify_project_modified();
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_clip_reset_transform(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) return 0;
+    const char* clip_id = duk_get_string(ctx, 0);
+    Clip* c = clip_id ? s_engine_instance->m_project->find_clip_mut(clip_id) : nullptr;
+    if (c) {
+        s_engine_instance->push_undo_state();
+        double rel_t = c->clip_relative_time(s_engine_instance->get_playhead_time());
+        c->pos_x = 0.0;
+        c->pos_y = 0.0;
+        c->scale = 1.0;
+        c->rotation = 0.0;
+        if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "pos_x").empty()) {
+            s_engine_instance->m_project->set_or_add_keyframe(c->id, "pos_x", rel_t, 0.0);
+        }
+        if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "pos_y").empty()) {
+            s_engine_instance->m_project->set_or_add_keyframe(c->id, "pos_y", rel_t, 0.0);
+        }
+        if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "scale").empty()) {
+            s_engine_instance->m_project->set_or_add_keyframe(c->id, "scale", rel_t, 1.0);
+        }
+        if (!s_engine_instance->m_project->get_clip_keyframes(c->id, "rotation").empty()) {
+            s_engine_instance->m_project->set_or_add_keyframe(c->id, "rotation", rel_t, 0.0);
+        }
+        s_engine_instance->notify_project_modified();
+    }
+    return 0;
+}
+
+// ----------------------------------------------------------------------------
+// JS Export Dispatchers
+// ----------------------------------------------------------------------------
+
+duk_ret_t ScriptEngine::js_export_get_audio_progress(duk_context* ctx) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        duk_push_number(ctx, s_engine_instance->m_app->get_export_manager().get_audio_progress());
+    } else {
+        duk_push_number(ctx, 0.0);
+    }
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_export_get_progress(duk_context* ctx) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        duk_push_number(ctx, s_engine_instance->m_app->get_export_manager().get_progress());
+    } else {
+        duk_push_number(ctx, 0.0);
+    }
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_export_is_exporting(duk_context* ctx) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        duk_push_boolean(ctx, s_engine_instance->m_app->get_export_manager().is_exporting());
+    } else {
+        duk_push_boolean(ctx, false);
+    }
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_export_get_status(duk_context* ctx) {
+    if (s_engine_instance && s_engine_instance->m_app) {
+        duk_push_string(ctx, s_engine_instance->m_app->get_export_manager().get_status_text().c_str());
+    } else {
+        duk_push_string(ctx, "Idle");
+    }
+    return 1;
+}
+
 // ----------------------------------------------------------------------------
 // JS Project & Assets Dispatchers
 // ----------------------------------------------------------------------------
@@ -4030,6 +4444,12 @@ void ScriptEngine::register_js_api() {
     reg_fn("file_dialog", js_gui_file_dialog, 1);
     reg_fn("native_file_dialog", js_gui_native_file_dialog, 1);
     reg_fn("builtin_file_dialog", js_gui_builtin_file_dialog, 1);
+    reg_fn("popout_preview", js_gui_popout_preview, 1);
+    reg_fn("is_preview_popped_out", js_gui_is_preview_popped_out, 0);
+    reg_fn("set_preview_aspect_mode", js_gui_set_preview_aspect_mode, 1);
+    reg_fn("get_preview_aspect_mode", js_gui_get_preview_aspect_mode, 0);
+    reg_fn("set_transform_tool", js_gui_set_transform_tool, 1);
+    reg_fn("get_transform_tool", js_gui_get_transform_tool, 0);
     duk_put_global_string(m_ctx, "gui");
 
     // 2. timeline
@@ -4079,6 +4499,9 @@ void ScriptEngine::register_js_api() {
     reg_fn("get_time", js_clip_get_time, 1);
     reg_fn("set_time", js_clip_set_time, 4);
     reg_fn("get_info", js_clip_get_info, 1);
+    reg_fn("get_transform", js_clip_get_transform, 1);
+    reg_fn("set_transform", js_clip_set_transform, 5);
+    reg_fn("reset_transform", js_clip_reset_transform, 1);
     duk_put_global_string(m_ctx, "clip");
 
     // 4. project
@@ -4125,7 +4548,25 @@ void ScriptEngine::register_js_api() {
     reg_fn("request", js_net_request, 1);
     duk_put_global_string(m_ctx, "net");
 
-    // 8. default plugin object
+    // 8. export (also alias as exporter & minicut.export for reserved keyword safety in JS)
+    duk_push_object(m_ctx);
+    reg_fn("get_audio_progress", js_export_get_audio_progress, 0);
+    reg_fn("get_progress", js_export_get_progress, 0);
+    reg_fn("is_exporting", js_export_is_exporting, 0);
+    reg_fn("get_status", js_export_get_status, 0);
+    duk_dup_top(m_ctx);
+    duk_put_global_string(m_ctx, "export");
+    duk_dup_top(m_ctx);
+    duk_put_global_string(m_ctx, "exporter");
+    duk_get_global_string(m_ctx, "minicut");
+    if (duk_is_object(m_ctx, -1)) {
+        duk_dup(m_ctx, -2);
+        duk_put_prop_string(m_ctx, -2, "export");
+    }
+    duk_pop(m_ctx);
+    duk_pop(m_ctx);
+
+    // 9. default plugin object
     duk_push_object(m_ctx);
     duk_push_string(m_ctx, "default"); duk_put_prop_string(m_ctx, -2, "id");
     duk_push_string(m_ctx, "Default Plugin"); duk_put_prop_string(m_ctx, -2, "title");

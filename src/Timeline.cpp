@@ -1,5 +1,6 @@
 #include "Timeline.h"
 #include "LocaleManager.h"
+#include "SettingsLogic.h"
 #include <imgui.h>
 #include <algorithm>
 #include <cmath>
@@ -7,6 +8,141 @@
 #include <filesystem>
 
 namespace fs = std::filesystem;
+
+struct TimelineThemeColors {
+    ImU32 video_fill, video_hover, video_border, video_badge;
+    ImU32 audio_fill, audio_hover, audio_border, audio_badge;
+    ImU32 subtitle_fill, subtitle_hover, subtitle_border, subtitle_badge;
+    ImU32 prefab_fill, prefab_hover, prefab_border;
+    ImU32 selection_border;
+    ImU32 playhead_color;
+};
+
+static TimelineThemeColors get_timeline_theme_colors(int colorblind_mode) {
+    TimelineThemeColors c;
+    switch (colorblind_mode) {
+    case 1: // Protanopia (Red-blind / Red-weak) - Okabe-Ito optimized
+        c.video_fill       = IM_COL32(0, 114, 178, 220);
+        c.video_hover      = IM_COL32(20, 134, 198, 240);
+        c.video_border     = IM_COL32(0, 114, 178, 255);
+        c.video_badge      = IM_COL32(0, 114, 178, 255);
+
+        c.audio_fill       = IM_COL32(230, 159, 0, 220);
+        c.audio_hover      = IM_COL32(245, 174, 20, 240);
+        c.audio_border     = IM_COL32(230, 159, 0, 255);
+        c.audio_badge      = IM_COL32(230, 159, 0, 255);
+
+        c.subtitle_fill    = IM_COL32(0, 158, 115, 220);
+        c.subtitle_hover   = IM_COL32(20, 178, 135, 240);
+        c.subtitle_border  = IM_COL32(0, 158, 115, 255);
+        c.subtitle_badge   = IM_COL32(0, 158, 115, 255);
+
+        c.prefab_fill      = IM_COL32(204, 121, 167, 220);
+        c.prefab_hover     = IM_COL32(224, 141, 187, 240);
+        c.prefab_border    = IM_COL32(204, 121, 167, 255);
+
+        c.selection_border = IM_COL32(255, 255, 255, 255);
+        c.playhead_color   = IM_COL32(230, 159, 0, 255);
+        break;
+
+    case 2: // Deuteranopia (Green-blind / Green-weak)
+        c.video_fill       = IM_COL32(0, 90, 170, 220);
+        c.video_hover      = IM_COL32(20, 110, 190, 240);
+        c.video_border     = IM_COL32(0, 90, 170, 255);
+        c.video_badge      = IM_COL32(0, 90, 170, 255);
+
+        c.audio_fill       = IM_COL32(230, 159, 0, 220);
+        c.audio_hover      = IM_COL32(245, 174, 20, 240);
+        c.audio_border     = IM_COL32(230, 159, 0, 255);
+        c.audio_badge      = IM_COL32(230, 159, 0, 255);
+
+        c.subtitle_fill    = IM_COL32(86, 180, 233, 220);
+        c.subtitle_hover   = IM_COL32(106, 200, 245, 240);
+        c.subtitle_border  = IM_COL32(86, 180, 233, 255);
+        c.subtitle_badge   = IM_COL32(86, 180, 233, 255);
+
+        c.prefab_fill      = IM_COL32(204, 121, 167, 220);
+        c.prefab_hover     = IM_COL32(224, 141, 187, 240);
+        c.prefab_border    = IM_COL32(204, 121, 167, 255);
+
+        c.selection_border = IM_COL32(240, 228, 66, 255);
+        c.playhead_color   = IM_COL32(86, 180, 233, 255);
+        break;
+
+    case 3: // Tritanopia (Blue-blind / Blue-weak)
+        c.video_fill       = IM_COL32(0, 130, 130, 220);
+        c.video_hover      = IM_COL32(20, 150, 150, 240);
+        c.video_border     = IM_COL32(0, 130, 130, 255);
+        c.video_badge      = IM_COL32(0, 130, 130, 255);
+
+        c.audio_fill       = IM_COL32(213, 94, 0, 220);
+        c.audio_hover      = IM_COL32(233, 114, 20, 240);
+        c.audio_border     = IM_COL32(213, 94, 0, 255);
+        c.audio_badge      = IM_COL32(213, 94, 0, 255);
+
+        c.subtitle_fill    = IM_COL32(204, 121, 167, 220);
+        c.subtitle_hover   = IM_COL32(224, 141, 187, 240);
+        c.subtitle_border  = IM_COL32(204, 121, 167, 255);
+        c.subtitle_badge   = IM_COL32(204, 121, 167, 255);
+
+        c.prefab_fill      = IM_COL32(70, 80, 95, 220);
+        c.prefab_hover     = IM_COL32(90, 100, 115, 240);
+        c.prefab_border    = IM_COL32(70, 80, 95, 255);
+
+        c.selection_border = IM_COL32(255, 255, 255, 255);
+        c.playhead_color   = IM_COL32(213, 94, 0, 255);
+        break;
+
+    case 4: // High Contrast
+        c.video_fill       = IM_COL32(20, 80, 220, 240);
+        c.video_hover      = IM_COL32(40, 100, 240, 255);
+        c.video_border     = IM_COL32(80, 160, 255, 255);
+        c.video_badge      = IM_COL32(80, 160, 255, 255);
+
+        c.audio_fill       = IM_COL32(0, 180, 50, 240);
+        c.audio_hover      = IM_COL32(20, 200, 70, 255);
+        c.audio_border     = IM_COL32(80, 255, 120, 255);
+        c.audio_badge      = IM_COL32(80, 255, 120, 255);
+
+        c.subtitle_fill    = IM_COL32(255, 140, 0, 240);
+        c.subtitle_hover   = IM_COL32(255, 160, 20, 255);
+        c.subtitle_border  = IM_COL32(255, 200, 50, 255);
+        c.subtitle_badge   = IM_COL32(255, 200, 50, 255);
+
+        c.prefab_fill      = IM_COL32(160, 40, 220, 240);
+        c.prefab_hover     = IM_COL32(180, 60, 240, 255);
+        c.prefab_border    = IM_COL32(220, 120, 255, 255);
+
+        c.selection_border = IM_COL32(255, 255, 0, 255);
+        c.playhead_color   = IM_COL32(255, 255, 0, 255);
+        break;
+
+    default: // 0: None / Standard Breeze Dark
+        c.video_fill       = IM_COL32(31, 98, 145, 220);
+        c.video_hover      = IM_COL32(41, 128, 185, 230);
+        c.video_border     = IM_COL32(61, 174, 233, 200);
+        c.video_badge      = IM_COL32(61, 174, 233, 255);
+
+        c.audio_fill       = IM_COL32(30, 130, 72, 220);
+        c.audio_hover      = IM_COL32(39, 174, 96, 230);
+        c.audio_border     = IM_COL32(46, 204, 113, 200);
+        c.audio_badge      = IM_COL32(46, 204, 113, 255);
+
+        c.subtitle_fill    = IM_COL32(175, 65, 0, 220);
+        c.subtitle_hover   = IM_COL32(211, 84, 0, 230);
+        c.subtitle_border  = IM_COL32(230, 126, 34, 200);
+        c.subtitle_badge   = IM_COL32(230, 126, 34, 255);
+
+        c.prefab_fill      = IM_COL32(85, 35, 125, 220);
+        c.prefab_hover     = IM_COL32(110, 50, 150, 230);
+        c.prefab_border    = IM_COL32(180, 100, 255, 220);
+
+        c.selection_border = IM_COL32(241, 196, 15, 255);
+        c.playhead_color   = IM_COL32(235, 77, 75, 255);
+        break;
+    }
+    return c;
+}
 
 Timeline::Timeline() {}
 Timeline::~Timeline() {}
@@ -55,9 +191,45 @@ void Timeline::add_track(Project& project, const std::string& type) {
 
     Track t;
     t.type = type;
-    t.name = (type == "video" ? "Video " : "Audio ") + std::to_string(next_num);
+    std::string prefix = (type == "video") ? "Video " : ((type == "subtitle") ? "Subtitle " : "Audio ");
+    t.name = prefix + std::to_string(next_num);
     t.id = "track_" + type + "_" + std::to_string(next_num);
+    if (type == "subtitle") {
+        t.depth = 90;
+    }
     project.tracks.push_back(t);
+}
+
+std::string Timeline::add_subtitle_clip(Project& project, double start_time, double duration, const std::string& text) {
+    int sub_track_idx = -1;
+    if (m_active_track_idx >= 0 && m_active_track_idx < static_cast<int>(project.tracks.size())) {
+        if (project.tracks[m_active_track_idx].type == "subtitle") {
+            sub_track_idx = m_active_track_idx;
+        }
+    }
+    if (sub_track_idx < 0) {
+        for (size_t i = 0; i < project.tracks.size(); ++i) {
+            if (project.tracks[i].type == "subtitle") {
+                sub_track_idx = static_cast<int>(i);
+                break;
+            }
+        }
+    }
+    if (sub_track_idx < 0) {
+        add_track(project, "subtitle");
+        sub_track_idx = static_cast<int>(project.tracks.size()) - 1;
+    }
+
+    Clip c;
+    c.id = "sub_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count());
+    c.start_time = std::max(0.0, start_time);
+    c.duration = std::max(0.5, duration);
+    c.subtitle_text = text;
+    project.tracks[sub_track_idx].clips.push_back(c);
+
+    m_active_track_idx = sub_track_idx;
+    select_clip(c.id);
+    return c.id;
 }
 
 void Timeline::delete_track(Project& project, int track_idx) {
@@ -244,35 +416,52 @@ bool Timeline::split_clip_at(Project& project, const std::string& clip_id, doubl
 }
 
 bool Timeline::split_selected_clip(Project& project, double playhead_time) {
-    // 1. If a clip is explicitly selected and under playhead, slice it
-    if (!m_drag_clip_id.empty()) {
-        if (split_clip_at(project, m_drag_clip_id, playhead_time)) {
-            return true;
-        }
+    // 1. Gather all selected clips
+    std::vector<std::string> targets = m_selected_clip_ids;
+    if (targets.empty() && !m_drag_clip_id.empty()) {
+        targets.push_back(m_drag_clip_id);
     }
 
-    // 2. If an active track is selected, slice clip on that track under playhead
-    if (m_active_track_idx >= 0 && m_active_track_idx < static_cast<int>(project.tracks.size())) {
-        for (const auto& clip : project.tracks[m_active_track_idx].clips) {
-            if (clip.contains_time(playhead_time)) {
-                if (split_clip_at(project, clip.id, playhead_time)) {
-                    return true;
+    bool split_any = false;
+    if (!targets.empty()) {
+        // Cascade split across ALL selected clips that intersect playhead
+        for (const auto& cid : targets) {
+            if (split_clip_at(project, cid, playhead_time)) {
+                split_any = true;
+            }
+        }
+    } else {
+        // If nothing is explicitly selected:
+        // First check active track
+        if (m_active_track_idx >= 0 && m_active_track_idx < static_cast<int>(project.tracks.size())) {
+            for (const auto& clip : project.tracks[m_active_track_idx].clips) {
+                if (clip.contains_time(playhead_time)) {
+                    if (split_clip_at(project, clip.id, playhead_time)) {
+                        split_any = true;
+                        break;
+                    }
+                }
+            }
+        }
+        // Fallback: cascade split across all tracks under the playhead
+        if (!split_any) {
+            for (const auto& track : project.tracks) {
+                for (const auto& clip : track.clips) {
+                    if (clip.contains_time(playhead_time)) {
+                        if (split_clip_at(project, clip.id, playhead_time)) {
+                            split_any = true;
+                            break;
+                        }
+                    }
                 }
             }
         }
     }
+    return split_any;
+}
 
-    // 3. Fallback: Check any track containing playhead_time
-    for (const auto& track : project.tracks) {
-        for (const auto& clip : track.clips) {
-            if (clip.contains_time(playhead_time)) {
-                if (split_clip_at(project, clip.id, playhead_time)) {
-                    return true;
-                }
-            }
-        }
-    }
-    return false;
+bool Timeline::split_selected_clips(Project& project, double playhead_time) {
+    return split_selected_clip(project, playhead_time);
 }
 
 bool Timeline::delete_selected_clips(Project& project) {
@@ -303,27 +492,45 @@ bool Timeline::delete_selected_clip(Project& project) {
 }
 
 void Timeline::copy_selected_clips(const Project& project) {
-    m_clipboard_clips.clear();
-    m_clipboard_keyframes.clear();
+    m_clipboard_items.clear();
     std::vector<std::string> targets = m_selected_clip_ids;
     if (targets.empty() && !m_drag_clip_id.empty()) {
         targets.push_back(m_drag_clip_id);
     }
+    if (targets.empty()) return;
+
+    double min_time = 1e9;
+    int min_track = 100000;
+    struct FoundItem {
+        Clip clip;
+        int track_idx;
+    };
+    std::vector<FoundItem> found;
+
     for (const auto& cid : targets) {
-        const Clip* c = project.find_clip(cid);
-        if (c) {
-            m_clipboard_clips.push_back(*c);
-            for (const auto& kf : project.keyframes) {
-                if (kf.clip_id == c->id) {
-                    m_clipboard_keyframes.push_back(kf);
-                }
-            }
+        int t_idx = -1, c_idx = -1;
+        if (project.find_clip(cid, &t_idx, &c_idx) && t_idx >= 0 && c_idx >= 0) {
+            const Clip& c = project.tracks[t_idx].clips[c_idx];
+            found.push_back({c, t_idx});
+            if (c.start_time < min_time) min_time = c.start_time;
+            if (t_idx < min_track) min_track = t_idx;
         }
     }
-    if (!m_clipboard_clips.empty()) {
-        m_clipboard_clip = m_clipboard_clips.front();
-        m_has_clipboard = true;
+    if (found.empty()) return;
+
+    for (const auto& item : found) {
+        ClipboardItem ci;
+        ci.clip = item.clip;
+        ci.track_offset = item.track_idx - min_track;
+        ci.time_offset = item.clip.start_time - min_time;
+        for (const auto& kf : project.keyframes) {
+            if (kf.clip_id == item.clip.id) {
+                ci.keyframes.push_back(kf);
+            }
+        }
+        m_clipboard_items.push_back(ci);
     }
+    m_has_clipboard = !m_clipboard_items.empty();
 }
 
 void Timeline::copy_selected_clip(const Project& project) {
@@ -340,7 +547,7 @@ void Timeline::cut_selected_clip(Project& project) {
 }
 
 bool Timeline::paste_clip(Project& project, double target_time, int target_track_idx) {
-    if (!m_has_clipboard || project.tracks.empty()) return false;
+    if (!m_has_clipboard || m_clipboard_items.empty() || project.tracks.empty()) return false;
 
     int dest_track = target_track_idx;
     if (dest_track < 0 || dest_track >= static_cast<int>(project.tracks.size())) {
@@ -353,19 +560,36 @@ bool Timeline::paste_clip(Project& project, double target_time, int target_track
         dest_track = 0;
     }
 
-    m_active_track_idx = dest_track;
+    clear_selection();
+    uint64_t now_ms = std::chrono::system_clock::now().time_since_epoch().count();
+    int count = 0;
 
-    Clip new_clip = m_clipboard_clip;
-    new_clip.id = "clip_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count() % 1000000);
-    new_clip.start_time = std::max(0.0, target_time);
+    for (const auto& ci : m_clipboard_items) {
+        int track_idx = dest_track + ci.track_offset;
+        while (track_idx >= static_cast<int>(project.tracks.size())) {
+            Track new_t;
+            new_t.type = (dest_track < static_cast<int>(project.tracks.size())) ? project.tracks[dest_track].type : "video";
+            new_t.name = "Track " + std::to_string(project.tracks.size() + 1);
+            new_t.id = "track_" + std::to_string(project.tracks.size() + 1);
+            project.tracks.push_back(new_t);
+        }
 
-    project.tracks[dest_track].clips.push_back(new_clip);
+        Clip new_clip = ci.clip;
+        new_clip.id = "clip_" + std::to_string(now_ms % 1000000 + count++);
+        new_clip.start_time = std::max(0.0, target_time + ci.time_offset);
 
-    for (auto kf : m_clipboard_keyframes) {
-        kf.clip_id = new_clip.id;
-        project.keyframes.push_back(kf);
+        project.tracks[track_idx].clips.push_back(new_clip);
+
+        for (auto kf : ci.keyframes) {
+            kf.clip_id = new_clip.id;
+            project.keyframes.push_back(kf);
+        }
+
+        m_selected_clip_ids.push_back(new_clip.id);
+        m_drag_clip_id = new_clip.id;
     }
-    m_drag_clip_id = new_clip.id;
+
+    m_active_track_idx = dest_track;
     return true;
 }
 
@@ -389,6 +613,14 @@ void Timeline::render_ui(Project& project, double& playhead_time,
     ImGui::SameLine();
     if (ImGui::Button(_TR("timeline_add_audio"))) {
         add_track(project, "audio");
+        if (on_project_changed) on_project_changed();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button(_TR("timeline_add_subtitle"))) {
+        std::string new_id = add_subtitle_clip(project, playhead_time, 3.0, "New Subtitle");
+        if (on_select_clip && !new_id.empty()) {
+            on_select_clip(new_id);
+        }
         if (on_project_changed) on_project_changed();
     }
     ImGui::SameLine();
@@ -442,6 +674,7 @@ void Timeline::render_ui(Project& project, double& playhead_time,
 
     ImDrawList* draw_list = ImGui::GetWindowDrawList();
     ImGuiIO& io = ImGui::GetIO();
+    TimelineThemeColors theme = get_timeline_theme_colors(SettingsLogic::instance().get_colorblind_mode());
 
     const float track_header_w = m_track_header_w;
     const float ruler_h = 24.0f;
@@ -525,24 +758,28 @@ void Timeline::render_ui(Project& project, double& playhead_time,
         }
     }
 
+    bool is_light = SettingsLogic::instance().get_light_theme();
+
     // Backgrounds
-    draw_list->AddRectFilled(canvas_pos, ImVec2(canvas_pos.x + canvas_size.x, tracks_bottom_y),
-                             IM_COL32(24, 27, 31, 255));
+    ImU32 canvas_bg = is_light ? IM_COL32(242, 243, 245, 255) : IM_COL32(24, 27, 31, 255);
+    ImU32 sidebar_bg = is_light ? IM_COL32(230, 232, 236, 255) : IM_COL32(31, 35, 41, 255);
+    ImU32 ruler_bg = is_light ? IM_COL32(222, 225, 230, 255) : IM_COL32(35, 39, 46, 255);
+
+    draw_list->AddRectFilled(canvas_pos, ImVec2(canvas_pos.x + canvas_size.x, tracks_bottom_y), canvas_bg);
     // Header sidebar background
-    draw_list->AddRectFilled(canvas_pos, ImVec2(content_x, tracks_bottom_y),
-                             IM_COL32(31, 35, 41, 255));
+    draw_list->AddRectFilled(canvas_pos, ImVec2(content_x, tracks_bottom_y), sidebar_bg);
     // Ruler background
-    draw_list->AddRectFilled(ImVec2(content_x, canvas_pos.y), ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + ruler_h),
-                             IM_COL32(35, 39, 46, 255));
+    draw_list->AddRectFilled(ImVec2(content_x, canvas_pos.y), ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + ruler_h), ruler_bg);
+
     // Boundary line / Resizable splitter line
     ImU32 splitter_line_col = (m_dragging_track_header || is_header_splitter_hovered)
                               ? IM_COL32(61, 174, 233, 255)
-                              : IM_COL32(55, 62, 72, 255);
+                              : (is_light ? IM_COL32(188, 192, 198, 255) : IM_COL32(55, 62, 72, 255));
     float splitter_thickness = (m_dragging_track_header || is_header_splitter_hovered) ? 2.5f : 1.0f;
     draw_list->AddLine(ImVec2(content_x, canvas_pos.y), ImVec2(content_x, tracks_bottom_y),
                        splitter_line_col, splitter_thickness);
     draw_list->AddLine(ImVec2(content_x, canvas_pos.y + ruler_h), ImVec2(canvas_pos.x + canvas_size.x, canvas_pos.y + ruler_h),
-                       IM_COL32(55, 62, 72, 255));
+                       is_light ? IM_COL32(188, 192, 198, 255) : IM_COL32(55, 62, 72, 255));
 
     // Draw Ruler ticks
     double visible_start_t = std::max(0.0, static_cast<double>(m_scroll_sec));
@@ -553,19 +790,21 @@ void Timeline::render_ui(Project& project, double& playhead_time,
     else if (m_pixels_per_sec < 60.0f) tick_step_sec = 2;
 
     int start_tick = static_cast<int>(visible_start_t / tick_step_sec) * tick_step_sec;
+    ImU32 ruler_tick_col = is_light ? IM_COL32(120, 126, 135, 255) : IM_COL32(180, 190, 205, 255);
+    ImU32 ruler_text_col = is_light ? IM_COL32(40, 45, 52, 255) : IM_COL32(190, 200, 215, 255);
+    ImU32 grid_line_col = is_light ? IM_COL32(218, 222, 228, 255) : IM_COL32(38, 43, 50, 255);
+
     for (int t = start_tick; t <= static_cast<int>(visible_end_t); t += tick_step_sec) {
         float tx = time_to_screen_x(t);
         if (tx < content_x || tx > canvas_pos.x + canvas_size.x) continue;
 
-        draw_list->AddLine(ImVec2(tx, canvas_pos.y + ruler_h - 10), ImVec2(tx, canvas_pos.y + ruler_h),
-                           IM_COL32(180, 190, 205, 255));
+        draw_list->AddLine(ImVec2(tx, canvas_pos.y + ruler_h - 10), ImVec2(tx, canvas_pos.y + ruler_h), ruler_tick_col);
 
         std::string tc = format_timecode(t, false);
-        draw_list->AddText(ImVec2(tx + 4, canvas_pos.y + 3), IM_COL32(190, 200, 215, 255), tc.c_str());
+        draw_list->AddText(ImVec2(tx + 4, canvas_pos.y + 3), ruler_text_col, tc.c_str());
 
         // Vertical faint grid across tracks
-        draw_list->AddLine(ImVec2(tx, canvas_pos.y + ruler_h), ImVec2(tx, tracks_bottom_y),
-                           IM_COL32(38, 43, 50, 255));
+        draw_list->AddLine(ImVec2(tx, canvas_pos.y + ruler_h), ImVec2(tx, tracks_bottom_y), grid_line_col);
     }
 
     // Ruler scrubbing
@@ -600,20 +839,24 @@ void Timeline::render_ui(Project& project, double& playhead_time,
         bool is_active_track = (static_cast<int>(t) == m_active_track_idx);
 
         // Header Background
-        ImU32 header_bg = is_active_track ? IM_COL32(45, 52, 63, 255) : IM_COL32(33, 38, 45, 255);
+        ImU32 header_bg = is_light ? (is_active_track ? IM_COL32(208, 226, 245, 255) : IM_COL32(232, 235, 240, 255))
+                                   : (is_active_track ? IM_COL32(45, 52, 63, 255) : IM_COL32(33, 38, 45, 255));
+        ImU32 divider_col = is_light ? IM_COL32(205, 209, 215, 255) : IM_COL32(45, 50, 58, 255);
+        ImU32 track_name_col = is_light ? IM_COL32(30, 35, 42, 255) : IM_COL32(230, 235, 245, 255);
+
         draw_list->AddRectFilled(ImVec2(canvas_pos.x, track_y), ImVec2(content_x, track_y + track_h), header_bg);
         draw_list->AddLine(ImVec2(canvas_pos.x, track_y + track_h), ImVec2(canvas_pos.x + canvas_size.x, track_y + track_h),
-                           IM_COL32(45, 50, 58, 255));
+                           divider_col);
 
         // Clip header controls so they NEVER overflow or overlap the timeline lanes!
         draw_list->PushClipRect(ImVec2(canvas_pos.x, track_y), ImVec2(content_x - 1.0f, track_y + track_h), true);
 
         // Track Name & selection
-        std::string badge = (track.type == "video") ? "[V]" : "[A]";
-        ImU32 badge_col = (track.type == "video") ? IM_COL32(61, 174, 233, 255) : IM_COL32(46, 204, 113, 255);
+        std::string badge = (track.type == "video") ? "[V]" : ((track.type == "subtitle") ? "[S]" : "[A]");
+        ImU32 badge_col = (track.type == "video") ? theme.video_badge : ((track.type == "subtitle") ? theme.subtitle_badge : theme.audio_badge);
         draw_list->AddText(ImVec2(canvas_pos.x + 6, track_y + 4), badge_col, badge.c_str());
         std::string display_name = get_display_track_name(track);
-        draw_list->AddText(ImVec2(canvas_pos.x + 28, track_y + 4), IM_COL32(230, 235, 245, 255), display_name.c_str());
+        draw_list->AddText(ImVec2(canvas_pos.x + 28, track_y + 4), track_name_col, display_name.c_str());
 
         // Mute / Solo mini buttons in header
         ImGui::SetCursorScreenPos(ImVec2(canvas_pos.x + 6, track_y + 20));
@@ -870,14 +1113,23 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                 }
             }
             ImGui::Separator();
+            if (ImGui::MenuItem("+ Add Subtitle Clip Here")) {
+                std::string new_id = add_subtitle_clip(project, click_time, 3.0, "New Subtitle");
+                if (on_select_clip && !new_id.empty()) {
+                    on_select_clip(new_id);
+                }
+                if (on_project_changed) on_project_changed();
+            }
             if (ImGui::MenuItem(_TR("timeline_add_video"))) {
-                Track vt; vt.type = "video"; vt.name = "Video " + std::to_string(project.tracks.size() + 1); vt.id = "track_v" + std::to_string(project.tracks.size() + 1);
-                project.tracks.push_back(vt);
+                add_track(project, "video");
                 if (on_project_changed) on_project_changed();
             }
             if (ImGui::MenuItem(_TR("timeline_add_audio"))) {
-                Track at; at.type = "audio"; at.name = "Audio " + std::to_string(project.tracks.size() + 1); at.id = "track_a" + std::to_string(project.tracks.size() + 1);
-                project.tracks.push_back(at);
+                add_track(project, "audio");
+                if (on_project_changed) on_project_changed();
+            }
+            if (ImGui::MenuItem("+ Add Subtitle Track")) {
+                add_track(project, "subtitle");
                 if (on_project_changed) on_project_changed();
             }
             ImGui::EndPopup();
@@ -890,7 +1142,9 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                                    (mouse_pos.x >= content_x && mouse_pos.x <= canvas_right &&
                                     mouse_pos.y >= canvas_top && mouse_pos.y <= canvas_bottom);
 
-        // Render Clips on this track
+        // Render Clips on this track (Clipped to content_x so clips never overlap track headers on the left)
+        draw_list->PushClipRect(ImVec2(content_x, canvas_pos.y + ruler_h), ImVec2(canvas_right, tracks_bottom_y), true);
+
         for (size_t c = 0; c < track.clips.size(); ++c) {
             Clip& clip = track.clips[c];
             float clip_x0 = time_to_screen_x(clip.start_time);
@@ -916,14 +1170,17 @@ void Timeline::render_ui(Project& project, double& playhead_time,
             // Clip block colors
             ImU32 fill_col, border_col;
             if (!clip.prefab_id.empty()) {
-                fill_col = is_hovered ? IM_COL32(110, 50, 150, 230) : IM_COL32(85, 35, 125, 220);
-                border_col = is_selected ? IM_COL32(241, 196, 15, 255) : IM_COL32(180, 100, 255, 220);
+                fill_col = is_hovered ? theme.prefab_hover : theme.prefab_fill;
+                border_col = is_selected ? theme.selection_border : theme.prefab_border;
             } else if (track.type == "video") {
-                fill_col = is_hovered ? IM_COL32(41, 128, 185, 230) : IM_COL32(31, 98, 145, 220);
-                border_col = is_selected ? IM_COL32(241, 196, 15, 255) : IM_COL32(61, 174, 233, 200);
+                fill_col = is_hovered ? theme.video_hover : theme.video_fill;
+                border_col = is_selected ? theme.selection_border : theme.video_border;
+            } else if (track.type == "subtitle") {
+                fill_col = is_hovered ? theme.subtitle_hover : theme.subtitle_fill;
+                border_col = is_selected ? theme.selection_border : theme.subtitle_border;
             } else {
-                fill_col = is_hovered ? IM_COL32(39, 174, 96, 230) : IM_COL32(30, 130, 72, 220);
-                border_col = is_selected ? IM_COL32(241, 196, 15, 255) : IM_COL32(46, 204, 113, 200);
+                fill_col = is_hovered ? theme.audio_hover : theme.audio_fill;
+                border_col = is_selected ? theme.selection_border : theme.audio_border;
             }
 
             draw_list->AddRectFilled(ImVec2(clip_x0, clip_y0), ImVec2(clip_x1, clip_y1), fill_col, 4.0f);
@@ -937,13 +1194,16 @@ void Timeline::render_ui(Project& project, double& playhead_time,
 
             // Clip label text
             std::string label;
-            if (!clip.prefab_name.empty()) {
+            if (!clip.subtitle_text.empty()) {
+                label = "[SUB] " + clip.subtitle_text;
+            } else if (!clip.prefab_name.empty()) {
                 label = "[PF: " + clip.prefab_name + "] ";
-            }
-            if (track.type == "video") {
+            } else if (track.type == "video") {
                 const auto* va = project.find_video_asset(clip.asset_id);
                 if (va) label += fs::path(va->path).filename().string();
                 else label += clip.id;
+            } else if (track.type == "subtitle") {
+                label = "[SUB] " + clip.id;
             } else {
                 const auto* aa = project.find_audio_asset(clip.asset_id);
                 if (aa) {
@@ -1120,6 +1380,7 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                 }
             }
         }
+        draw_list->PopClipRect();
 
         track_y += track_h;
     }
@@ -1179,19 +1440,40 @@ void Timeline::render_ui(Project& project, double& playhead_time,
             Clip* target_clip = project.find_clip_mut(m_drag_clip_id);
             if (target_clip) {
                 if (m_drag_mode == DragMode::MoveClip) {
-                    double new_start = std::max(0.0, m_drag_orig_start_time + delta_t);
-                    double snapped = snap_time(new_start, project, target_clip->id);
-                    double actual_dt = snapped - m_drag_orig_start_time;
-                    target_clip->start_time = snapped;
+                    // Check if dragged to another track of matching type
+                    int cur_track_idx = -1;
+                    project.find_clip(target_clip->id, &cur_track_idx);
+                    int target_t_idx = static_cast<int>(std::floor((mouse_pos.y - start_track_y) / track_h));
 
-                    for (const auto& cid : m_selected_clip_ids) {
-                        if (cid == target_clip->id) continue;
-                        Clip* other_clip = project.find_clip_mut(cid);
-                        if (other_clip && m_drag_multi_orig_times.find(cid) != m_drag_multi_orig_times.end()) {
-                            other_clip->start_time = std::max(0.0, m_drag_multi_orig_times[cid] + actual_dt);
+                    if (cur_track_idx >= 0 && target_t_idx >= 0 &&
+                        target_t_idx < static_cast<int>(project.tracks.size()) &&
+                        target_t_idx != cur_track_idx) {
+                        if (project.tracks[cur_track_idx].type == project.tracks[target_t_idx].type) {
+                            Clip moved = *target_clip;
+                            auto& src_clips = project.tracks[cur_track_idx].clips;
+                            src_clips.erase(std::remove_if(src_clips.begin(), src_clips.end(),
+                                [&](const Clip& c) { return c.id == moved.id; }), src_clips.end());
+                            project.tracks[target_t_idx].clips.push_back(moved);
+                            m_active_track_idx = target_t_idx;
+                            target_clip = project.find_clip_mut(m_drag_clip_id);
                         }
                     }
-                    if (on_project_changed) on_project_changed();
+
+                    if (target_clip) {
+                        double new_start = std::max(0.0, m_drag_orig_start_time + delta_t);
+                        double snapped = snap_time(new_start, project, target_clip->id);
+                        double actual_dt = snapped - m_drag_orig_start_time;
+                        target_clip->start_time = snapped;
+
+                        for (const auto& cid : m_selected_clip_ids) {
+                            if (cid == target_clip->id) continue;
+                            Clip* other_clip = project.find_clip_mut(cid);
+                            if (other_clip && m_drag_multi_orig_times.find(cid) != m_drag_multi_orig_times.end()) {
+                                other_clip->start_time = std::max(0.0, m_drag_multi_orig_times[cid] + actual_dt);
+                            }
+                        }
+                        if (on_project_changed) on_project_changed();
+                    }
                 } else if (m_drag_mode == DragMode::TrimLeft) {
                     double new_start = m_drag_orig_start_time + delta_t;
                     new_start = snap_time(new_start, project, target_clip->id);
@@ -1257,13 +1539,13 @@ void Timeline::render_ui(Project& project, double& playhead_time,
     float playhead_x = time_to_screen_x(playhead_time);
     if (playhead_x >= content_x && playhead_x <= (canvas_pos.x + canvas_size.x)) {
         draw_list->AddLine(ImVec2(playhead_x, canvas_pos.y), ImVec2(playhead_x, tracks_bottom_y),
-                           IM_COL32(235, 77, 75, 255), 2.0f);
+                           theme.playhead_color, 2.0f);
 
         // Top triangle handle on ruler
         ImVec2 p0(playhead_x - 6.0f, canvas_pos.y);
         ImVec2 p1(playhead_x + 6.0f, canvas_pos.y);
         ImVec2 p2(playhead_x, canvas_pos.y + 12.0f);
-        draw_list->AddTriangleFilled(p0, p1, p2, IM_COL32(235, 77, 75, 255));
+        draw_list->AddTriangleFilled(p0, p1, p2, theme.playhead_color);
     }
 
     // Bottom Horizontal Scrollbar

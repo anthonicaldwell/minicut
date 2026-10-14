@@ -98,6 +98,12 @@ Powered by `libcurl`:
 | `gui.file_dialog([opts])` | Opens file dialog choosing native vs built-in per user settings. Supports sync return or callback. |
 | `gui.native_file_dialog([opts])` | Forces system native file dialog (kdialog, zenity, or portal). |
 | `gui.builtin_file_dialog([opts])` | Forces built-in ImGui file dialog modal. |
+| `gui.popout_preview(popped)` | Detaches (true) or docks (false) the video preview panel into a floating window. |
+| `gui.is_preview_popped_out()` | Returns `boolean` whether preview is currently detached/floating. |
+| `gui.set_preview_aspect_mode(mode)` | Sets aspect mode: 0 (Auto), 1 (16:9), 2 (9:16), 3 (4:3), 4 (1:1), 5 (21:9), 6 (4:5). |
+| `gui.get_preview_aspect_mode()` | Returns current preview aspect mode index (0-6). |
+| `gui.set_transform_tool(tool)` | Sets active preview gizmo tool (`"select"`, `"translate"`, `"scale"`, `"rotate"`). |
+| `gui.get_transform_tool()` | Returns active preview gizmo tool name (`"select"`, `"translate"`, `"scale"`, `"rotate"`). |
 
 ### 3.4. Timeline & Tracks (`timeline`)
 
@@ -135,6 +141,9 @@ Powered by `libcurl`:
 | `clip.get_rotation(clip_id)` / `clip.set_rotation(clip_id, deg)` | Rotation in degrees. |
 | `clip.get_opacity(clip_id)` / `clip.set_opacity(clip_id, a)` | Opacity (0.0 to 1.0). |
 | `clip.get_volume(clip_id)` / `clip.set_volume(clip_id, v)` | Audio gain multiplier. |
+| `clip.get_transform(clip_id)` | Returns table `{ x, y, scale, rotation }`. |
+| `clip.set_transform(clip_id, [x, y, s, r])` | Sets translation X, Y, scale, and rotation simultaneously. |
+| `clip.reset_transform(clip_id)` | Resets clip transform to origin (`x=0, y=0, scale=1.0, rotation=0.0`). |
 | `timeline.add_keyframe(clip_id, prop, t, val)` | Adds animation keyframe. |
 | `timeline.evaluate_keyframe(clip_id, prop, t, def)` | Evaluates interpolated value. |
 
@@ -145,3 +154,13 @@ Powered by `libcurl`:
 | `minicut.push_undo()` | Creates an undo snapshot. |
 | `minicut.set_status(msg, [dur])` | Shows green toast in menu bar. |
 | `minicut.log(message)` | Prints message to console. |
+
+### 3.7. Export Automation & Progress (`export`)
+
+| Function | Returns | Description |
+|---|---|---|
+| `export.get_audio_progress()` | `number` | Audio mixing progress (stereo mixing & keyframes, 0.0 to 1.0). |
+| `export.get_progress()` | `number` | Overall export pipeline progress (0.0 to 1.0). |
+| `export.is_exporting()` | `boolean` | True if background render/encode is actively running. |
+| `export.get_status()` | `string` | Human-readable pipeline status description. |
+

@@ -25,9 +25,17 @@ if [ -f "$HOME/.local/share/applications/minicut.desktop" ]; then
     REMOVED_ANY=true
 fi
 
-if [ -f "$HOME/.local/share/icons/hicolor/256x256/apps/minicut.png" ]; then
-    echo "Removing $HOME/.local/share/icons/hicolor/256x256/apps/minicut.png..."
-    rm -f "$HOME/.local/share/icons/hicolor/256x256/apps/minicut.png"
+for size in 256x256 128x128 64x64 48x48 32x32; do
+    if [ -f "$HOME/.local/share/icons/hicolor/$size/apps/minicut.png" ]; then
+        echo "Removing $HOME/.local/share/icons/hicolor/$size/apps/minicut.png..."
+        rm -f "$HOME/.local/share/icons/hicolor/$size/apps/minicut.png"
+        REMOVED_ANY=true
+    fi
+done
+
+if [ -f "$HOME/.local/share/pixmaps/minicut.png" ]; then
+    echo "Removing $HOME/.local/share/pixmaps/minicut.png..."
+    rm -f "$HOME/.local/share/pixmaps/minicut.png"
     REMOVED_ANY=true
 fi
 
@@ -69,9 +77,17 @@ if [ -w "/usr/local/share/applications" ] && [ -f "/usr/local/share/applications
     REMOVED_ANY=true
 fi
 
-if [ -w "/usr/local/share/icons/hicolor/256x256/apps" ] && [ -f "/usr/local/share/icons/hicolor/256x256/apps/minicut.png" ]; then
-    echo "Removing /usr/local/share/icons/hicolor/256x256/apps/minicut.png..."
-    rm -f "/usr/local/share/icons/hicolor/256x256/apps/minicut.png"
+for size in 256x256 128x128 64x64 48x48 32x32; do
+    if [ -w "/usr/local/share/icons/hicolor/$size/apps" ] && [ -f "/usr/local/share/icons/hicolor/$size/apps/minicut.png" ]; then
+        echo "Removing /usr/local/share/icons/hicolor/$size/apps/minicut.png..."
+        rm -f "/usr/local/share/icons/hicolor/$size/apps/minicut.png"
+        REMOVED_ANY=true
+    fi
+done
+
+if [ -w "/usr/local/share/pixmaps" ] && [ -f "/usr/local/share/pixmaps/minicut.png" ]; then
+    echo "Removing /usr/local/share/pixmaps/minicut.png..."
+    rm -f "/usr/local/share/pixmaps/minicut.png"
     REMOVED_ANY=true
 fi
 

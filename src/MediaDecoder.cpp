@@ -35,7 +35,7 @@ void DecodedVideoContext::close() {
     video_stream_idx = -1;
     last_decoded_pts = -1.0;
     is_image = false;
-    cached_image_rgba.clear();
+    cached_image_rgba.reset();
     cached_w = 0;
     cached_h = 0;
 }
@@ -102,8 +102,9 @@ bool DecodedVideoContext::open(const std::string& filepath) {
 bool DecodedVideoContext::decode_frame_at(double target_sec, int out_w, int out_h, std::vector<uint8_t>& out_rgba) {
     if (!format_ctx || !codec_ctx || video_stream_idx < 0) return false;
 
-    if (is_image && !cached_image_rgba.empty() && cached_w == out_w && cached_h == out_h) {
-        out_rgba = cached_image_rgba;
+    if (is_image && cached_image_rgba && !cached_image_rgba->empty() && cached_w == out_w && cached_h == out_h) {
+        out_rgba.resize(cached_image_rgba->size());
+        std::memcpy(out_rgba.data(), cached_image_rgba->data(), cached_image_rgba->size());
         return true;
     }
 
@@ -126,11 +127,11 @@ bool DecodedVideoContext::decode_frame_at(double target_sec, int out_w, int out_
         if (packet->stream_index == video_stream_idx) {
             if (avcodec_send_packet(codec_ctx, packet) == 0) {
                 while (avcodec_receive_frame(codec_ctx, frame) == 0) {
-                    double frame_pts_sec = frame->pts * av_q2d(stream->time_base);
+                    double frame_pts_sec = (frame->pts != AV_NOPTS_VALUE) ? (frame->pts * av_q2d(stream->time_base)) : 0.0;
                     last_decoded_pts = frame_pts_sec;
 
-                    // If this frame is at or just before target_sec or target_sec <= 0.05
-                    if (frame_pts_sec >= (target_sec - 0.04) || max_packets < 5) {
+                    // If this is a still image or at/past target_sec or reached packet limit
+                    if (is_image || frame_pts_sec >= (target_sec - 0.04) || max_packets < 5) {
                         // Setup sws context if needed
                         sws_ctx = sws_getCachedContext(
                             sws_ctx,
@@ -158,7 +159,8 @@ bool DecodedVideoContext::decode_frame_at(double target_sec, int out_w, int out_
     av_packet_free(&packet);
 
     if (found && is_image) {
-        cached_image_rgba = out_rgba;
+        cached_image_rgba = std::make_shared<SwapBuffer<uint8_t>>(out_rgba.size());
+        std::memcpy(cached_image_rgba->data(), out_rgba.data(), out_rgba.size());
         cached_w = out_w;
         cached_h = out_h;
     }

@@ -10,7 +10,7 @@
 #include <chrono>
 #include <GL/glew.h>
 
-#define MINICUT_VERSION "1.2.0"
+#define MINICUT_VERSION "1.4.0"
 
 // Forward declarations
 struct VideoAsset;
@@ -77,6 +77,9 @@ struct Clip {
     std::string prefab_id;   // e.g. "pf1" if clip originated from a prefab
     std::string prefab_name; // Display name of origin prefab
 
+    // Subtitle text for subtitle tracks
+    std::string subtitle_text;
+
     double end_time() const { return start_time + duration; }
     bool contains_time(double t) const { return t >= start_time && t < (start_time + duration); }
     double clip_relative_time(double t) const { return t - start_time; }
@@ -86,7 +89,7 @@ struct Clip {
 struct Track {
     std::string id;
     std::string name;
-    std::string type; // "video" or "audio"
+    std::string type; // "video", "audio", or "subtitle"
     bool muted = false;
     bool solo = false;
     int depth = 0; // Render depth (0-100; lower renders bottom/background, higher renders top/foreground)
@@ -115,6 +118,50 @@ struct Project {
             }
         }
         return max_time;
+    }
+
+    double get_assets_duration() const {
+        double max_time = 0.0;
+        for (const auto& track : tracks) {
+            for (const auto& clip : track.clips) {
+                if (clip.end_time() > max_time) {
+                    max_time = clip.end_time();
+                }
+            }
+        }
+        return max_time;
+    }
+
+    double get_largest_asset_aspect_ratio() const {
+        double max_aspect = 0.0;
+        // Search timeline clips for active visual assets
+        for (const auto& track : tracks) {
+            for (const auto& clip : track.clips) {
+                const VideoAsset* asset = find_video_asset(clip.asset_id);
+                if (asset && asset->width > 0 && asset->height > 0) {
+                    double ar = static_cast<double>(asset->width) / static_cast<double>(asset->height);
+                    if (ar > max_aspect) {
+                        max_aspect = ar;
+                    }
+                }
+            }
+        }
+        // If no visual clips placed on timeline yet, check project video assets pool
+        if (max_aspect <= 0.0) {
+            for (const auto& asset : video_assets) {
+                if (asset.width > 0 && asset.height > 0) {
+                    double ar = static_cast<double>(asset.width) / static_cast<double>(asset.height);
+                    if (ar > max_aspect) {
+                        max_aspect = ar;
+                    }
+                }
+            }
+        }
+        // Default standard 16:9 widescreen fallback
+        if (max_aspect <= 0.0) {
+            max_aspect = 16.0 / 9.0;
+        }
+        return max_aspect;
     }
 
     const VideoAsset* find_video_asset(const std::string& id) const {

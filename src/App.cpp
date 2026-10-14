@@ -1,6 +1,7 @@
 #include "App.h"
 #include "LocaleManager.h"
 #include "TempManager.h"
+#include "SwapManager.h"
 #include <imgui.h>
 #include <imgui_internal.h>
 #include <backends/imgui_impl_sdl2.h>
@@ -15,6 +16,21 @@
 
 namespace fs = std::filesystem;
 
+static Uint32 get_event_window_id(const SDL_Event& event) {
+    switch (event.type) {
+        case SDL_WINDOWEVENT: return event.window.windowID;
+        case SDL_KEYDOWN:
+        case SDL_KEYUP: return event.key.windowID;
+        case SDL_TEXTEDITING: return event.edit.windowID;
+        case SDL_TEXTINPUT: return event.text.windowID;
+        case SDL_MOUSEMOTION: return event.motion.windowID;
+        case SDL_MOUSEBUTTONDOWN:
+        case SDL_MOUSEBUTTONUP: return event.button.windowID;
+        case SDL_MOUSEWHEEL: return event.wheel.windowID;
+        default: return 0;
+    }
+}
+
 App::App() {
     m_clip_manager.set_audio_engine(&m_audio_engine);
     m_export_manager.set_browse_callback([this]() {
@@ -27,6 +43,7 @@ App::~App() {
 }
 
 bool App::init(int argc, char* argv[]) {
+    SwapManager::instance().init();
     SDL_SetHint(SDL_HINT_APP_NAME, "minicut");
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_TIMER) != 0) {
@@ -100,7 +117,7 @@ bool App::init(int argc, char* argv[]) {
 
     // Init ImGui
     IMGUI_CHECKVERSION();
-    ImGui::CreateContext();
+    m_imgui_context = ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
@@ -165,18 +182,21 @@ bool App::init(int argc, char* argv[]) {
     apply_kde_plasma_theme();
 
     ImGui_ImplSDL2_InitForOpenGL(m_window, m_gl_context);
-    ImGui_ImplOpenGL3_Init("#version 330");
+    RenderBackendType preferred_backend = (m_settings_logic.get_render_backend() == "Vulkan") ? RenderBackendType::Vulkan : RenderBackendType::OpenGL3;
+    RenderSystem::instance().init(m_window, m_gl_context, preferred_backend);
 
     // Init Preview Texture
-    glGenTextures(1, &m_preview_texture);
-    glBindTexture(GL_TEXTURE_2D, m_preview_texture);
-    std::vector<uint8_t> blank(1280 * 720 * 4, 20);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 1280, 720, 0, GL_RGBA, GL_UNSIGNED_BYTE, blank.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    m_preview_texture = static_cast<GLuint>(RenderSystem::instance().create_texture(1280, 720, nullptr));
+
+    // Generate Settings Gear Icon Texture
+    generate_settings_gear_icon();
+
+    // Generate Preview Toolbar Icons
+    generate_preview_toolbar_icons();
 
     // Init Audio Engine
     m_audio_engine.init();
+    m_audio_engine.set_preview_volume_db(m_settings_logic.get_preview_volume_db());
 
     // Default tracks in project
     new_project();
@@ -233,7 +253,7 @@ bool App::init(int argc, char* argv[]) {
     return true;
 }
 
-void App::apply_kde_plasma_theme() {
+void App::apply_breeze_dark_theme() {
     ImGuiStyle& style = ImGui::GetStyle();
     ImVec4* colors = style.Colors;
 
@@ -276,18 +296,104 @@ void App::apply_kde_plasma_theme() {
     colors[ImGuiCol_TabActive]             = ImVec4(0.24f, 0.68f, 0.91f, 1.00f);
     colors[ImGuiCol_TabUnfocused]          = ImVec4(0.15f, 0.16f, 0.18f, 1.00f);
     colors[ImGuiCol_TabUnfocusedActive]    = ImVec4(0.20f, 0.22f, 0.24f, 1.00f);
+    colors[ImGuiCol_TableHeaderBg]         = ImVec4(0.20f, 0.22f, 0.25f, 1.00f);
+    colors[ImGuiCol_TableBorderStrong]     = ImVec4(0.28f, 0.30f, 0.34f, 1.00f);
+    colors[ImGuiCol_TableBorderLight]      = ImVec4(0.22f, 0.24f, 0.27f, 1.00f);
+    colors[ImGuiCol_TableRowBg]            = ImVec4(0.14f, 0.15f, 0.16f, 1.00f);
+    colors[ImGuiCol_TableRowBgAlt]         = ImVec4(0.17f, 0.19f, 0.21f, 1.00f);
+}
 
-    style.WindowRounding    = 4.0f;
-    style.ChildRounding     = 4.0f;
-    style.FrameRounding     = 3.0f;
-    style.PopupRounding     = 4.0f;
-    style.ScrollbarRounding = 4.0f;
-    style.GrabRounding      = 3.0f;
-    style.TabRounding       = 3.0f;
-    style.WindowBorderSize  = 1.0f;
-    style.FrameBorderSize   = 1.0f;
-    style.ItemSpacing       = ImVec2(8.0f, 5.0f);
-    style.FramePadding      = ImVec2(6.0f, 4.0f);
+void App::apply_breeze_light_theme() {
+    ImGuiStyle& style = ImGui::GetStyle();
+    ImVec4* colors = style.Colors;
+
+    // KDE Breeze Light Color Scheme
+    colors[ImGuiCol_Text]                  = ImVec4(0.14f, 0.15f, 0.16f, 1.00f); // #232629
+    colors[ImGuiCol_TextDisabled]          = ImVec4(0.50f, 0.54f, 0.58f, 1.00f);
+    colors[ImGuiCol_WindowBg]              = ImVec4(0.94f, 0.94f, 0.95f, 1.00f); // #eff0f1
+    colors[ImGuiCol_ChildBg]               = ImVec4(0.99f, 0.99f, 0.99f, 1.00f); // #fcfcfc
+    colors[ImGuiCol_PopupBg]               = ImVec4(1.00f, 1.00f, 1.00f, 0.98f);
+    colors[ImGuiCol_Border]                = ImVec4(0.74f, 0.75f, 0.76f, 1.00f); // #bcbebf
+    colors[ImGuiCol_BorderShadow]          = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
+    colors[ImGuiCol_FrameBg]               = ImVec4(0.98f, 0.98f, 0.99f, 1.00f);
+    colors[ImGuiCol_FrameBgHovered]        = ImVec4(0.24f, 0.68f, 0.91f, 0.25f);
+    colors[ImGuiCol_FrameBgActive]         = ImVec4(0.24f, 0.68f, 0.91f, 0.45f);
+    colors[ImGuiCol_TitleBg]               = ImVec4(0.90f, 0.91f, 0.92f, 1.00f);
+    colors[ImGuiCol_TitleBgActive]         = ImVec4(0.85f, 0.86f, 0.88f, 1.00f);
+    colors[ImGuiCol_TitleBgCollapsed]      = ImVec4(0.90f, 0.91f, 0.92f, 0.75f);
+    colors[ImGuiCol_MenuBarBg]             = ImVec4(0.92f, 0.93f, 0.94f, 1.00f);
+    colors[ImGuiCol_ScrollbarBg]           = ImVec4(0.92f, 0.93f, 0.94f, 0.60f);
+    colors[ImGuiCol_ScrollbarGrab]         = ImVec4(0.74f, 0.75f, 0.76f, 1.00f);
+    colors[ImGuiCol_ScrollbarGrabHovered]  = ImVec4(0.24f, 0.68f, 0.91f, 0.70f);
+    colors[ImGuiCol_ScrollbarGrabActive]   = ImVec4(0.24f, 0.68f, 0.91f, 1.00f);
+    colors[ImGuiCol_CheckMark]             = ImVec4(0.15f, 0.55f, 0.82f, 1.00f);
+    colors[ImGuiCol_SliderGrab]            = ImVec4(0.24f, 0.68f, 0.91f, 1.00f);
+    colors[ImGuiCol_SliderGrabActive]      = ImVec4(0.15f, 0.55f, 0.82f, 1.00f);
+    colors[ImGuiCol_Button]                = ImVec4(0.88f, 0.89f, 0.90f, 1.00f);
+    colors[ImGuiCol_ButtonHovered]         = ImVec4(0.24f, 0.68f, 0.91f, 0.60f);
+    colors[ImGuiCol_ButtonActive]          = ImVec4(0.24f, 0.68f, 0.91f, 0.90f);
+    colors[ImGuiCol_Header]                = ImVec4(0.24f, 0.68f, 0.91f, 0.25f);
+    colors[ImGuiCol_HeaderHovered]         = ImVec4(0.24f, 0.68f, 0.91f, 0.50f);
+    colors[ImGuiCol_HeaderActive]          = ImVec4(0.24f, 0.68f, 0.91f, 0.75f);
+    colors[ImGuiCol_Separator]             = ImVec4(0.74f, 0.75f, 0.76f, 1.00f);
+    colors[ImGuiCol_SeparatorHovered]      = ImVec4(0.24f, 0.68f, 0.91f, 0.78f);
+    colors[ImGuiCol_SeparatorActive]       = ImVec4(0.24f, 0.68f, 0.91f, 1.00f);
+    colors[ImGuiCol_ResizeGrip]            = ImVec4(0.74f, 0.75f, 0.76f, 0.50f);
+    colors[ImGuiCol_ResizeGripHovered]     = ImVec4(0.24f, 0.68f, 0.91f, 0.70f);
+    colors[ImGuiCol_ResizeGripActive]      = ImVec4(0.24f, 0.68f, 0.91f, 1.00f);
+    colors[ImGuiCol_Tab]                   = ImVec4(0.88f, 0.89f, 0.90f, 1.00f);
+    colors[ImGuiCol_TabHovered]            = ImVec4(0.24f, 0.68f, 0.91f, 0.70f);
+    colors[ImGuiCol_TabActive]             = ImVec4(0.24f, 0.68f, 0.91f, 1.00f);
+    colors[ImGuiCol_TabUnfocused]          = ImVec4(0.85f, 0.86f, 0.87f, 1.00f);
+    colors[ImGuiCol_TabUnfocusedActive]    = ImVec4(0.88f, 0.89f, 0.90f, 1.00f);
+    colors[ImGuiCol_TableHeaderBg]         = ImVec4(0.88f, 0.89f, 0.91f, 1.00f);
+    colors[ImGuiCol_TableBorderStrong]     = ImVec4(0.74f, 0.75f, 0.76f, 1.00f);
+    colors[ImGuiCol_TableBorderLight]      = ImVec4(0.82f, 0.83f, 0.84f, 1.00f);
+    colors[ImGuiCol_TableRowBg]            = ImVec4(0.96f, 0.96f, 0.97f, 1.00f);
+    colors[ImGuiCol_TableRowBgAlt]         = ImVec4(0.92f, 0.93f, 0.94f, 1.00f);
+}
+
+void App::apply_theme() {
+    auto apply_to_current = [this]() {
+        if (m_settings_logic.get_light_theme()) {
+            apply_breeze_light_theme();
+        } else {
+            apply_breeze_dark_theme();
+        }
+
+        ImGuiStyle& style = ImGui::GetStyle();
+        style.WindowRounding    = 4.0f;
+        style.ChildRounding     = 4.0f;
+        style.FrameRounding     = 3.0f;
+        style.PopupRounding     = 4.0f;
+        style.ScrollbarRounding = 4.0f;
+        style.GrabRounding      = 3.0f;
+        style.TabRounding       = 3.0f;
+        style.WindowBorderSize  = 1.0f;
+        style.FrameBorderSize   = 1.0f;
+        style.ItemSpacing       = ImVec2(8.0f, 5.0f);
+        style.FramePadding      = ImVec2(6.0f, 4.0f);
+    };
+
+    if (m_imgui_context) {
+        ImGui::SetCurrentContext(m_imgui_context);
+        apply_to_current();
+    }
+    if (m_preview_imgui_ctx) {
+        ImGui::SetCurrentContext(m_preview_imgui_ctx);
+        apply_to_current();
+    }
+    if (m_export_imgui_ctx) {
+        ImGui::SetCurrentContext(m_export_imgui_ctx);
+        apply_to_current();
+    }
+    if (m_imgui_context) {
+        ImGui::SetCurrentContext(m_imgui_context);
+    }
+}
+
+void App::apply_kde_plasma_theme() {
+    apply_theme();
 }
 
 void App::set_playhead_time(double t) {
@@ -305,6 +411,25 @@ void App::on_project_modified() {
 void App::set_selected_clip_id(const std::string& id) {
     m_selected_clip_id = id;
     m_keyframe_editor.set_selected_clip(id);
+}
+
+Clip* App::find_selected_clip() {
+    if (m_selected_clip_id.empty()) return nullptr;
+    int t_idx = -1, c_idx = -1;
+    return m_project.find_clip_mut(m_selected_clip_id, &t_idx, &c_idx);
+}
+
+bool App::is_selected_clip_visual() {
+    Clip* c = find_selected_clip();
+    if (!c) return false;
+    for (const auto& track : m_project.tracks) {
+        if (track.type == "video") {
+            for (const auto& clip : track.clips) {
+                if (clip.id == c->id) return true;
+            }
+        }
+    }
+    return false;
 }
 
 void App::set_status_notification(const std::string& msg, double duration) {
@@ -681,8 +806,8 @@ void App::export_path_browser() {
         NativeFileDialog::save_file(
             "Select Export Destination",
             default_file,
-            "MP4 Video (*.mp4)",
-            "*.mp4",
+            "Any Supported Format (*.mp4 *.gif *.webp)",
+            "*.mp4 *.gif *.webp",
             [this](const std::string& path) {
                 m_export_manager.set_output_path(path);
             }
@@ -693,9 +818,13 @@ void App::export_path_browser() {
     m_file_browser.open(
         "Select Export Destination",
         FileBrowserMode::SaveFile,
-        { { "MP4 Video (*.mp4)", { ".mp4" } }, { "All Files (*.*)", { ".*" } } },
+        { { "Any Supported Format (*.mp4, *.gif, *.webp)", { ".mp4", ".gif", ".webp" } },
+          { "MP4 Video (*.mp4)", { ".mp4" } },
+          { "Animated GIF (*.gif)", { ".gif" } },
+          { "Animated WebP (*.webp)", { ".webp" } },
+          { "All Files (*.*)", { ".*" } } },
         default_file,
-        ".mp4",
+        "",
         [this](const std::string& path) {
             m_export_manager.set_output_path(path);
         },
@@ -706,22 +835,77 @@ void App::export_path_browser() {
 void App::process_events() {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
-        ImGui_ImplSDL2_ProcessEvent(&event);
+        Uint32 wid = get_event_window_id(event);
+        if (m_export_window && wid == SDL_GetWindowID(m_export_window)) {
+            if (m_export_imgui_ctx) {
+                ImGui::SetCurrentContext(m_export_imgui_ctx);
+                ImGui_ImplSDL2_ProcessEvent(&event);
+            }
+        } else if (m_preview_window && wid == SDL_GetWindowID(m_preview_window)) {
+            if (m_preview_imgui_ctx) {
+                ImGui::SetCurrentContext(m_preview_imgui_ctx);
+                ImGui_ImplSDL2_ProcessEvent(&event);
+            }
+        } else {
+            ImGui::SetCurrentContext(m_imgui_context);
+            ImGui_ImplSDL2_ProcessEvent(&event);
+        }
 
         if (event.type == SDL_QUIT) {
             m_running = false;
-        } else if (event.type == SDL_TEXTEDITING) {
-            m_ime_composition = event.edit.text;
-            m_ime_cursor = event.edit.start;
-            m_ime_selection_len = event.edit.length;
-            m_text_preview_dirty = true;
-        } else if (event.type == SDL_TEXTINPUT) {
-            m_ime_composition.clear();
-            m_text_preview_dirty = true;
         } else if (event.type == SDL_WINDOWEVENT) {
-            if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
-                m_window_width = event.window.data1;
-                m_window_height = event.window.data2;
+            if (m_preview_window && event.window.windowID == SDL_GetWindowID(m_preview_window)) {
+                if (event.window.event == SDL_WINDOWEVENT_CLOSE) {
+                    set_preview_popped_out(false);
+                }
+            } else if (m_export_window && event.window.windowID == SDL_GetWindowID(m_export_window)) {
+                if (event.window.event == SDL_WINDOWEVENT_CLOSE) {
+                    if (m_export_manager.is_exporting()) {
+                        m_export_manager.cancel_export();
+                    }
+                    m_export_manager.close_export_dialog();
+                    m_export_manager.dismiss_status();
+                }
+            } else if (m_window && event.window.windowID == SDL_GetWindowID(m_window)) {
+                if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
+                    m_window_width = event.window.data1;
+                    m_window_height = event.window.data2;
+                }
+            }
+        } else if (event.type == SDL_KEYDOWN) {
+            if (m_preview_window && event.key.windowID == SDL_GetWindowID(m_preview_window)) {
+                if (event.key.keysym.sym == SDLK_ESCAPE) {
+                    set_preview_popped_out(false);
+                } else if (event.key.keysym.sym == SDLK_SPACE) {
+                    toggle_playback();
+                } else if (event.key.keysym.sym == SDLK_F11) {
+                    Uint32 flags = SDL_GetWindowFlags(m_preview_window);
+                    bool is_fullscreen = (flags & SDL_WINDOW_FULLSCREEN_DESKTOP) != 0;
+                    SDL_SetWindowFullscreen(m_preview_window, is_fullscreen ? 0 : SDL_WINDOW_FULLSCREEN_DESKTOP);
+                }
+            } else if (m_export_window && event.key.windowID == SDL_GetWindowID(m_export_window)) {
+                if (event.key.keysym.sym == SDLK_ESCAPE) {
+                    if (!m_export_manager.is_exporting()) {
+                        m_export_manager.close_export_dialog();
+                        m_export_manager.dismiss_status();
+                    }
+                }
+            }
+        } else if (event.type == SDL_TEXTEDITING) {
+            if (ImGui::GetIO().WantTextInput) {
+                m_ime_composition = event.edit.text;
+                m_ime_cursor = event.edit.start;
+                m_ime_selection_len = event.edit.length;
+                m_text_preview_dirty = true;
+            } else {
+                m_ime_composition.clear();
+            }
+        } else if (event.type == SDL_TEXTINPUT) {
+            if (ImGui::GetIO().WantTextInput) {
+                m_ime_composition.clear();
+                m_text_preview_dirty = true;
+            } else {
+                m_ime_composition.clear();
             }
         } else if (event.type == SDL_DROPFILE) {
             char* dropped_file = event.drop.file;
@@ -755,6 +939,9 @@ void App::process_events() {
             }
         }
     }
+    if (m_imgui_context) {
+        ImGui::SetCurrentContext(m_imgui_context);
+    }
 }
 
 void App::update(double delta_time) {
@@ -762,6 +949,20 @@ void App::update(double delta_time) {
     m_script_engine.update(delta_time);
 
     ImGuiIO& io = ImGui::GetIO();
+
+    // Synchronize SDL text input state with Dear ImGui's text input focus.
+    // When no text widget is active, deactivate OS IME so it does not intercept
+    // timeline keyboard shortcuts across different language keyboard layouts.
+    if (io.WantTextInput) {
+        if (!SDL_IsTextInputActive()) {
+            SDL_StartTextInput();
+        }
+    } else {
+        if (SDL_IsTextInputActive()) {
+            SDL_StopTextInput();
+        }
+        m_ime_composition.clear();
+    }
 
     // ------------------------------------------------------------------------
     // Reliable Frame-Synchronized Keyboard Shortcuts
@@ -795,6 +996,13 @@ void App::update(double delta_time) {
             m_playhead_time = m_project.get_total_duration();
             m_audio_engine.set_playhead_time(m_playhead_time);
             m_media_decoder.request_frame(m_playhead_time, m_project);
+        }
+
+        // Transform Tool Hotkey: T (or Q) toggles universal transform gizmo
+        if (!io.KeyCtrl && !io.KeyAlt && !io.KeyShift) {
+            if (ImGui::IsKeyPressed(ImGuiKey_T, false) || ImGui::IsKeyPressed(ImGuiKey_Q, false)) {
+                m_preview_transform_enabled = !m_preview_transform_enabled;
+            }
         }
 
         // S: Split selected clip at playhead
@@ -947,7 +1155,7 @@ void App::render_menu_bar() {
             if (ImGui::MenuItem(_TR("edit_select_all"), "Ctrl+A")) {
                 m_timeline.select_all(m_project);
             }
-            if (ImGui::MenuItem(_TR("edit_split"), "S", false, !m_selected_clip_id.empty())) {
+            if (ImGui::MenuItem(_TR("edit_split"), "S", false, has_sel || !m_project.tracks.empty())) {
                 push_undo_state();
                 m_timeline.split_selected_clip(m_project, m_playhead_time);
                 m_media_decoder.request_frame(m_playhead_time, m_project);
@@ -965,12 +1173,28 @@ void App::render_menu_bar() {
             ImGui::EndMenu();
         }
 
-        if (ImGui::BeginMenu(_TR("menu_project"))) {
+        if (ImGui::BeginMenu(_TR("menu_assets"))) {
             if (ImGui::MenuItem(_TR("project_import_video"), "Ctrl+I")) { import_video_browser(); }
             if (ImGui::MenuItem(_TR("project_import_audio"))) { import_audio_browser(); }
             if (ImGui::MenuItem(_TR("project_import_image"))) { import_image_browser(); }
             if (ImGui::MenuItem(_TR("project_import_prefab"))) { import_prefab_browser(); }
+            ImGui::Separator();
             if (ImGui::MenuItem(_TR("text_add_asset"))) { open_text_dialog(); }
+            if (ImGui::MenuItem("Add Text-to-Speech...")) { open_tts_dialog(); }
+            ImGui::Separator();
+            if (ImGui::MenuItem("Add Subtitle...")) { add_subtitle_at_playhead(); }
+            if (ImGui::MenuItem("Add Subtitle Track")) {
+                m_timeline.add_track(m_project, "subtitle");
+                on_project_modified();
+            }
+            ImGui::EndMenu();
+        }
+
+        if (ImGui::BeginMenu(_TR("menu_project"))) {
+            if (ImGui::BeginMenu("AI Tools")) {
+                if (ImGui::MenuItem("AI Script Generator...")) { open_ai_dialog(); }
+                ImGui::EndMenu();
+            }
             ImGui::Separator();
             if (ImGui::MenuItem(_TR("project_generate_demo"))) {
                 std::string test_v = "demo_colorbars.mp4";
@@ -985,24 +1209,6 @@ void App::render_menu_bar() {
             ImGui::Separator();
             if (ImGui::MenuItem(_TR("project_cleanup_temp"))) {
                 cleanup_temp_files();
-            }
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu(_TR("menu_settings"))) {
-            bool use_sys = m_use_system_file_dialog;
-            if (ImGui::MenuItem(_TR("settings_system_dialog"), nullptr, &use_sys)) {
-                m_use_system_file_dialog = use_sys;
-                save_settings();
-            }
-            if (ImGui::BeginMenu(_TR("settings_language"))) {
-                std::string cur_lang = LocaleManager::instance().current_locale();
-                for (const auto& lang : LocaleManager::instance().get_available_languages()) {
-                    if (ImGui::MenuItem(lang.name.c_str(), nullptr, cur_lang == lang.code)) {
-                        set_language(lang.code);
-                    }
-                }
-                ImGui::EndMenu();
             }
             ImGui::EndMenu();
         }
@@ -1065,15 +1271,64 @@ void App::render_menu_bar() {
 
         // Right-aligned notifications & status indicators
         if (!m_status_notification.empty()) {
-            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - ImGui::CalcTextSize(m_status_notification.c_str()).x - 220.0f);
+            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - ImGui::CalcTextSize(m_status_notification.c_str()).x - 260.0f);
             ImGui::TextColored(ImVec4(0.2f, 0.85f, 0.45f, 1.0f), "%s", m_status_notification.c_str());
         }
 
         float avail = ImGui::GetContentRegionAvail().x;
-        if (avail > 200.0f) {
+        if (avail > 260.0f) {
             std::string status = "Project: " + m_project.name + " | Time: " + format_timecode(m_playhead_time);
-            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - ImGui::CalcTextSize(status.c_str()).x - 20.0f);
+            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - ImGui::CalcTextSize(status.c_str()).x - 55.0f);
             ImGui::TextDisabled("%s", status.c_str());
+        }
+
+        // Far-right Gear icon button to open SettingsDialog
+        float gear_btn_w = 28.0f;
+        float gear_btn_h = 24.0f;
+        float right_x = ImGui::GetWindowWidth() - gear_btn_w - 8.0f;
+        if (right_x > ImGui::GetCursorPosX()) {
+            ImGui::SetCursorPosX(right_x);
+        }
+
+        ImVec2 p_min = ImGui::GetCursorScreenPos();
+        ImVec2 p_max = ImVec2(p_min.x + gear_btn_w, p_min.y + gear_btn_h);
+
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.24f, 0.68f, 0.91f, 0.35f));
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.24f, 0.68f, 0.91f, 0.60f));
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(3, 2));
+
+        bool clicked = false;
+        if (m_settings_icon_texture != 0) {
+            clicked = ImGui::ImageButton("##GearSettingsBtn",
+                                         (ImTextureID)(intptr_t)m_settings_icon_texture,
+                                         ImVec2(18, 18),
+                                         ImVec2(0, 0), ImVec2(1, 1),
+                                         ImVec4(0, 0, 0, 0),
+                                         ImVec4(0.92f, 0.94f, 0.96f, 1.0f));
+        } else {
+            clicked = ImGui::Button("##GearSettingsFallback", ImVec2(gear_btn_w, gear_btn_h));
+            ImDrawList* dl = ImGui::GetWindowDrawList();
+            ImVec2 center = ImVec2((p_min.x + p_max.x) * 0.5f, (p_min.y + p_max.y) * 0.5f);
+            ImU32 icon_col = ImGui::IsItemHovered() ? IM_COL32(61, 174, 233, 255) : IM_COL32(230, 235, 240, 240);
+            dl->AddCircle(center, 6.0f, icon_col, 16, 2.0f);
+            dl->AddCircleFilled(center, 2.5f, icon_col);
+            for (int i = 0; i < 8; ++i) {
+                float a = i * (3.14159265f / 4.0f);
+                ImVec2 t1 = ImVec2(center.x + std::cos(a) * 6.0f, center.y + std::sin(a) * 6.0f);
+                ImVec2 t2 = ImVec2(center.x + std::cos(a) * 9.0f, center.y + std::sin(a) * 9.0f);
+                dl->AddLine(t1, t2, icon_col, 2.0f);
+            }
+        }
+
+        ImGui::PopStyleVar();
+        ImGui::PopStyleColor(3);
+
+        if (clicked) {
+            open_settings_dialog();
+        }
+        if (ImGui::IsItemHovered()) {
+            ImGui::SetTooltip("%s", _TR("menu_settings"));
         }
 
         ImGui::EndMainMenuBar();
@@ -1087,7 +1342,7 @@ void App::render_shelf_dock() {
 
 void App::render_clip_panel() {
     std::string title = std::string(_TR("panel_clips")) + "###ClipsPanel";
-    ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoCollapse);
+    ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
     m_clip_manager.render_ui(
         m_project, m_playhead_time,
@@ -1127,6 +1382,10 @@ void App::render_clip_panel() {
         // On add text
         [this]() {
             open_text_dialog();
+        },
+        // On add tts
+        [this]() {
+            open_tts_dialog();
         }
     );
 
@@ -1134,16 +1393,274 @@ void App::render_clip_panel() {
     ImGui::End();
 }
 
+
+void App::render_popout_preview_window() {
+    if (!m_preview_window || !m_preview_imgui_ctx) return;
+
+    SDL_GL_MakeCurrent(m_preview_window, m_gl_context);
+    ImGui::SetCurrentContext(m_preview_imgui_ctx);
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplSDL2_NewFrame();
+    ImGui::NewFrame();
+
+    int pw = 0, ph = 0;
+    SDL_GL_GetDrawableSize(m_preview_window, &pw, &ph);
+
+    ImGui::SetNextWindowPos(ImVec2(0, 0));
+    ImGui::SetNextWindowSize(ImVec2(static_cast<float>(pw), static_cast<float>(ph)));
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                             ImGuiWindowFlags_NoBringToFrontOnFocus;
+    if (ImGui::Begin("DetachedPreviewWindowRoot", nullptr, flags)) {
+        render_preview_contents(true);
+        ImGui::End();
+    }
+
+    ImGui::Render();
+    glViewport(0, 0, pw, ph);
+    glClearColor(0.04f, 0.04f, 0.05f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    SDL_GL_SwapWindow(m_preview_window);
+
+    // Restore main context
+    SDL_GL_MakeCurrent(m_window, m_gl_context);
+    ImGui::SetCurrentContext(m_imgui_context);
+}
+
+void App::render_export_os_window() {
+    if (!m_export_window || !m_export_imgui_ctx) return;
+
+    // Update window title with progress if exporting
+    if (m_export_manager.is_exporting()) {
+        char buf[128];
+        snprintf(buf, sizeof(buf), "Exporting Timeline (%.0f%%) - Minicut", m_export_manager.get_progress() * 100.0f);
+        SDL_SetWindowTitle(m_export_window, buf);
+    } else if (m_export_manager.is_finished()) {
+        SDL_SetWindowTitle(m_export_window, "Export Finished - Minicut");
+    } else if (m_export_manager.is_error()) {
+        SDL_SetWindowTitle(m_export_window, "Export Error - Minicut");
+    } else {
+        SDL_SetWindowTitle(m_export_window, "Export Timeline Media - Minicut");
+    }
+
+    SDL_GL_MakeCurrent(m_export_window, m_gl_context);
+    ImGui::SetCurrentContext(m_export_imgui_ctx);
+    ImGui_ImplOpenGL3_NewFrame();
+    ImGui_ImplSDL2_NewFrame();
+    ImGui::NewFrame();
+
+    int ew = 0, eh = 0;
+    SDL_GL_GetDrawableSize(m_export_window, &ew, &eh);
+
+    m_export_manager.render_ui(
+        [this](const ExportConfig& cfg) {
+            m_export_manager.start_export(m_project, cfg);
+        },
+        true // standalone_window
+    );
+
+    ImGui::Render();
+    glViewport(0, 0, ew, eh);
+    glClearColor(0.14f, 0.15f, 0.18f, 1.0f);
+    glClear(GL_COLOR_BUFFER_BIT);
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    SDL_GL_SwapWindow(m_export_window);
+
+    // Restore main context
+    SDL_GL_MakeCurrent(m_window, m_gl_context);
+    ImGui::SetCurrentContext(m_imgui_context);
+}
+
 void App::render_preview_panel() {
     std::string title = std::string(_TR("panel_preview")) + "###PreviewPanel";
-    ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoCollapse);
+    ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
-    ImVec2 avail = ImGui::GetContentRegionAvail();
+    if (m_preview_popped_out) {
+        ImVec2 avail = ImGui::GetContentRegionAvail();
+        float btn_w = 260.0f;
+        float btn_h = 36.0f;
+        float center_x = std::max(10.0f, (avail.x - btn_w) * 0.5f);
+        float center_y = std::max(10.0f, (avail.y - btn_h) * 0.5f - 20.0f);
+        ImGui::SetCursorPos(ImVec2(center_x, center_y));
+        ImGui::TextColored(ImVec4(0.40f, 0.75f, 1.0f, 1.0f), "Video Preview is Detached (Separate Window)");
+        ImGui::SetCursorPosX(center_x - 30.0f);
+        ImGui::TextDisabled("Drag preview window across monitors. Press F11 for Fullscreen.");
+        ImGui::SetCursorPosX(center_x);
+        ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 10.0f);
+        if (ImGui::Button("Attach Preview Back (Dock)", ImVec2(btn_w, btn_h))) {
+            set_preview_popped_out(false);
+        }
+    } else {
+        render_preview_contents(false);
+    }
+    ImGui::End();
+}
+
+void App::render_preview_toolbar(bool is_detached) {
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(4.0f, 3.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(4.0f, 0.0f));
+
+    // 1. Universal Transform Toggle Button
+    if (m_preview_transform_enabled) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.24f, 0.68f, 0.91f, 0.60f));
+    }
+    if (ImGui::ImageButton("##btn_transform", (ImTextureID)(intptr_t)m_icon_tex_transform, ImVec2(20, 20))) {
+        m_preview_transform_enabled = !m_preview_transform_enabled;
+    }
+    if (m_preview_transform_enabled) {
+        ImGui::PopStyleColor();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Transform Tool (T)\nToggle universal transform gizmo (drag inside to move, corners to scale, top pin to rotate).");
+    }
+
+    ImGui::SameLine();
+    // 2. Reset Button
+    if (ImGui::ImageButton("##btn_reset", (ImTextureID)(intptr_t)m_icon_tex_reset, ImVec2(20, 20))) {
+        Clip* clip = find_selected_clip();
+        if (clip && is_selected_clip_visual()) {
+            push_undo_state();
+            double r_t = clip->clip_relative_time(m_playhead_time);
+            clip->pos_x = 0.0;
+            clip->pos_y = 0.0;
+            clip->scale = 1.0;
+            clip->rotation = 0.0;
+            if (!m_project.get_clip_keyframes(clip->id, "pos_x").empty()) {
+                m_project.set_or_add_keyframe(clip->id, "pos_x", r_t, 0.0);
+            }
+            if (!m_project.get_clip_keyframes(clip->id, "pos_y").empty()) {
+                m_project.set_or_add_keyframe(clip->id, "pos_y", r_t, 0.0);
+            }
+            if (!m_project.get_clip_keyframes(clip->id, "scale").empty()) {
+                m_project.set_or_add_keyframe(clip->id, "scale", r_t, 1.0);
+            }
+            if (!m_project.get_clip_keyframes(clip->id, "rotation").empty()) {
+                m_project.set_or_add_keyframe(clip->id, "rotation", r_t, 0.0);
+            }
+            on_project_modified();
+            m_media_decoder.request_frame(m_playhead_time, m_project);
+        }
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Reset Transform\nCenter and reset scale (1.0) & rotation (0°).");
+    }
+
+    ImGui::SameLine();
+    ImGui::SeparatorEx(ImGuiSeparatorFlags_Vertical);
+    ImGui::SameLine();
+
+    // Quick numerical properties for selected visual clip
+    Clip* sel_clip = find_selected_clip();
+    bool is_visual = sel_clip && is_selected_clip_visual();
+    if (is_visual) {
+        double rel_time = sel_clip->clip_relative_time(m_playhead_time);
+        double cur_pos_x = m_project.get_clip_param(*sel_clip, "pos_x", rel_time);
+        double cur_pos_y = m_project.get_clip_param(*sel_clip, "pos_y", rel_time);
+        double cur_scale = m_project.get_clip_param(*sel_clip, "scale", rel_time);
+        double cur_rot   = m_project.get_clip_param(*sel_clip, "rotation", rel_time);
+
+        float px = static_cast<float>(cur_pos_x);
+        float py = static_cast<float>(cur_pos_y);
+        float sc = static_cast<float>(cur_scale);
+        float rot = static_cast<float>(cur_rot);
+
+        ImGui::Text("X:");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(60.0f);
+        if (ImGui::DragFloat("##tx", &px, 1.0f, -4000.0f, 4000.0f, "%.0f")) {
+            push_undo_state();
+            sel_clip->pos_x = px;
+            if (!m_project.get_clip_keyframes(sel_clip->id, "pos_x").empty()) {
+                m_project.set_or_add_keyframe(sel_clip->id, "pos_x", rel_time, px);
+            }
+            on_project_modified();
+            m_media_decoder.request_frame(m_playhead_time, m_project);
+        }
+        ImGui::SameLine();
+        ImGui::Text("Y:");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(60.0f);
+        if (ImGui::DragFloat("##ty", &py, 1.0f, -4000.0f, 4000.0f, "%.0f")) {
+            push_undo_state();
+            sel_clip->pos_y = py;
+            if (!m_project.get_clip_keyframes(sel_clip->id, "pos_y").empty()) {
+                m_project.set_or_add_keyframe(sel_clip->id, "pos_y", rel_time, py);
+            }
+            on_project_modified();
+            m_media_decoder.request_frame(m_playhead_time, m_project);
+        }
+        ImGui::SameLine();
+        ImGui::Text("S:");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(55.0f);
+        if (ImGui::DragFloat("##ts", &sc, 0.01f, 0.05f, 10.0f, "%.2f")) {
+            push_undo_state();
+            sel_clip->scale = std::max(0.01f, sc);
+            if (!m_project.get_clip_keyframes(sel_clip->id, "scale").empty()) {
+                m_project.set_or_add_keyframe(sel_clip->id, "scale", rel_time, sel_clip->scale);
+            }
+            on_project_modified();
+            m_media_decoder.request_frame(m_playhead_time, m_project);
+        }
+        ImGui::SameLine();
+        ImGui::Text("R:");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(55.0f);
+        if (ImGui::DragFloat("##tr", &rot, 0.5f, -360.0f, 360.0f, "%.1f°")) {
+            push_undo_state();
+            sel_clip->rotation = rot;
+            if (!m_project.get_clip_keyframes(sel_clip->id, "rotation").empty()) {
+                m_project.set_or_add_keyframe(sel_clip->id, "rotation", rel_time, rot);
+            }
+            on_project_modified();
+            m_media_decoder.request_frame(m_playhead_time, m_project);
+        }
+    } else {
+        ImGui::TextDisabled("No visual clip selected");
+    }
+
+    // Right-aligned Pop-Out / Dock button
+    float pop_btn_w = 78.0f;
+    float rem_w = ImGui::GetContentRegionAvail().x;
+    if (rem_w > pop_btn_w + 10.0f) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + (rem_w - pop_btn_w));
+    }
+    if (is_detached) {
+        if (ImGui::Button("Dock In##PopIn", ImVec2(pop_btn_w, 24.0f))) {
+            set_preview_popped_out(false);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Dock preview back into main application panel");
+    } else {
+        if (ImGui::Button("Pop Out##PopOut", ImVec2(pop_btn_w, 24.0f))) {
+            set_preview_popped_out(true);
+        }
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("Pop out preview into floating window for dual-monitor workflows");
+    }
+
+    ImGui::PopStyleVar(2);
+    ImGui::Separator();
+}
+
+void App::render_preview_viewport() {
     float transport_h = 38.0f;
-    float video_area_h = avail.y - transport_h;
-    if (video_area_h < 100.0f) video_area_h = 100.0f;
+    ImVec2 avail = ImGui::GetContentRegionAvail();
+    float video_area_h = avail.y - transport_h - 4.0f;
+    if (video_area_h < 80.0f) video_area_h = 80.0f;
 
     float aspect = 16.0f / 9.0f;
+    switch (m_preview_aspect_idx) {
+        case 0: aspect = static_cast<float>(m_project.get_largest_asset_aspect_ratio()); break;
+        case 1: aspect = 16.0f / 9.0f; break;
+        case 2: aspect = 9.0f / 16.0f; break;
+        case 3: aspect = 4.0f / 3.0f; break;
+        case 4: aspect = 1.0f / 1.0f; break;
+        case 5: aspect = 21.0f / 9.0f; break;
+        case 6: aspect = 4.0f / 5.0f; break;
+        default: aspect = static_cast<float>(m_project.get_largest_asset_aspect_ratio()); break;
+    }
+    if (aspect <= 0.05f) aspect = 16.0f / 9.0f;
+
     float disp_w = avail.x;
     float disp_h = disp_w / aspect;
 
@@ -1154,11 +1671,230 @@ void App::render_preview_panel() {
 
     float offset_x = (avail.x - disp_w) * 0.5f;
     float offset_y = (video_area_h - disp_h) * 0.5f;
+    ImVec2 img_screen_pos = ImGui::GetCursorScreenPos();
+    img_screen_pos.x += offset_x;
+    img_screen_pos.y += offset_y;
 
     ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + offset_x, ImGui::GetCursorPosY() + offset_y));
     ImGui::Image((ImTextureID)(intptr_t)m_preview_texture, ImVec2(disp_w, disp_h));
 
-    // Transport Controls
+    // Render active subtitles over video preview
+    for (const auto& track : m_project.tracks) {
+        if (track.type == "subtitle" && !track.muted) {
+            for (const auto& clip : track.clips) {
+                if (clip.contains_time(m_playhead_time) && !clip.subtitle_text.empty()) {
+                    ImVec2 text_size = ImGui::CalcTextSize(clip.subtitle_text.c_str());
+                    float box_pad = 10.0f;
+                    float text_x = img_screen_pos.x + (disp_w - text_size.x) * 0.5f;
+                    float text_y = img_screen_pos.y + disp_h - text_size.y - 24.0f;
+
+                    ImDrawList* dl = ImGui::GetWindowDrawList();
+                    dl->AddRectFilled(ImVec2(text_x - box_pad, text_y - box_pad * 0.5f),
+                                      ImVec2(text_x + text_size.x + box_pad, text_y + text_size.y + box_pad * 0.5f),
+                                      IM_COL32(0, 0, 0, 195), 4.0f);
+                    dl->AddText(ImVec2(text_x, text_y), IM_COL32(255, 255, 255, 255), clip.subtitle_text.c_str());
+                }
+            }
+        }
+    }
+
+    // Render Interactive Transform Gizmo for selected visual clip
+    Clip* sel_clip = find_selected_clip();
+    bool is_visual = sel_clip && is_selected_clip_visual();
+    if (m_preview_transform_enabled && is_visual && sel_clip->contains_time(m_playhead_time)) {
+        double rel_time = sel_clip->clip_relative_time(m_playhead_time);
+        double cur_pos_x = m_project.get_clip_param(*sel_clip, "pos_x", rel_time);
+        double cur_pos_y = m_project.get_clip_param(*sel_clip, "pos_y", rel_time);
+        double cur_scale = m_project.get_clip_param(*sel_clip, "scale", rel_time);
+        double cur_rot   = m_project.get_clip_param(*sel_clip, "rotation", rel_time);
+
+        int src_w = 1280, src_h = 720;
+        const VideoAsset* va = m_project.find_video_asset(sel_clip->asset_id);
+        if (va && va->width > 0 && va->height > 0) {
+            src_w = va->width;
+            src_h = va->height;
+        }
+
+        double base_scale = std::min(1280.0 / src_w, 720.0 / src_h);
+        double total_scale = base_scale * cur_scale;
+        double half_w = (src_w * total_scale) * 0.5;
+        double half_h = (src_h * total_scale) * 0.5;
+
+        double f_rad = cur_rot * (3.14159265358979323846 / 180.0);
+        double cos_f = std::cos(f_rad);
+        double sin_f = std::sin(f_rad);
+
+        double cx_1280 = 1280.0 * 0.5 + cur_pos_x;
+        double cy_720  = 720.0  * 0.5 + cur_pos_y;
+
+        double corners_x[4] = { -half_w,  half_w,  half_w, -half_w };
+        double corners_y[4] = { -half_h, -half_h,  half_h,  half_h };
+
+        ImVec2 screen_corners[4];
+        for (int k = 0; k < 4; ++k) {
+            double px = cx_1280 + corners_x[k] * cos_f - corners_y[k] * sin_f;
+            double py = cy_720  + corners_x[k] * sin_f + corners_y[k] * cos_f;
+            screen_corners[k].x = img_screen_pos.x + static_cast<float>((px / 1280.0) * disp_w);
+            screen_corners[k].y = img_screen_pos.y + static_cast<float>((py / 720.0) * disp_h);
+        }
+
+        ImVec2 screen_center;
+        screen_center.x = img_screen_pos.x + static_cast<float>((cx_1280 / 1280.0) * disp_w);
+        screen_center.y = img_screen_pos.y + static_cast<float>((cy_720 / 720.0) * disp_h);
+
+        ImVec2 top_mid;
+        top_mid.x = (screen_corners[0].x + screen_corners[1].x) * 0.5f;
+        top_mid.y = (screen_corners[0].y + screen_corners[1].y) * 0.5f;
+
+        float pin_dist = 28.0f;
+        ImVec2 rot_pin(top_mid.x + static_cast<float>(sin_f) * pin_dist,
+                       top_mid.y - static_cast<float>(cos_f) * pin_dist);
+
+        ImVec2 mouse_pos = ImGui::GetIO().MousePos;
+        bool is_window_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
+
+        // Check hover on rotation pin
+        bool hovered_rot_pin = is_window_hovered && (std::hypot(mouse_pos.x - rot_pin.x, mouse_pos.y - rot_pin.y) <= 10.0f);
+
+        // Check hover on corners
+        int hovered_corner = -1;
+        if (is_window_hovered && !hovered_rot_pin) {
+            for (int k = 0; k < 4; ++k) {
+                if (std::hypot(mouse_pos.x - screen_corners[k].x, mouse_pos.y - screen_corners[k].y) <= 9.0f) {
+                    hovered_corner = k;
+                    break;
+                }
+            }
+        }
+
+        // Check point in quad
+        auto pt_in_quad = [](const ImVec2& pt, const ImVec2* p) -> bool {
+            float c[4];
+            for (int i = 0; i < 4; ++i) {
+                int n = (i + 1) % 4;
+                c[i] = (p[n].x - p[i].x) * (pt.y - p[i].y) - (p[n].y - p[i].y) * (pt.x - p[i].x);
+            }
+            bool all_pos = (c[0] >= 0.0f && c[1] >= 0.0f && c[2] >= 0.0f && c[3] >= 0.0f);
+            bool all_neg = (c[0] <= 0.0f && c[1] <= 0.0f && c[2] <= 0.0f && c[3] <= 0.0f);
+            return all_pos || all_neg;
+        };
+        bool inside_quad = is_window_hovered && hovered_corner < 0 && !hovered_rot_pin && pt_in_quad(mouse_pos, screen_corners);
+
+        // Mouse Drag Start
+        if (ImGui::IsMouseClicked(ImGuiMouseButton_Left) && is_window_hovered) {
+            if (hovered_rot_pin) {
+                m_gizmo_drag_mode = GizmoDragMode::RotateCorner;
+                m_gizmo_drag_start_mouse = mouse_pos;
+                m_gizmo_orig_rotation = cur_rot;
+                m_gizmo_orig_angle = std::atan2(mouse_pos.y - screen_center.y, mouse_pos.x - screen_center.x) * (180.0 / 3.141592653589793);
+                push_undo_state();
+            } else if (hovered_corner >= 0) {
+                m_gizmo_drag_corner = hovered_corner;
+                m_gizmo_drag_start_mouse = mouse_pos;
+                m_gizmo_drag_mode = GizmoDragMode::ScaleCorner;
+                m_gizmo_orig_scale = cur_scale;
+                m_gizmo_orig_dist = std::max(1.0f, std::hypot(mouse_pos.x - screen_center.x, mouse_pos.y - screen_center.y));
+                push_undo_state();
+            } else if (inside_quad) {
+                m_gizmo_drag_mode = GizmoDragMode::Translate;
+                m_gizmo_drag_start_mouse = mouse_pos;
+                m_gizmo_orig_pos_x = cur_pos_x;
+                m_gizmo_orig_pos_y = cur_pos_y;
+                push_undo_state();
+            }
+        }
+
+        // Mouse Drag Execution
+        if (m_gizmo_drag_mode != GizmoDragMode::None) {
+            if (ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                if (m_gizmo_drag_mode == GizmoDragMode::Translate) {
+                    float dx = mouse_pos.x - m_gizmo_drag_start_mouse.x;
+                    float dy = mouse_pos.y - m_gizmo_drag_start_mouse.y;
+                    double new_x = m_gizmo_orig_pos_x + static_cast<double>(dx * (1280.0f / disp_w));
+                    double new_y = m_gizmo_orig_pos_y + static_cast<double>(dy * (720.0f / disp_h));
+                    sel_clip->pos_x = new_x;
+                    sel_clip->pos_y = new_y;
+                    if (!m_project.get_clip_keyframes(sel_clip->id, "pos_x").empty()) {
+                        m_project.set_or_add_keyframe(sel_clip->id, "pos_x", rel_time, new_x);
+                    }
+                    if (!m_project.get_clip_keyframes(sel_clip->id, "pos_y").empty()) {
+                        m_project.set_or_add_keyframe(sel_clip->id, "pos_y", rel_time, new_y);
+                    }
+                    on_project_modified();
+                    m_media_decoder.request_frame(m_playhead_time, m_project);
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+                } else if (m_gizmo_drag_mode == GizmoDragMode::ScaleCorner) {
+                    float cur_dist = std::hypot(mouse_pos.x - screen_center.x, mouse_pos.y - screen_center.y);
+                    double ratio = cur_dist / m_gizmo_orig_dist;
+                    double new_scale = std::max(0.01, m_gizmo_orig_scale * ratio);
+                    sel_clip->scale = new_scale;
+                    if (!m_project.get_clip_keyframes(sel_clip->id, "scale").empty()) {
+                        m_project.set_or_add_keyframe(sel_clip->id, "scale", rel_time, new_scale);
+                    }
+                    on_project_modified();
+                    m_media_decoder.request_frame(m_playhead_time, m_project);
+                    ImGui::SetMouseCursor((m_gizmo_drag_corner == 0 || m_gizmo_drag_corner == 2) ? ImGuiMouseCursor_ResizeNWSE : ImGuiMouseCursor_ResizeNESW);
+                } else if (m_gizmo_drag_mode == GizmoDragMode::RotateCorner) {
+                    double cur_angle = std::atan2(mouse_pos.y - screen_center.y, mouse_pos.x - screen_center.x) * (180.0 / 3.141592653589793);
+                    double delta_angle = cur_angle - m_gizmo_orig_angle;
+                    double new_rot = m_gizmo_orig_rotation + delta_angle;
+                    sel_clip->rotation = new_rot;
+                    if (!m_project.get_clip_keyframes(sel_clip->id, "rotation").empty()) {
+                        m_project.set_or_add_keyframe(sel_clip->id, "rotation", rel_time, new_rot);
+                    }
+                    on_project_modified();
+                    m_media_decoder.request_frame(m_playhead_time, m_project);
+                    ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+                }
+            } else {
+                m_gizmo_drag_mode = GizmoDragMode::None;
+                m_gizmo_drag_corner = -1;
+            }
+        } else {
+            // Set hover cursor
+            if (hovered_rot_pin) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
+            } else if (hovered_corner >= 0) {
+                ImGui::SetMouseCursor((hovered_corner == 0 || hovered_corner == 2) ? ImGuiMouseCursor_ResizeNWSE : ImGuiMouseCursor_ResizeNESW);
+            } else if (inside_quad) {
+                ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
+            }
+        }
+
+        // Draw Gizmo Overlay
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        // 1. Quad outline
+        ImVec2 quad_pts[5] = { screen_corners[0], screen_corners[1], screen_corners[2], screen_corners[3], screen_corners[0] };
+        dl->AddPolyline(quad_pts, 5, IM_COL32(61, 174, 233, 230), 0, 1.8f);
+
+        // 2. Line to rotation pin
+        dl->AddLine(top_mid, rot_pin, IM_COL32(61, 174, 233, 200), 1.5f);
+
+        // 3. Rotation pin circle
+        bool pin_active = (m_gizmo_drag_mode == GizmoDragMode::RotateCorner) || (hovered_rot_pin && m_gizmo_drag_mode == GizmoDragMode::None);
+        dl->AddCircleFilled(rot_pin, 6.0f, pin_active ? IM_COL32(255, 220, 50, 255) : IM_COL32(61, 174, 233, 255));
+        dl->AddCircle(rot_pin, 6.5f, IM_COL32(20, 25, 30, 255), 0, 1.5f);
+
+        // 4. Center crosshair
+        float ch = 7.0f;
+        dl->AddLine(ImVec2(screen_center.x - ch, screen_center.y), ImVec2(screen_center.x + ch, screen_center.y), IM_COL32(255, 255, 255, 220), 1.2f);
+        dl->AddLine(ImVec2(screen_center.x, screen_center.y - ch), ImVec2(screen_center.x, screen_center.y + ch), IM_COL32(255, 255, 255, 220), 1.2f);
+
+        // 5. 4 Corner handle boxes
+        for (int k = 0; k < 4; ++k) {
+            bool corner_active = (m_gizmo_drag_mode == GizmoDragMode::ScaleCorner && m_gizmo_drag_corner == k) ||
+                                 (hovered_corner == k && m_gizmo_drag_mode == GizmoDragMode::None);
+            ImU32 fill_col = corner_active ? IM_COL32(255, 220, 50, 255) : IM_COL32(255, 255, 255, 255);
+            ImVec2 p_min(screen_corners[k].x - 4.5f, screen_corners[k].y - 4.5f);
+            ImVec2 p_max(screen_corners[k].x + 4.5f, screen_corners[k].y + 4.5f);
+            dl->AddRectFilled(p_min, p_max, fill_col, 1.5f);
+            dl->AddRect(p_min, p_max, IM_COL32(61, 174, 233, 255), 1.5f, 0, 1.5f);
+        }
+    }
+}
+
+void App::render_preview_transport() {
+    float transport_h = 38.0f;
     ImGui::SetCursorPosY(ImGui::GetWindowHeight() - transport_h - 4.0f);
     ImGui::Separator();
 
@@ -1193,12 +1929,33 @@ void App::render_preview_panel() {
     ImGui::Checkbox("Loop", &m_loop_playback);
 
     ImGui::SameLine();
+    ImGui::SetNextItemWidth(105.0f);
+    char auto_ar_label[64];
+    double largest_ar = m_project.get_largest_asset_aspect_ratio();
+    snprintf(auto_ar_label, sizeof(auto_ar_label), "Auto (%.2f:1)", largest_ar);
+    const char* aspect_options[] = {
+        auto_ar_label,
+        "16:9 Wide",
+        "9:16 Shorts",
+        "4:3 Standard",
+        "1:1 Square",
+        "21:9 Cinema",
+        "4:5 Portrait"
+    };
+    ImGui::Combo("##preview_aspect", &m_preview_aspect_idx, aspect_options, IM_ARRAYSIZE(aspect_options));
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Preview Aspect Ratio\nDefault: Auto (adapts to timeline asset with largest aspect ratio)");
+    }
+
+    ImGui::SameLine();
     ImGui::Text("%s / %s", format_timecode(m_playhead_time).c_str(), format_timecode(m_project.get_total_duration()).c_str());
 
-    // Scrub Slider
+    // Scrub Slider & Preview Volume Adjustment (dB)
     ImGui::SameLine();
-    float scrub_w = ImGui::GetContentRegionAvail().x - 10.0f;
-    if (scrub_w > 80.0f) {
+    float p_avail_w = ImGui::GetContentRegionAvail().x;
+    float vol_slider_w = 90.0f;
+    float scrub_w = p_avail_w - vol_slider_w - 15.0f;
+    if (scrub_w > 50.0f) {
         ImGui::SetNextItemWidth(scrub_w);
         float t_val = static_cast<float>(m_playhead_time);
         if (ImGui::SliderFloat("##scrub", &t_val, 0.0f, static_cast<float>(m_project.get_total_duration()), "")) {
@@ -1208,12 +1965,34 @@ void App::render_preview_panel() {
         }
     }
 
-    ImGui::End();
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(vol_slider_w);
+    float vol_db = m_audio_engine.get_preview_volume_db();
+    char vol_str[32];
+    if (vol_db <= -59.5f) {
+        snprintf(vol_str, sizeof(vol_str), "Mute");
+    } else {
+        snprintf(vol_str, sizeof(vol_str), "%+.1f dB", vol_db);
+    }
+    if (ImGui::SliderFloat("##preview_vol_db", &vol_db, -60.0f, 6.0f, vol_str)) {
+        m_audio_engine.set_preview_volume_db(vol_db);
+        m_settings_logic.set_preview_volume_db(vol_db);
+        m_settings_logic.save_to_disk();
+    }
+    if (ImGui::IsItemHovered()) {
+        ImGui::SetTooltip("Preview Audio Volume (-60 dB to +6 dB)\nDouble-click to enter value directly.");
+    }
+}
+
+void App::render_preview_contents(bool is_detached) {
+    render_preview_toolbar(is_detached);
+    render_preview_viewport();
+    render_preview_transport();
 }
 
 void App::render_timeline_panel() {
     std::string title = std::string(_TR("panel_timeline")) + "###TimelinePanel";
-    ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoCollapse);
+    ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus);
 
     m_timeline.render_ui(
         m_project, m_playhead_time, m_selected_clip_id,
@@ -1251,6 +2030,8 @@ void App::render_context_panel() {
             const Track& tr = m_project.tracks[t_idx];
             if (tr.type == "audio") {
                 title = "Context: Audio Tools & Keyframes###ContextPanel";
+            } else if (tr.type == "subtitle" || !clip->subtitle_text.empty()) {
+                title = "Context: Subtitle Inspector###ContextPanel";
             } else {
                 const VideoAsset* va = m_project.find_video_asset(clip->asset_id);
                 if (va && va->is_image) {
@@ -1262,7 +2043,14 @@ void App::render_context_panel() {
         }
     }
 
-    ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoCollapse);
+    // Enhance scrollbar visibility and styling for Context Inspector
+    ImGui::PushStyleVar(ImGuiStyleVar_ScrollbarSize, 16.0f);
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarBg, ImVec4(0.12f, 0.14f, 0.18f, 0.85f));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, ImVec4(0.35f, 0.58f, 0.82f, 0.85f));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, ImVec4(0.45f, 0.70f, 0.95f, 1.00f));
+    ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, ImVec4(0.55f, 0.80f, 1.00f, 1.00f));
+
+    ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_AlwaysVerticalScrollbar);
     m_keyframe_editor.render_ui(
         m_project, m_playhead_time,
         [this](double new_t) {
@@ -1276,7 +2064,19 @@ void App::render_context_panel() {
             m_media_decoder.request_frame(m_playhead_time, m_project);
         }
     );
+
+    // If more content exists below the scroll view, show an obvious hint banner
+    float scroll_y = ImGui::GetScrollY();
+    float max_scroll_y = ImGui::GetScrollMaxY();
+    if (max_scroll_y > 10.0f && scroll_y < max_scroll_y - 10.0f) {
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::TextColored(ImVec4(0.24f, 0.68f, 0.91f, 0.95f), "  ▼  Scroll down for more parameters  ▼");
+    }
+
     ImGui::End();
+    ImGui::PopStyleColor(4);
+    ImGui::PopStyleVar();
 }
 
 void App::render_about_dialog() {
@@ -1307,19 +2107,10 @@ void App::render_about_dialog() {
 }
 
 bool App::is_any_dialog_open() const {
-    if (m_show_about || m_show_text_dialog || m_file_browser.is_open() ||
-        m_export_manager.is_dialog_open() || m_export_manager.is_exporting() ||
-        m_timeline.is_rename_modal_open() || m_clip_manager.is_importing()) {
-        return true;
-    }
-    if (ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
-        return true;
-    }
-    ImGuiContext* g = ImGui::GetCurrentContext();
-    if (g && (g->OpenPopupStack.Size > 0 || g->NavWindowingTarget != nullptr)) {
-        return true;
-    }
-    return false;
+    return m_show_about || m_show_text_dialog || m_file_browser.is_open() ||
+           m_export_manager.is_dialog_open() || m_export_manager.is_exporting() ||
+           m_timeline.is_rename_modal_open() || m_clip_manager.is_importing() ||
+           m_settings_dialog.is_open() || m_tts_dialog.is_open() || m_ai_dialog.is_open();
 }
 
 void App::update_window_title() {
@@ -1333,61 +2124,71 @@ void App::update_window_title() {
 }
 
 void App::load_settings() {
-    const char* home = std::getenv("HOME");
-    if (!home) return;
-    fs::path cfg_path = fs::path(home) / ".config" / "minicut" / "settings.json";
-    std::error_code ec;
-    if (fs::exists(cfg_path, ec)) {
-        try {
-            std::ifstream ifs(cfg_path);
-            if (ifs.is_open()) {
-                nlohmann::json j;
-                ifs >> j;
-                m_use_system_file_dialog = j.value("use_system_file_dialog", true);
-                std::string lang = j.value("language", "en");
-                if (lang != "en" && lang != "ja" && lang != "jp" && lang != "ko" && lang != "uk" && lang != "ar") {
-                    lang = "en";
-                }
-                LocaleManager::instance().set_locale(lang);
-                m_split_h = std::clamp(j.value("split_h", 0.46f), 0.15f, 0.85f);
-                m_split_top_v = std::clamp(j.value("split_top_v", 0.28f), 0.15f, 0.75f);
-                m_split_bottom_v = std::clamp(j.value("split_bottom_v", 0.65f), 0.20f, 0.85f);
-                m_timeline.set_track_header_width(j.value("track_header_w", 145.0f));
-            }
-        } catch (...) {}
-    } else {
-        LocaleManager::instance().set_locale("en");
-        save_settings();
+    m_settings_logic.load_from_disk();
+    m_use_system_file_dialog = m_settings_logic.get_use_system_file_dialog();
+    std::string lang = m_settings_logic.get_language();
+    if (lang != "en" && lang != "ja" && lang != "jp" && lang != "ko" && lang != "uk" && lang != "ar") {
+        lang = "en";
     }
+    LocaleManager::instance().set_locale(lang);
+    m_split_h = m_settings_logic.get_split_h();
+    m_split_top_v = m_settings_logic.get_split_top_v();
+    m_split_bottom_v = m_settings_logic.get_split_bottom_v();
+    m_timeline.set_track_header_width(m_settings_logic.get_track_header_w());
 }
 
 void App::save_settings() {
-    const char* home = std::getenv("HOME");
-    if (!home) return;
-    fs::path cfg_dir = fs::path(home) / ".config" / "minicut";
-    std::error_code ec;
-    fs::create_directories(cfg_dir, ec);
-    fs::path cfg_path = cfg_dir / "settings.json";
-
-    nlohmann::json j;
-    j["use_system_file_dialog"] = m_use_system_file_dialog;
-    j["language"] = LocaleManager::instance().current_locale();
-    j["split_h"] = m_split_h;
-    j["split_top_v"] = m_split_top_v;
-    j["split_bottom_v"] = m_split_bottom_v;
-    j["track_header_w"] = m_timeline.get_track_header_width();
-
-    try {
-        std::ofstream ofs(cfg_path);
-        if (ofs.is_open()) {
-            ofs << j.dump(2);
-        }
-    } catch (...) {}
+    m_settings_logic.set_use_system_file_dialog(m_use_system_file_dialog);
+    m_settings_logic.set_language(LocaleManager::instance().current_locale());
+    m_settings_logic.set_split_h(m_split_h);
+    m_settings_logic.set_split_top_v(m_split_top_v);
+    m_settings_logic.set_split_bottom_v(m_split_bottom_v);
+    m_settings_logic.set_track_header_w(m_timeline.get_track_header_width());
+    m_settings_logic.save_to_disk();
 }
 
 void App::set_language(const std::string& code) {
     LocaleManager::instance().set_locale(code);
+    m_settings_logic.set_language(code);
     save_settings();
+}
+
+void App::reload_subsystems() {
+    // 1. Reload render backend preference
+    std::string backend_pref = m_settings_logic.get_render_backend();
+    RenderBackendType target_type = (backend_pref == "Vulkan") ? RenderBackendType::Vulkan : RenderBackendType::OpenGL3;
+    RenderSystem::instance().set_backend(target_type);
+
+    // 2. Reload theme & accessibility styling
+    apply_theme();
+
+    // 3. Reload audio engine snapshot & assets
+    m_audio_engine.update_project_snapshot(m_project);
+    m_audio_engine.ensure_project_assets_loaded(m_project);
+
+    // 4. Reload scripts
+    m_script_engine.reload_scripts();
+
+    // 5. Reinitialize swap manager
+    SwapManager::instance().reinitialize();
+
+    // 6. Reload locales
+    LocaleManager::instance().reload_locales();
+
+    // 7. Request fresh preview frame
+    m_media_decoder.request_frame(m_playhead_time, m_project);
+
+    set_status_notification("Subsystems reloaded successfully (" + std::string(RenderSystem::instance().get_backend_name()) + ")", 3.0);
+}
+
+void App::add_subtitle_at_playhead() {
+    push_undo_state();
+    std::string new_id = m_timeline.add_subtitle_clip(m_project, m_playhead_time, 3.0, "New Subtitle");
+    if (!new_id.empty()) {
+        set_selected_clip_id(new_id);
+    }
+    m_media_decoder.request_frame(m_playhead_time, m_project);
+    on_project_modified();
 }
 
 void App::cleanup_temp_files() {
@@ -1417,7 +2218,7 @@ void App::render_splitters() {
     ImVec2 mouse_pos = ImGui::GetMousePos();
     bool mouse_down = ImGui::IsMouseDown(0);
 
-    float menu_h = ImGui::GetFrameHeight();
+    float menu_h = m_menu_bar_height > 0.0f ? m_menu_bar_height : ImGui::GetFrameHeight();
     float shelf_h = m_script_engine.is_shelf_visible() ? m_script_engine.get_shelf_height() : 0.0f;
     float content_y = menu_h + shelf_h;
     float total_w = static_cast<float>(m_window_width);
@@ -1427,7 +2228,7 @@ void App::render_splitters() {
     float left_top_w = total_w * m_split_top_v;
     float left_bottom_w = total_w * m_split_bottom_v;
 
-    const float thickness = 6.0f;
+    const float thickness = 8.0f;
 
     // 1. Horizontal Splitter (between Top Row and Bottom Row)
     float split_y = content_y + top_h;
@@ -1494,7 +2295,7 @@ void App::render_splitters() {
 }
 
 void App::render() {
-    ImGui_ImplOpenGL3_NewFrame();
+    RenderSystem::instance().new_frame();
     ImGui_ImplSDL2_NewFrame();
     ImGui::NewFrame();
 
@@ -1542,13 +2343,17 @@ void App::render() {
     // Render Plugin Script Panels
     m_script_engine.render_script_panels(total_w, total_h, content_y);
 
-    // Export Manager dialog & progress bar
-    m_export_manager.render_ui([this](const ExportConfig& cfg) {
-        m_export_manager.start_export(m_project, cfg);
-    });
-
     // File Browser Dialog
     m_file_browser.render();
+
+    // Settings Dialog
+    m_settings_dialog.render(m_settings_logic, *this);
+
+    // Text-to-Speech Dialog
+    m_tts_dialog.render(*this);
+
+    // AI Dialog
+    m_ai_dialog.render(*this);
 
     // Import Progress Modal
     if (m_clip_manager.is_importing()) {
@@ -1570,13 +2375,108 @@ void App::render() {
     // About Dialog
     render_about_dialog();
 
-    // Render ImGui
+    // Universal IME auto-completion & composition overlay across all text entries and dialogs
+    ImGuiContext* g = ImGui::GetCurrentContext();
+    if (g && g->PlatformImeData.WantVisible && ImGui::GetIO().WantTextInput) {
+        SDL_Rect ime_rect;
+        ime_rect.x = static_cast<int>(g->PlatformImeData.InputPos.x);
+        ime_rect.y = static_cast<int>(g->PlatformImeData.InputPos.y);
+        ime_rect.w = 1;
+        ime_rect.h = static_cast<int>(g->PlatformImeData.InputLineHeight > 0.0f ? g->PlatformImeData.InputLineHeight : ImGui::GetFontSize());
+        SDL_SetTextInputRect(&ime_rect);
+
+        if (!m_ime_composition.empty()) {
+            ImVec2 pos = g->PlatformImeData.InputPos;
+            float line_h = (g->PlatformImeData.InputLineHeight > 0.0f) ? g->PlatformImeData.InputLineHeight : ImGui::GetFontSize();
+            ImDrawList* fg = ImGui::GetForegroundDrawList();
+            ImVec2 text_sz = ImGui::CalcTextSize(m_ime_composition.c_str());
+
+            ImVec2 box_min = ImVec2(pos.x, pos.y);
+            ImVec2 box_max = ImVec2(pos.x + text_sz.x + 8.0f, pos.y + line_h);
+            fg->AddRectFilled(box_min, box_max, IM_COL32(35, 45, 60, 240), 3.0f);
+            fg->AddRect(box_min, box_max, IM_COL32(50, 150, 255, 255), 3.0f);
+            fg->AddText(ImVec2(pos.x + 4.0f, pos.y + (line_h - text_sz.y) * 0.5f), IM_COL32(255, 255, 255, 255), m_ime_composition.c_str());
+            fg->AddLine(ImVec2(pos.x + 2.0f, box_max.y - 1.0f), ImVec2(box_max.x - 2.0f, box_max.y - 1.0f), IM_COL32(80, 200, 255, 255), 2.0f);
+        }
+    }
+
+    // Render ImGui & Swap Window via RenderSystem
     ImGui::Render();
-    glViewport(0, 0, m_window_width, m_window_height);
-    glClearColor(0.14f, 0.15f, 0.16f, 1.0f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
-    SDL_GL_SwapWindow(m_window);
+    RenderSystem::instance().render_and_swap(ImGui::GetDrawData(), m_window_width, m_window_height);
+
+    // Manage and render Detached Preview Window
+    if (m_preview_popped_out) {
+        if (!m_preview_window) {
+            m_preview_window = SDL_CreateWindow(
+                "Minicut Video Preview [Detached]",
+                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                960, 540,
+                SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
+            );
+            if (m_preview_window) {
+                m_preview_imgui_ctx = ImGui::CreateContext(m_imgui_context->IO.Fonts);
+                ImGui::SetCurrentContext(m_preview_imgui_ctx);
+                ImGui_ImplSDL2_InitForOpenGL(m_preview_window, m_gl_context);
+                ImGui_ImplOpenGL3_Init("#version 330");
+                apply_theme();
+                ImGui::SetCurrentContext(m_imgui_context);
+            }
+        }
+        if (m_preview_window) {
+            render_popout_preview_window();
+        }
+    } else {
+        if (m_preview_window) {
+            if (m_preview_imgui_ctx) {
+                ImGui::SetCurrentContext(m_preview_imgui_ctx);
+                ImGui_ImplOpenGL3_Shutdown();
+                ImGui_ImplSDL2_Shutdown();
+                ImGui::DestroyContext(m_preview_imgui_ctx);
+                m_preview_imgui_ctx = nullptr;
+            }
+            SDL_DestroyWindow(m_preview_window);
+            m_preview_window = nullptr;
+            ImGui::SetCurrentContext(m_imgui_context);
+            SDL_GL_MakeCurrent(m_window, m_gl_context);
+        }
+    }
+
+    // Manage and render Standalone Export Window
+    if (m_export_manager.is_window_active()) {
+        if (!m_export_window) {
+            m_export_window = SDL_CreateWindow(
+                "Export Timeline Media - Minicut",
+                SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
+                580, 420,
+                SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE
+            );
+            if (m_export_window) {
+                m_export_imgui_ctx = ImGui::CreateContext(m_imgui_context->IO.Fonts);
+                ImGui::SetCurrentContext(m_export_imgui_ctx);
+                ImGui_ImplSDL2_InitForOpenGL(m_export_window, m_gl_context);
+                ImGui_ImplOpenGL3_Init("#version 330");
+                apply_theme();
+                ImGui::SetCurrentContext(m_imgui_context);
+            }
+        }
+        if (m_export_window) {
+            render_export_os_window();
+        }
+    } else {
+        if (m_export_window) {
+            if (m_export_imgui_ctx) {
+                ImGui::SetCurrentContext(m_export_imgui_ctx);
+                ImGui_ImplOpenGL3_Shutdown();
+                ImGui_ImplSDL2_Shutdown();
+                ImGui::DestroyContext(m_export_imgui_ctx);
+                m_export_imgui_ctx = nullptr;
+            }
+            SDL_DestroyWindow(m_export_window);
+            m_export_window = nullptr;
+            ImGui::SetCurrentContext(m_imgui_context);
+            SDL_GL_MakeCurrent(m_window, m_gl_context);
+        }
+    }
 }
 
 void App::run() {
@@ -1594,17 +2494,51 @@ void App::run() {
 
 void App::cleanup() {
     m_audio_engine.shutdown();
+    SwapManager::instance().shutdown();
 
     if (m_preview_texture) {
-        glDeleteTextures(1, &m_preview_texture);
+        RenderSystem::instance().delete_texture(m_preview_texture);
         m_preview_texture = 0;
     }
     if (m_text_preview_texture) {
-        glDeleteTextures(1, &m_text_preview_texture);
+        RenderSystem::instance().delete_texture(m_text_preview_texture);
         m_text_preview_texture = 0;
     }
+    if (m_settings_icon_texture) {
+        RenderSystem::instance().delete_texture(m_settings_icon_texture);
+        m_settings_icon_texture = 0;
+    }
+    cleanup_preview_toolbar_icons();
 
-    ImGui_ImplOpenGL3_Shutdown();
+    if (m_preview_imgui_ctx) {
+        ImGui::SetCurrentContext(m_preview_imgui_ctx);
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplSDL2_Shutdown();
+        ImGui::DestroyContext(m_preview_imgui_ctx);
+        m_preview_imgui_ctx = nullptr;
+    }
+    if (m_preview_window) {
+        SDL_DestroyWindow(m_preview_window);
+        m_preview_window = nullptr;
+    }
+
+    if (m_export_imgui_ctx) {
+        ImGui::SetCurrentContext(m_export_imgui_ctx);
+        ImGui_ImplOpenGL3_Shutdown();
+        ImGui_ImplSDL2_Shutdown();
+        ImGui::DestroyContext(m_export_imgui_ctx);
+        m_export_imgui_ctx = nullptr;
+    }
+    if (m_export_window) {
+        SDL_DestroyWindow(m_export_window);
+        m_export_window = nullptr;
+    }
+
+    if (m_imgui_context) {
+        ImGui::SetCurrentContext(m_imgui_context);
+    }
+
+    RenderSystem::instance().shutdown();
     ImGui_ImplSDL2_Shutdown();
     ImGui::DestroyContext();
 
@@ -1621,6 +2555,7 @@ void App::cleanup() {
 
 void App::open_text_dialog() {
     m_show_text_dialog = true;
+    m_text_dialog_request_focus = true;
     m_text_preview_dirty = true;
     std::string loc = LocaleManager::instance().current_locale();
     if (LocaleManager::instance().is_rtl()) {
@@ -1674,6 +2609,11 @@ void App::update_text_preview() {
 
 void App::render_text_dialog() {
     if (!m_show_text_dialog) return;
+
+    if (m_text_dialog_request_focus) {
+        ImGui::SetNextWindowFocus();
+        m_text_dialog_request_focus = false;
+    }
 
     ImGui::SetNextWindowSize(ImVec2(620, 680), ImGuiCond_Appearing);
     std::string title = std::string(_TR("text_dialog_title")) + "###TextGeneratorModal";
@@ -1896,5 +2836,256 @@ std::string App::create_text_asset(const std::string& text, const TextConfig& co
 void App::add_text_to_timeline(const std::string& asset_id, double insert_time) {
     add_asset_to_timeline(asset_id, true, insert_time);
 }
+
+void App::generate_settings_gear_icon() {
+    const int w = 32;
+    const int h = 32;
+    std::vector<uint8_t> rgba(w * h * 4, 0);
+
+    const float cx = 15.5f;
+    const float cy = 15.5f;
+    const float r_outer = 12.0f;
+    const float r_inner = 8.5f;
+    const float r_hole = 4.0f;
+    const int teeth = 8;
+    const float tooth_angle = (2.0f * 3.14159265f) / static_cast<float>(teeth);
+
+    for (int y = 0; y < h; ++y) {
+        for (int x = 0; x < w; ++x) {
+            float dx = static_cast<float>(x) - cx;
+            float dy = static_cast<float>(y) - cy;
+            float dist = std::sqrt(dx * dx + dy * dy);
+            float angle = std::atan2(dy, dx);
+            if (angle < 0.0f) angle += 2.0f * 3.14159265f;
+
+            float rel = std::fmod(angle, tooth_angle) / tooth_angle;
+            // Trapezoidal tooth profile
+            float tooth_val = 0.0f;
+            if (rel >= 0.2f && rel <= 0.8f) {
+                tooth_val = 1.0f;
+            } else if (rel < 0.2f) {
+                tooth_val = rel / 0.2f;
+            } else {
+                tooth_val = (1.0f - rel) / 0.2f;
+            }
+
+            float current_r = r_inner + (r_outer - r_inner) * tooth_val;
+            float alpha_outer = std::clamp(current_r - dist + 0.6f, 0.0f, 1.0f);
+            float alpha_hole = std::clamp(dist - r_hole + 0.6f, 0.0f, 1.0f);
+            float alpha = alpha_outer * alpha_hole;
+
+            if (alpha > 0.02f) {
+                int idx = (y * w + x) * 4;
+                rgba[idx + 0] = 225; // R
+                rgba[idx + 1] = 230; // G
+                rgba[idx + 2] = 238; // B
+                rgba[idx + 3] = static_cast<uint8_t>(alpha * 255.0f);
+            }
+        }
+    }
+
+    if (m_settings_icon_texture != 0) {
+        RenderSystem::instance().delete_texture(m_settings_icon_texture);
+    }
+    m_settings_icon_texture = static_cast<GLuint>(RenderSystem::instance().create_texture(w, h, rgba.data()));
+}
+
+void App::generate_preview_toolbar_icons() {
+    const int w = 32;
+    const int h = 32;
+
+    auto set_px = [](std::vector<uint8_t>& buf, int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
+        if (x >= 0 && x < 32 && y >= 0 && y < 32) {
+            int idx = (y * 32 + x) * 4;
+            float sa = a / 255.0f;
+            float da = buf[idx + 3] / 255.0f;
+            float out_a = sa + da * (1.0f - sa);
+            if (out_a > 0.0f) {
+                buf[idx + 0] = static_cast<uint8_t>((r * sa + buf[idx + 0] * da * (1.0f - sa)) / out_a);
+                buf[idx + 1] = static_cast<uint8_t>((g * sa + buf[idx + 1] * da * (1.0f - sa)) / out_a);
+                buf[idx + 2] = static_cast<uint8_t>((b * sa + buf[idx + 2] * da * (1.0f - sa)) / out_a);
+                buf[idx + 3] = static_cast<uint8_t>(out_a * 255.0f);
+            }
+        }
+    };
+
+    auto draw_line = [&](std::vector<uint8_t>& buf, float x0, float y0, float x1, float y1, float thickness, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
+        float dx = x1 - x0;
+        float dy = y1 - y0;
+        float len = std::hypot(dx, dy);
+        if (len < 1e-4f) return;
+        float ux = dx / len;
+        float uy = dy / len;
+        float nx = -uy;
+        float ny = ux;
+        float half_t = thickness * 0.5f;
+        for (int y = 0; y < 32; ++y) {
+            for (int x = 0; x < 32; ++x) {
+                float px = x + 0.5f - x0;
+                float py = y + 0.5f - y0;
+                float proj = px * ux + py * uy;
+                float perp = std::abs(px * nx + py * ny);
+                if (proj >= -0.5f && proj <= len + 0.5f && perp <= half_t + 0.5f) {
+                    float alpha = std::clamp(half_t + 0.5f - perp, 0.0f, 1.0f);
+                    if (proj < 0.0f) alpha *= std::clamp(1.0f + proj, 0.0f, 1.0f);
+                    if (proj > len) alpha *= std::clamp(1.0f - (proj - len), 0.0f, 1.0f);
+                    if (alpha > 0.02f) {
+                        set_px(buf, x, y, r, g, b, static_cast<uint8_t>(alpha * a));
+                    }
+                }
+            }
+        }
+    };
+
+    auto fill_circle = [&](std::vector<uint8_t>& buf, float cx, float cy, float radius, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
+        for (int y = 0; y < 32; ++y) {
+            for (int x = 0; x < 32; ++x) {
+                float d = std::hypot(x + 0.5f - cx, y + 0.5f - cy);
+                float alpha = std::clamp(radius + 0.5f - d, 0.0f, 1.0f);
+                if (alpha > 0.02f) {
+                    set_px(buf, x, y, r, g, b, static_cast<uint8_t>(alpha * a));
+                }
+            }
+        }
+    };
+
+    auto draw_circle_outline = [&](std::vector<uint8_t>& buf, float cx, float cy, float radius, float thickness, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
+        float half_t = thickness * 0.5f;
+        for (int y = 0; y < 32; ++y) {
+            for (int x = 0; x < 32; ++x) {
+                float d = std::hypot(x + 0.5f - cx, y + 0.5f - cy);
+                float dist_to_r = std::abs(d - radius);
+                if (dist_to_r <= half_t + 0.5f) {
+                    float alpha = std::clamp(half_t + 0.5f - dist_to_r, 0.0f, 1.0f);
+                    if (alpha > 0.02f) {
+                        set_px(buf, x, y, r, g, b, static_cast<uint8_t>(alpha * a));
+                    }
+                }
+            }
+        }
+    };
+
+    auto draw_rect = [&](std::vector<uint8_t>& buf, float x0, float y0, float x1, float y1, float thickness, uint8_t r, uint8_t g, uint8_t b, uint8_t a = 255) {
+        draw_line(buf, x0, y0, x1, y0, thickness, r, g, b, a);
+        draw_line(buf, x1, y0, x1, y1, thickness, r, g, b, a);
+        draw_line(buf, x1, y1, x0, y1, thickness, r, g, b, a);
+        draw_line(buf, x0, y1, x0, y0, thickness, r, g, b, a);
+    };
+
+    // 1. Select Tool Icon (Cursor arrow)
+    {
+        std::vector<uint8_t> rgba(w * h * 4, 0);
+        draw_line(rgba, 7.0f, 5.0f, 7.0f, 23.0f, 2.2f, 235, 240, 248);
+        draw_line(rgba, 7.0f, 23.0f, 12.5f, 18.0f, 2.2f, 235, 240, 248);
+        draw_line(rgba, 12.5f, 18.0f, 17.5f, 26.5f, 2.2f, 235, 240, 248);
+        draw_line(rgba, 17.5f, 26.5f, 20.5f, 24.5f, 2.2f, 235, 240, 248);
+        draw_line(rgba, 20.5f, 24.5f, 15.5f, 16.0f, 2.2f, 235, 240, 248);
+        draw_line(rgba, 15.5f, 16.0f, 22.0f, 16.0f, 2.2f, 235, 240, 248);
+        draw_line(rgba, 22.0f, 16.0f, 7.0f, 5.0f, 2.2f, 235, 240, 248);
+        for (int y = 7; y <= 21; ++y) {
+            for (int x = 8; x <= 18; ++x) {
+                if (x <= 7 + (y - 5) && x >= 8 && y <= 16) {
+                    set_px(rgba, x, y, 200, 225, 255, 180);
+                }
+            }
+        }
+        if (m_icon_tex_select) RenderSystem::instance().delete_texture(m_icon_tex_select);
+        m_icon_tex_select = static_cast<GLuint>(RenderSystem::instance().create_texture(w, h, rgba.data()));
+        m_icon_tex_transform = m_icon_tex_select;
+    }
+
+    // 2. Translate Tool Icon (4-way cross arrow)
+    {
+        std::vector<uint8_t> rgba(w * h * 4, 0);
+        draw_line(rgba, 6.0f, 15.5f, 25.0f, 15.5f, 2.2f, 235, 240, 248);
+        draw_line(rgba, 15.5f, 6.0f, 15.5f, 25.0f, 2.2f, 235, 240, 248);
+        // Top arrow
+        draw_line(rgba, 11.5f, 10.0f, 15.5f, 5.5f, 2.0f, 235, 240, 248);
+        draw_line(rgba, 19.5f, 10.0f, 15.5f, 5.5f, 2.0f, 235, 240, 248);
+        // Bottom arrow
+        draw_line(rgba, 11.5f, 21.0f, 15.5f, 25.5f, 2.0f, 235, 240, 248);
+        draw_line(rgba, 19.5f, 21.0f, 15.5f, 25.5f, 2.0f, 235, 240, 248);
+        // Left arrow
+        draw_line(rgba, 10.0f, 11.5f, 5.5f, 15.5f, 2.0f, 235, 240, 248);
+        draw_line(rgba, 10.0f, 19.5f, 5.5f, 15.5f, 2.0f, 235, 240, 248);
+        // Right arrow
+        draw_line(rgba, 21.0f, 11.5f, 25.5f, 15.5f, 2.0f, 235, 240, 248);
+        draw_line(rgba, 21.0f, 19.5f, 25.5f, 15.5f, 2.0f, 235, 240, 248);
+        if (m_icon_tex_translate) RenderSystem::instance().delete_texture(m_icon_tex_translate);
+        m_icon_tex_translate = static_cast<GLuint>(RenderSystem::instance().create_texture(w, h, rgba.data()));
+    }
+
+    // 3. Scale Tool Icon (Box with corner diagonal arrows)
+    {
+        std::vector<uint8_t> rgba(w * h * 4, 0);
+        draw_rect(rgba, 9.0f, 9.0f, 22.0f, 22.0f, 1.8f, 160, 200, 245);
+        // Top-left outward arrow
+        draw_line(rgba, 12.0f, 12.0f, 5.0f, 5.0f, 2.0f, 235, 240, 248);
+        draw_line(rgba, 5.0f, 10.0f, 5.0f, 5.0f, 2.0f, 235, 240, 248);
+        draw_line(rgba, 10.0f, 5.0f, 5.0f, 5.0f, 2.0f, 235, 240, 248);
+        // Bottom-right outward arrow
+        draw_line(rgba, 19.0f, 19.0f, 26.0f, 26.0f, 2.0f, 235, 240, 248);
+        draw_line(rgba, 21.0f, 26.0f, 26.0f, 26.0f, 2.0f, 235, 240, 248);
+        draw_line(rgba, 26.0f, 21.0f, 26.0f, 26.0f, 2.0f, 235, 240, 248);
+        if (m_icon_tex_scale) RenderSystem::instance().delete_texture(m_icon_tex_scale);
+        m_icon_tex_scale = static_cast<GLuint>(RenderSystem::instance().create_texture(w, h, rgba.data()));
+    }
+
+    // 4. Rotate Tool Icon (Arc with arrow)
+    {
+        std::vector<uint8_t> rgba(w * h * 4, 0);
+        const float cx = 15.5f;
+        const float cy = 15.5f;
+        const float r = 9.5f;
+        for (float deg = 35.0f; deg <= 315.0f; deg += 3.0f) {
+            float rad = deg * (3.14159265f / 180.0f);
+            float px = cx + std::cos(rad) * r;
+            float py = cy - std::sin(rad) * r;
+            fill_circle(rgba, px, py, 1.2f, 235, 240, 248);
+        }
+        float tip_x = cx + std::cos(35.0f * 3.14159265f / 180.0f) * r;
+        float tip_y = cy - std::sin(35.0f * 3.14159265f / 180.0f) * r;
+        draw_line(rgba, tip_x - 1.0f, tip_y - 5.5f, tip_x, tip_y, 2.0f, 235, 240, 248);
+        draw_line(rgba, tip_x + 5.5f, tip_y - 2.0f, tip_x, tip_y, 2.0f, 235, 240, 248);
+        if (m_icon_tex_rotate) RenderSystem::instance().delete_texture(m_icon_tex_rotate);
+        m_icon_tex_rotate = static_cast<GLuint>(RenderSystem::instance().create_texture(w, h, rgba.data()));
+    }
+
+    // 5. Reset Tool Icon (Crosshair target circle)
+    {
+        std::vector<uint8_t> rgba(w * h * 4, 0);
+        draw_circle_outline(rgba, 15.5f, 15.5f, 9.0f, 1.8f, 235, 240, 248);
+        fill_circle(rgba, 15.5f, 15.5f, 2.2f, 235, 240, 248);
+        draw_line(rgba, 15.5f, 3.5f, 15.5f, 7.5f, 1.8f, 235, 240, 248);
+        draw_line(rgba, 15.5f, 23.5f, 15.5f, 27.5f, 1.8f, 235, 240, 248);
+        draw_line(rgba, 3.5f, 15.5f, 7.5f, 15.5f, 1.8f, 235, 240, 248);
+        draw_line(rgba, 23.5f, 15.5f, 27.5f, 15.5f, 1.8f, 235, 240, 248);
+        if (m_icon_tex_reset) RenderSystem::instance().delete_texture(m_icon_tex_reset);
+        m_icon_tex_reset = static_cast<GLuint>(RenderSystem::instance().create_texture(w, h, rgba.data()));
+    }
+
+    // 6. Popout Tool Icon (Window with outward diagonal arrow)
+    {
+        std::vector<uint8_t> rgba(w * h * 4, 0);
+        draw_rect(rgba, 5.0f, 10.0f, 20.0f, 26.0f, 1.8f, 170, 205, 245);
+        draw_line(rgba, 5.0f, 14.0f, 20.0f, 14.0f, 1.5f, 170, 205, 245);
+        draw_line(rgba, 13.0f, 17.0f, 26.0f, 5.0f, 2.2f, 235, 240, 248);
+        draw_line(rgba, 20.0f, 5.0f, 26.0f, 5.0f, 2.2f, 235, 240, 248);
+        draw_line(rgba, 26.0f, 11.0f, 26.0f, 5.0f, 2.2f, 235, 240, 248);
+        if (m_icon_tex_popout) RenderSystem::instance().delete_texture(m_icon_tex_popout);
+        m_icon_tex_popout = static_cast<GLuint>(RenderSystem::instance().create_texture(w, h, rgba.data()));
+    }
+}
+
+void App::cleanup_preview_toolbar_icons() {
+    if (m_icon_tex_select) { RenderSystem::instance().delete_texture(m_icon_tex_select); m_icon_tex_select = 0; }
+    m_icon_tex_transform = 0;
+    if (m_icon_tex_translate) { RenderSystem::instance().delete_texture(m_icon_tex_translate); m_icon_tex_translate = 0; }
+    if (m_icon_tex_scale) { RenderSystem::instance().delete_texture(m_icon_tex_scale); m_icon_tex_scale = 0; }
+    if (m_icon_tex_rotate) { RenderSystem::instance().delete_texture(m_icon_tex_rotate); m_icon_tex_rotate = 0; }
+    if (m_icon_tex_reset) { RenderSystem::instance().delete_texture(m_icon_tex_reset); m_icon_tex_reset = 0; }
+    if (m_icon_tex_popout) { RenderSystem::instance().delete_texture(m_icon_tex_popout); m_icon_tex_popout = 0; }
+}
+
 
 

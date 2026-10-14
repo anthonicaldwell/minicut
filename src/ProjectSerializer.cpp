@@ -66,6 +66,9 @@ std::string ProjectSerializer::serialize_json(Project& project) {
                 cj["prefab_id"] = clip.prefab_id;
                 cj["prefab_name"] = clip.prefab_name;
             }
+            if (!clip.subtitle_text.empty()) {
+                cj["subtitle_text"] = clip.subtitle_text;
+            }
             clips_arr.push_back(cj);
         }
         tj["clips"] = clips_arr;
@@ -193,6 +196,7 @@ bool ProjectSerializer::deserialize_json(Project& project, const std::string& js
                             c.opacity = cj.value("opacity", 1.0);
                             c.prefab_id = cj.value("prefab_id", "");
                             c.prefab_name = cj.value("prefab_name", "");
+                            c.subtitle_text = cj.value("subtitle_text", "");
                             t.clips.push_back(c);
                         }
                     }

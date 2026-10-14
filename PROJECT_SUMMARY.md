@@ -380,6 +380,22 @@
 ### JJ. Localized "Vibe Coded" READMEs
 - Created concise user guide READMEs in all 5 languages (`README.md`, `README_ja.md`, `README_ko.md`, `README_uk.md`, `README_ar.md`) detailing the application overview, the "vibe coding" journey with Google DeepMind Antigravity, and quick start instructions without mentioning proprietary software.
 
+### KK. Version 1.4.0 Major Architecture & Feature Updates
+- **Multi-Window Dual-Monitor Architecture**:
+  - Independent native OS window for Popout Video Preview (`m_preview_window`) preserving letterbox/pillarbox aspect ratio buffer zones, interactive transform gizmo, and transport controls.
+  - Independent native OS window for the Export Dialog & Progress Tracker (`m_export_window`) enabling continuous timeline editing without modal blocking, fading, or dimming.
+  - Multi-context Dear ImGui routing sharing loaded international CJK & Arabic font atlas (`m_imgui_context->IO.Fonts`).
+- **Universal Transform Tool**: 3D-package-style spatial gizmo with center crosshair, corner scale handles, top rotation pin, and direct canvas translation with keyframe interpolation.
+- **Multi-Language Text-To-Speech (TTS)**: Built-in voice synthesis supporting English, Japanese (with Kanji transliteration via `kakasi`/`mecab`/kana dictionary fallback), Korean, Ukrainian, and Arabic.
+- **Stereo Audio Engine & Dual-Channel Keyframing**: Timeline audio tracks support stereo panning and independent Left and Right channel volume curve keyframing.
+- **Preview Volume Control**: Real-time dB volume slider from -60 dB to +6 dB (with mute support).
+- **Cross-Track Timeline Dragging**: Drag media clips across tracks of compatible types.
+- **Smart Auto-Length Export**: Export duration defaults to the end of assets or manual time entry.
+- **Aspect Ratio Engine**: Auto-detection adapting to the timeline's largest asset, plus presets for 16:9, 9:16, 4:3, 1:1, 21:9, and 4:5.
+- **Universal IME Auto-Complete**: CJK and Arabic composition overlay rendering across all inputs and dialogs.
+- **Layout-Independent Hotkeys**: Framerate-synchronized shortcuts working uniformly regardless of active keyboard layout.
+- **Instant Theme & Colorblind Switching**: Live KDE Plasma, Breeze Light, Breeze Dark, and Protanopia/Deuteranopia/Tritanopia updates without restarting.
+
 ---
 
 ## 5. Build, Test, and Execution Commands

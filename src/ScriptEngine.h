@@ -25,6 +25,7 @@ struct ScriptItem {
     bool is_panel_open = false; // Plugin tool panel currently open
     bool is_javascript = false; // True if .js file
     GLuint icon_texture = 0;   // Texture for dock icon
+    bool icon_checked = false; // Has icon search been performed?
 };
 
 class ScriptEngine {
@@ -125,6 +126,12 @@ private:
     static int lua_gui_file_dialog(lua_State* L);
     static int lua_gui_native_file_dialog(lua_State* L);
     static int lua_gui_builtin_file_dialog(lua_State* L);
+    static int lua_gui_popout_preview(lua_State* L);
+    static int lua_gui_is_preview_popped_out(lua_State* L);
+    static int lua_gui_set_preview_aspect_mode(lua_State* L);
+    static int lua_gui_get_preview_aspect_mode(lua_State* L);
+    static int lua_gui_set_transform_tool(lua_State* L);
+    static int lua_gui_get_transform_tool(lua_State* L);
 
     // Timeline Placement & Navigation
     static int lua_timeline_get_playhead(lua_State* L);
@@ -177,6 +184,15 @@ private:
     static int lua_clip_get_time(lua_State* L);
     static int lua_clip_set_time(lua_State* L);
     static int lua_clip_get_info(lua_State* L);
+    static int lua_clip_get_transform(lua_State* L);
+    static int lua_clip_set_transform(lua_State* L);
+    static int lua_clip_reset_transform(lua_State* L);
+
+    // Export API
+    static int lua_export_get_audio_progress(lua_State* L);
+    static int lua_export_get_progress(lua_State* L);
+    static int lua_export_is_exporting(lua_State* L);
+    static int lua_export_get_status(lua_State* L);
 
     // Project & Minicut
     static int lua_project_save(lua_State* L);
@@ -218,6 +234,12 @@ private:
     static duk_ret_t js_gui_file_dialog(duk_context* ctx);
     static duk_ret_t js_gui_native_file_dialog(duk_context* ctx);
     static duk_ret_t js_gui_builtin_file_dialog(duk_context* ctx);
+    static duk_ret_t js_gui_popout_preview(duk_context* ctx);
+    static duk_ret_t js_gui_is_preview_popped_out(duk_context* ctx);
+    static duk_ret_t js_gui_set_preview_aspect_mode(duk_context* ctx);
+    static duk_ret_t js_gui_get_preview_aspect_mode(duk_context* ctx);
+    static duk_ret_t js_gui_set_transform_tool(duk_context* ctx);
+    static duk_ret_t js_gui_get_transform_tool(duk_context* ctx);
 
     // Timeline
     static duk_ret_t js_timeline_get_playhead(duk_context* ctx);
@@ -263,6 +285,15 @@ private:
     static duk_ret_t js_clip_get_time(duk_context* ctx);
     static duk_ret_t js_clip_set_time(duk_context* ctx);
     static duk_ret_t js_clip_get_info(duk_context* ctx);
+    static duk_ret_t js_clip_get_transform(duk_context* ctx);
+    static duk_ret_t js_clip_set_transform(duk_context* ctx);
+    static duk_ret_t js_clip_reset_transform(duk_context* ctx);
+
+    // JS Export API
+    static duk_ret_t js_export_get_audio_progress(duk_context* ctx);
+    static duk_ret_t js_export_get_progress(duk_context* ctx);
+    static duk_ret_t js_export_is_exporting(duk_context* ctx);
+    static duk_ret_t js_export_get_status(duk_context* ctx);
 
     // Project & Assets
     static duk_ret_t js_project_save(duk_context* ctx);

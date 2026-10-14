@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Common.h"
+#include "SwapManager.h"
 #include <string>
 #include <vector>
 #include <map>
@@ -26,7 +27,7 @@ struct DecodedVideoContext {
     int height = 0;
 
     bool is_image = false;
-    std::vector<uint8_t> cached_image_rgba;
+    std::shared_ptr<SwapBuffer<uint8_t>> cached_image_rgba;
     int cached_w = 0;
     int cached_h = 0;
 

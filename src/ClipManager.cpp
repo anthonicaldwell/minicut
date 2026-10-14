@@ -734,7 +734,8 @@ void ClipManager::render_ui(Project& project, double playhead_time,
                             const std::function<void()>& on_import_image,
                             const std::function<void()>& on_import_audio,
                             const std::function<void()>& on_import_prefab,
-                            const std::function<void()>& on_add_text) {
+                            const std::function<void()>& on_add_text,
+                            const std::function<void()>& on_add_tts) {
     poll_async_imports(project);
 
     // Keyboard shortcut deletion and enter-to-add
@@ -777,6 +778,10 @@ void ClipManager::render_ui(Project& project, double playhead_time,
     ImGui::SameLine();
     if (ImGui::Button(_TR("text_add_asset"))) {
         if (on_add_text) on_add_text();
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("+ Speech...")) {
+        if (on_add_tts) on_add_tts();
     }
 
     // Active Import Progress Banner

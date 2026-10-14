@@ -39,6 +39,8 @@ void KeyframeEditor::render_ui(Project& project, double playhead_time,
     const Track& track = project.tracks[track_idx];
     if (track.type == "audio") {
         render_audio_tools(project, clip, track, playhead_time, on_scrub, on_project_changed);
+    } else if (track.type == "subtitle" || !clip->subtitle_text.empty()) {
+        render_subtitle_tools(project, clip, track, playhead_time, on_project_changed);
     } else {
         const VideoAsset* va = project.find_video_asset(clip->asset_id);
         if (va && va->is_image) {
@@ -86,11 +88,15 @@ void KeyframeEditor::render_parameter_row(
     double prev_kf = project.find_prev_keyframe_time(clip->id, param, rel_playhead);
     double next_kf = project.find_next_keyframe_time(clip->id, param, rel_playhead);
 
-    // Label
-    ImGui::Text("%-11s", label);
-    ImGui::SameLine();
+    ImGui::TableNextRow(ImGuiTableRowFlags_None, 24.0f);
 
-    // Previous Keyframe Jump
+    // Column 0: Property Label
+    ImGui::TableSetColumnIndex(0);
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted(label);
+
+    // Column 1: Keyframe Jump & Toggle Controls
+    ImGui::TableSetColumnIndex(1);
     if (prev_kf >= 0.0) {
         if (ImGui::SmallButton("<")) {
             if (on_scrub) on_scrub(clip->start_time + prev_kf);
@@ -100,9 +106,8 @@ void KeyframeEditor::render_parameter_row(
         ImGui::SmallButton("<");
         ImGui::EndDisabled();
     }
-    ImGui::SameLine();
+    ImGui::SameLine(0, 2);
 
-    // Keyframe Toggle Diamond
     if (has_kf) {
         ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.85f, 0.65f, 0.10f, 0.8f));
         ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 1.0f, 1.0f, 1.0f));
@@ -120,9 +125,8 @@ void KeyframeEditor::render_parameter_row(
     if (ImGui::IsItemHovered()) {
         ImGui::SetTooltip(has_kf ? "Remove keyframe at playhead" : "Add keyframe at playhead");
     }
-    ImGui::SameLine();
+    ImGui::SameLine(0, 2);
 
-    // Next Keyframe Jump
     if (next_kf >= 0.0) {
         if (ImGui::SmallButton(">")) {
             if (on_scrub) on_scrub(clip->start_time + next_kf);
@@ -132,10 +136,10 @@ void KeyframeEditor::render_parameter_row(
         ImGui::SmallButton(">");
         ImGui::EndDisabled();
     }
-    ImGui::SameLine();
 
-    // Numerical Input DragFloat
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - 30.0f);
+    // Column 2: Numerical Input DragFloat
+    ImGui::TableSetColumnIndex(2);
+    ImGui::SetNextItemWidth(-1.0f);
     float val_f = static_cast<float>(cur_val);
     if (ImGui::DragFloat("##val", &val_f, speed, min_val, max_val, format)) {
         auto kfs = project.get_clip_keyframes(clip->id, param);
@@ -148,12 +152,15 @@ void KeyframeEditor::render_parameter_row(
             else if (param == "rotation") clip->rotation = val_f;
             else if (param == "scale") clip->scale = val_f;
             else if (param == "opacity") clip->opacity = val_f;
+            else if (param == "volume" || param == "volume_left" || param == "volume_right") {
+                project.set_or_add_keyframe(clip->id, param, rel_playhead, val_f);
+            }
         }
         if (on_project_changed) on_project_changed();
     }
-    ImGui::SameLine();
 
-    // Reset Button
+    // Column 3: Reset Button
+    ImGui::TableSetColumnIndex(3);
     if (ImGui::SmallButton("R")) {
         auto kfs = project.get_clip_keyframes(clip->id, param);
         if (has_kf || !kfs.empty()) {
@@ -164,6 +171,9 @@ void KeyframeEditor::render_parameter_row(
             else if (param == "rotation") clip->rotation = default_val;
             else if (param == "scale") clip->scale = default_val;
             else if (param == "opacity") clip->opacity = default_val;
+            else if (param == "volume" || param == "volume_left" || param == "volume_right") {
+                project.set_or_add_keyframe(clip->id, param, rel_playhead, default_val);
+            }
         }
         if (on_project_changed) on_project_changed();
     }
@@ -232,11 +242,20 @@ void KeyframeEditor::render_image_tools(
 
     // 2D Transform Controls
     ImGui::Text("Transform Properties (Keyframeable):");
-    render_parameter_row(project, clip, "pos_x", _TR("inspector_position_x"), rel_playhead, 0.0, -1920.0f, 1920.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
-    render_parameter_row(project, clip, "pos_y", _TR("inspector_position_y"), rel_playhead, 0.0, -1080.0f, 1080.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
-    render_parameter_row(project, clip, "rotation", _TR("inspector_rotation"), rel_playhead, 0.0, -360.0f, 360.0f, 0.5f, "%.1f deg", on_scrub, on_project_changed);
-    render_parameter_row(project, clip, "scale", _TR("inspector_scale"), rel_playhead, 1.0, 0.01f, 5.0f, 0.01f, "%.2fx", on_scrub, on_project_changed);
-    render_parameter_row(project, clip, "opacity", _TR("inspector_opacity"), rel_playhead, 1.0, 0.0f, 1.0f, 0.01f, "%.2f", on_scrub, on_project_changed);
+    if (ImGui::BeginTable("##ImageParamTable", 4, ImGuiTableFlags_PadOuterX | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Property", ImGuiTableColumnFlags_WidthFixed, 85.0f);
+        ImGui::TableSetupColumn("Keyframe", ImGuiTableColumnFlags_WidthFixed, 78.0f);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Reset", ImGuiTableColumnFlags_WidthFixed, 26.0f);
+
+        render_parameter_row(project, clip, "pos_x", _TR("inspector_position_x"), rel_playhead, 0.0, -1920.0f, 1920.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "pos_y", _TR("inspector_position_y"), rel_playhead, 0.0, -1080.0f, 1080.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "rotation", _TR("inspector_rotation"), rel_playhead, 0.0, -360.0f, 360.0f, 0.5f, "%.1f deg", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "scale", _TR("inspector_scale"), rel_playhead, 1.0, 0.01f, 5.0f, 0.01f, "%.2fx", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "opacity", _TR("inspector_opacity"), rel_playhead, 1.0, 0.0f, 1.0f, 0.01f, "%.2f", on_scrub, on_project_changed);
+
+        ImGui::EndTable();
+    }
 
     int trk_idx = -1;
     project.find_clip(clip->id, &trk_idx);
@@ -321,11 +340,20 @@ void KeyframeEditor::render_video_tools(
 
     // Transform controls
     ImGui::Text("Video Transform & Opacity:");
-    render_parameter_row(project, clip, "pos_x", _TR("inspector_position_x"), rel_playhead, 0.0, -1920.0f, 1920.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
-    render_parameter_row(project, clip, "pos_y", _TR("inspector_position_y"), rel_playhead, 0.0, -1080.0f, 1080.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
-    render_parameter_row(project, clip, "rotation", _TR("inspector_rotation"), rel_playhead, 0.0, -360.0f, 360.0f, 0.5f, "%.1f deg", on_scrub, on_project_changed);
-    render_parameter_row(project, clip, "scale", _TR("inspector_scale"), rel_playhead, 1.0, 0.01f, 5.0f, 0.01f, "%.2fx", on_scrub, on_project_changed);
-    render_parameter_row(project, clip, "opacity", _TR("inspector_opacity"), rel_playhead, 1.0, 0.0f, 1.0f, 0.01f, "%.2f", on_scrub, on_project_changed);
+    if (ImGui::BeginTable("##VideoParamTable", 4, ImGuiTableFlags_PadOuterX | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Property", ImGuiTableColumnFlags_WidthFixed, 85.0f);
+        ImGui::TableSetupColumn("Keyframe", ImGuiTableColumnFlags_WidthFixed, 78.0f);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Reset", ImGuiTableColumnFlags_WidthFixed, 26.0f);
+
+        render_parameter_row(project, clip, "pos_x", _TR("inspector_position_x"), rel_playhead, 0.0, -1920.0f, 1920.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "pos_y", _TR("inspector_position_y"), rel_playhead, 0.0, -1080.0f, 1080.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "rotation", _TR("inspector_rotation"), rel_playhead, 0.0, -360.0f, 360.0f, 0.5f, "%.1f deg", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "scale", _TR("inspector_scale"), rel_playhead, 1.0, 0.01f, 5.0f, 0.01f, "%.2fx", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "opacity", _TR("inspector_opacity"), rel_playhead, 1.0, 0.0f, 1.0f, 0.01f, "%.2f", on_scrub, on_project_changed);
+
+        ImGui::EndTable();
+    }
 
     int trk_idx = -1;
     project.find_clip(clip->id, &trk_idx);
@@ -405,32 +433,58 @@ void KeyframeEditor::render_audio_tools(
         if (on_project_changed) on_project_changed();
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton("Duck (20%)")) {
-        double d = clip->duration;
-        project.set_or_add_keyframe(clip->id, "volume", 0.0, 1.0);
-        project.set_or_add_keyframe(clip->id, "volume", d * 0.2, 0.2);
-        project.set_or_add_keyframe(clip->id, "volume", d * 0.8, 0.2);
-        project.set_or_add_keyframe(clip->id, "volume", d, 1.0);
+    if (ImGui::SmallButton("Pan Left")) {
+        project.set_or_add_keyframe(clip->id, "volume_left", 0.0, 1.0);
+        project.set_or_add_keyframe(clip->id, "volume_right", 0.0, 0.0);
         if (on_project_changed) on_project_changed();
     }
     ImGui::SameLine();
-    if (ImGui::SmallButton("Reset 100%")) {
+    if (ImGui::SmallButton("Pan Right")) {
+        project.set_or_add_keyframe(clip->id, "volume_left", 0.0, 0.0);
+        project.set_or_add_keyframe(clip->id, "volume_right", 0.0, 1.0);
+        if (on_project_changed) on_project_changed();
+    }
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Reset Stereo")) {
         project.remove_clip_keyframes(clip->id);
         project.set_or_add_keyframe(clip->id, "volume", 0.0, 1.0);
+        project.set_or_add_keyframe(clip->id, "volume_left", 0.0, 1.0);
+        project.set_or_add_keyframe(clip->id, "volume_right", 0.0, 1.0);
         if (on_project_changed) on_project_changed();
     }
 
     ImGui::Spacing();
     ImGui::Separator();
 
-    ImGui::Text("Volume & Gain (Keyframeable):");
-    render_parameter_row(project, clip, "volume", _TR("inspector_volume"), rel_playhead, 1.0, 0.0f, 2.0f, 0.02f, "%.2fx", on_scrub, on_project_changed);
+    ImGui::Text("Stereo Audio & Gain (Keyframeable):");
+    if (ImGui::BeginTable("##AudioParamTable", 4, ImGuiTableFlags_PadOuterX | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Property", ImGuiTableColumnFlags_WidthFixed, 85.0f);
+        ImGui::TableSetupColumn("Keyframe", ImGuiTableColumnFlags_WidthFixed, 78.0f);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Reset", ImGuiTableColumnFlags_WidthFixed, 26.0f);
+
+        render_parameter_row(project, clip, "volume", "Master Gain", rel_playhead, 1.0, 0.0f, 2.0f, 0.02f, "%.2fx", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "volume_left", "Left Channel", rel_playhead, 1.0, 0.0f, 2.0f, 0.02f, "%.2fx", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "volume_right", "Right Channel", rel_playhead, 1.0, 0.0f, 2.0f, 0.02f, "%.2fx", on_scrub, on_project_changed);
+
+        ImGui::EndTable();
+    }
 
     ImGui::Spacing();
     ImGui::Separator();
 
-    ImGui::Text("Audio Gain Curve Graph:");
-    render_curve_graph(project, clip, "volume", 0.0f, 2.0f, playhead_time, on_scrub, on_project_changed);
+    const char* audio_params[] = { "volume", "volume_left", "volume_right" };
+    const char* audio_param_labels[] = { "Master Gain Curve", "Left Channel Curve", "Right Channel Curve" };
+    if (m_selected_param_idx < 0 || m_selected_param_idx > 2) m_selected_param_idx = 0;
+
+    ImGui::Text("Audio Curve Graph:");
+    ImGui::SameLine();
+    ImGui::SetNextItemWidth(180.0f);
+    if (ImGui::Combo("##AudioParamCombo", &m_selected_param_idx, audio_param_labels, 3)) {
+        m_selected_kf_idx = -1;
+    }
+
+    render_curve_graph(project, clip, audio_params[m_selected_param_idx], 0.0f, 2.0f, playhead_time, on_scrub, on_project_changed);
 }
 
 void KeyframeEditor::render_curve_graph(
@@ -646,5 +700,59 @@ void KeyframeEditor::render_curve_graph(
             project.set_or_add_keyframe(clip->id, current_param, cur_kf.time, cur_kf.value);
             if (on_project_changed) on_project_changed();
         }
+    }
+}
+
+void KeyframeEditor::render_subtitle_tools(Project& project, Clip* clip, const Track& track, double playhead_time,
+                                           const std::function<void()>& on_project_changed) {
+    (void)project;
+    (void)track;
+    (void)playhead_time;
+
+    ImGui::Spacing();
+    ImGui::TextColored(ImVec4(0.9f, 0.5f, 0.1f, 1.0f), "[ Subtitle Clip Inspector ]");
+    ImGui::Separator();
+    ImGui::Spacing();
+
+    char buf[1024];
+    strncpy(buf, clip->subtitle_text.c_str(), sizeof(buf) - 1);
+    buf[sizeof(buf) - 1] = '\0';
+    ImGui::Text("Subtitle Text:");
+    if (ImGui::InputTextMultiline("##SubTextInput", buf, sizeof(buf), ImVec2(-1, 80))) {
+        clip->subtitle_text = buf;
+        if (on_project_changed) on_project_changed();
+    }
+
+    ImGui::Spacing();
+    ImGui::Text("Timing Properties:");
+    if (ImGui::BeginTable("##SubTimingTable", 2, ImGuiTableFlags_PadOuterX | ImGuiTableFlags_SizingStretchProp)) {
+        ImGui::TableSetupColumn("Property", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+
+        ImGui::TableNextRow(ImGuiTableRowFlags_None, 24.0f);
+        ImGui::TableSetColumnIndex(0);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Start Time");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(-1.0f);
+        float st = static_cast<float>(clip->start_time);
+        if (ImGui::DragFloat("##st", &st, 0.05f, 0.0f, 3600.0f, "%.2fs")) {
+            clip->start_time = std::max(0.0, static_cast<double>(st));
+            if (on_project_changed) on_project_changed();
+        }
+
+        ImGui::TableNextRow(ImGuiTableRowFlags_None, 24.0f);
+        ImGui::TableSetColumnIndex(0);
+        ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("Duration");
+        ImGui::TableSetColumnIndex(1);
+        ImGui::SetNextItemWidth(-1.0f);
+        float dur = static_cast<float>(clip->duration);
+        if (ImGui::DragFloat("##dur", &dur, 0.05f, 0.1f, 300.0f, "%.2fs")) {
+            clip->duration = std::max(0.1, static_cast<double>(dur));
+            if (on_project_changed) on_project_changed();
+        }
+
+        ImGui::EndTable();
     }
 }

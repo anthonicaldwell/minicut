@@ -12,6 +12,15 @@
 #include "ScriptEngine.h"
 #include "ArabicShaper.h"
 #include "TextGenerator.h"
+#include "SettingsLogic.h"
+#include "TTSManager.h"
+#include "AICore.h"
+#include "render/RenderSystem.h"
+#include "render/RenderBackendOpenGL3.h"
+#include "render/RenderBackendVulkan.h"
+#include "SwapManager.h"
+#include "JapaneseTransliteration.h"
+#include "third_party/imgui/backends/imgui_impl_sdl2.h"
 #include <iostream>
 #include <cassert>
 #include <filesystem>
@@ -1143,7 +1152,7 @@ void test_ogg_ogv_ogm_support() {
 void test_window_title_and_version() {
     std::cout << "[TEST] Running window title and version tests..." << std::endl;
     // Version test
-    assert(std::string(MINICUT_VERSION) == "1.2.0");
+    assert(std::string(MINICUT_VERSION) == "1.4.0");
 
     // Title formatting test
     auto format_title = [](const std::string& name) -> std::string {
@@ -1246,6 +1255,758 @@ void test_javascript_engine() {
     std::cout << "[PASS] Duktape JavaScript Engine integration tests passed." << std::endl;
 }
 
+void test_filebrowser_cancel_behavior() {
+    std::cout << "[TEST] Running FileBrowser cancel behavior test..." << std::endl;
+    FileBrowser fb;
+    bool cancelled = false;
+    bool confirmed = false;
+
+    fb.open("Test Browser", FileBrowserMode::OpenFile, {}, "default.mp4", ".mp4",
+        [&](const std::string& p) { confirmed = true; },
+        "Open",
+        [&]() { cancelled = true; });
+
+    assert(fb.is_open());
+    fb.cancel();
+    assert(!fb.is_open());
+    assert(cancelled == true);
+    assert(confirmed == false);
+
+    // Test second open and close()
+    bool cancelled2 = false;
+    fb.open("Test Browser 2", FileBrowserMode::SaveFile, {}, "out.mp4", ".mp4",
+        [&](const std::string& p) {},
+        "Save",
+        [&]() { cancelled2 = true; });
+    assert(fb.is_open());
+    fb.close();
+    assert(!fb.is_open());
+    assert(cancelled2 == true);
+
+    std::cout << "[PASS] FileBrowser cancel behavior tests passed." << std::endl;
+}
+
+void test_export_format_presets_and_formats() {
+    std::cout << "[TEST] Running Export format presets and formats test..." << std::endl;
+    ExportManager em;
+    em.load_format_presets();
+    size_t initial_count = em.get_presets().size();
+    assert(initial_count >= 5); // Built-in presets: 1080p, 720p, 4K, GIF, WebP
+
+    // Save a custom preset
+    bool saved = em.save_format_preset("Custom TikTok 9:16", 1080, 1920, 60, "mp4");
+    assert(saved);
+    em.load_format_presets();
+    assert(em.get_presets().size() == initial_count + 1);
+
+    // Verify properties
+    int found_idx = -1;
+    for (size_t i = 0; i < em.get_presets().size(); ++i) {
+        if (em.get_presets()[i].name == "Custom TikTok 9:16") {
+            found_idx = static_cast<int>(i);
+            assert(em.get_presets()[i].width == 1080);
+            assert(em.get_presets()[i].height == 1920);
+            assert(em.get_presets()[i].fps == 60);
+            assert(em.get_presets()[i].format == "mp4");
+            assert(em.get_presets()[i].is_custom == true);
+            break;
+        }
+    }
+    assert(found_idx != -1);
+
+    // Delete custom preset
+    bool deleted = em.delete_format_preset(found_idx);
+    assert(deleted);
+    em.load_format_presets();
+    assert(em.get_presets().size() == initial_count);
+
+    std::cout << "[PASS] Export format presets and formats tests passed." << std::endl;
+}
+
+void test_subtitle_track_and_serialization() {
+    std::cout << "[TEST] Running subtitle track & serialization test..." << std::endl;
+    Project p;
+    p.name = "Subtitle Demo Project";
+
+    Track sub_track;
+    sub_track.id = "track_sub_0";
+    sub_track.name = "Subtitles";
+    sub_track.type = "subtitle";
+    sub_track.depth = 95;
+
+    Clip c1;
+    c1.id = "sub_clip_1";
+    c1.start_time = 1.0;
+    c1.duration = 2.5;
+    c1.subtitle_text = "Welcome to Minicut 1.4!";
+    sub_track.clips.push_back(c1);
+
+    Clip c2;
+    c2.id = "sub_clip_2";
+    c2.start_time = 4.0;
+    c2.duration = 3.0;
+    c2.subtitle_text = "Generated using local and AI speech models.";
+    sub_track.clips.push_back(c2);
+
+    p.tracks.push_back(sub_track);
+
+    // Serialize to JSON string
+    std::string json_str = ProjectSerializer::serialize_json(p);
+    assert(!json_str.empty());
+
+    // Deserialize
+    Project p2;
+    bool ok = ProjectSerializer::deserialize_json(p2, json_str);
+    assert(ok);
+    assert(p2.tracks.size() == 1);
+    assert(p2.tracks[0].type == "subtitle");
+    assert(p2.tracks[0].clips.size() == 2);
+    assert(p2.tracks[0].clips[0].subtitle_text == "Welcome to Minicut 1.4!");
+    assert(p2.tracks[0].clips[1].subtitle_text == "Generated using local and AI speech models.");
+    assert(p2.tracks[0].clips[0].contains_time(2.0));
+    assert(!p2.tracks[0].clips[0].contains_time(3.8));
+
+    std::cout << "[PASS] Subtitle track & serialization tests passed." << std::endl;
+}
+
+void test_render_subsystem() {
+    std::cout << "[TEST] Running Render Subsystem test..." << std::endl;
+    RenderSystem& rs = RenderSystem::instance();
+    assert(rs.get_backend_type() == RenderBackendType::OpenGL3);
+    assert(std::string(rs.get_backend_name()) == "OpenGL 3.3");
+
+    // Vulkan backend probe test
+    RenderBackendVulkan vk_backend;
+    assert(std::string(vk_backend.get_name()) == "Vulkan");
+    assert(vk_backend.get_type() == RenderBackendType::Vulkan);
+    bool vk_supported = vk_backend.is_supported();
+    std::cout << "  -> Vulkan support on host: " << (vk_supported ? "Available" : "Not present (graceful fallback)") << std::endl;
+
+    // OpenGL backend probe test
+    RenderBackendOpenGL3 gl_backend;
+    assert(std::string(gl_backend.get_name()) == "OpenGL 3.3");
+    assert(gl_backend.get_type() == RenderBackendType::OpenGL3);
+    assert(gl_backend.is_supported() == true);
+
+    std::cout << "[PASS] Render Subsystem tests passed." << std::endl;
+}
+
+void test_settings_logic_and_auth() {
+    std::cout << "[TEST] Running SettingsLogic and Auth test..." << std::endl;
+
+    std::string home = getenv("HOME") ? getenv("HOME") : "";
+    std::string cfg_path = home + "/.config/minicut/settings.json";
+    std::string orig_cfg;
+    if (fs::exists(cfg_path)) {
+        std::ifstream ifs(cfg_path);
+        orig_cfg.assign((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    }
+
+    SettingsLogic& sl = SettingsLogic::instance();
+    sl.load_from_disk();
+
+    sl.set_ai_enabled(true);
+    assert(sl.is_ai_enabled() == true);
+
+    sl.set_render_backend("OpenGL3");
+    assert(sl.get_render_backend() == "OpenGL3");
+
+    sl.set_tts_provider("system");
+    assert(sl.get_tts_provider() == "system");
+
+    sl.set_tts_rate(1.25f);
+    assert(std::abs(sl.get_tts_rate() - 1.25f) < 1e-4);
+
+    sl.set_gemini_api_key("AIzaSyTestApiKeyMinicut12345");
+    assert(sl.get_gemini_api_key() == "AIzaSyTestApiKeyMinicut12345");
+    assert(sl.is_authenticated());
+    assert(sl.get_active_auth_token_or_key() == "AIzaSyTestApiKeyMinicut12345");
+
+    sl.save_to_disk();
+
+    // Verify persistence
+    assert(fs::exists(cfg_path));
+
+    // Restore original configuration so user settings are never lost
+    if (!orig_cfg.empty()) {
+        std::ofstream ofs(cfg_path);
+        ofs << orig_cfg;
+        ofs.close();
+        sl.load_from_disk();
+    }
+
+    std::cout << "[PASS] SettingsLogic and Auth tests passed." << std::endl;
+}
+
+void test_tts_manager() {
+    std::cout << "[TEST] Running TTSManager synthesis test..." << std::endl;
+    std::string temp_dir = TempManager::get_temp_dir();
+    std::string out_wav = temp_dir + "/test_tts_unit.wav";
+
+    std::string err;
+    bool ok = TTSManager::instance().synthesize("Testing Minicut speech synthesis.", out_wav, 1.0f, 1.0f, "", &err);
+    if (ok) {
+        assert(fs::exists(out_wav));
+        uintmax_t sz = fs::file_size(out_wav);
+        assert(sz > 44); // Greater than WAV header size
+        std::cout << "  -> Synthesized WAV size: " << sz << " bytes." << std::endl;
+    } else {
+        std::cout << "  -> Synthesis skipped or unavailable: " << err << std::endl;
+    }
+
+    // Direct WAV writer test
+    std::vector<int16_t> test_samples(8000, 1000); // 0.5s of audio
+    std::string direct_wav = temp_dir + "/test_direct_wav.wav";
+    bool wrote = TTSManager::write_wav_file(direct_wav, test_samples, 16000, 1);
+    assert(wrote);
+    assert(fs::exists(direct_wav));
+    assert(fs::file_size(direct_wav) == 44 + test_samples.size() * sizeof(int16_t));
+
+    std::cout << "[PASS] TTSManager tests passed." << std::endl;
+}
+
+void test_accessibility_and_cascading_timeline() {
+    std::cout << "[TEST] Running accessibility, srt export, and cascading timeline tests..." << std::endl;
+
+    // 1. SettingsLogic Accessibility and Voice Settings
+    SettingsLogic& settings = SettingsLogic::instance();
+    settings.set_light_theme(true);
+    assert(settings.get_light_theme() == true);
+    settings.set_colorblind_mode(2); // Deuteranopia
+    assert(settings.get_colorblind_mode() == 2);
+    settings.set_tts_voice("Fenrir");
+    assert(settings.get_tts_voice() == "Fenrir");
+
+    // Serialization & persistence
+    std::string home = getenv("HOME") ? getenv("HOME") : "";
+    std::string cfg_path = home + "/.config/minicut/settings.json";
+    std::string orig_cfg;
+    if (fs::exists(cfg_path)) {
+        std::ifstream ifs(cfg_path);
+        orig_cfg.assign((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    }
+
+    settings.save_to_disk();
+    SettingsLogic test_settings;
+    test_settings.load_from_disk();
+    assert(test_settings.get_light_theme() == true);
+    assert(test_settings.get_colorblind_mode() == 2);
+    assert(test_settings.get_tts_voice() == "Fenrir");
+
+    // Restore original configuration so user settings are never modified by tests
+    if (!orig_cfg.empty()) {
+        std::ofstream ofs(cfg_path);
+        ofs << orig_cfg;
+        ofs.close();
+        settings.load_from_disk();
+    }
+
+    // 2. ExportManager SRT File Generation
+    Project p;
+    Track st;
+    st.type = "subtitle";
+    st.name = "Subtitles";
+    Clip sc1;
+    sc1.id = "sub1";
+    sc1.start_time = 1.0;
+    sc1.duration = 2.5;
+    sc1.subtitle_text = "First line of subtitles";
+    st.clips.push_back(sc1);
+    Clip sc2;
+    sc2.id = "sub2";
+    sc2.start_time = 4.0;
+    sc2.duration = 3.0;
+    sc2.subtitle_text = "Second line of subtitles";
+    st.clips.push_back(sc2);
+    p.tracks.push_back(st);
+
+    std::string srt_path = "test_export_subtitles.srt";
+    if (fs::exists(srt_path)) fs::remove(srt_path);
+    bool srt_ok = ExportManager::write_srt_file(srt_path, p);
+    assert(srt_ok);
+    assert(fs::exists(srt_path));
+    std::ifstream srt_in(srt_path);
+    std::string srt_content((std::istreambuf_iterator<char>(srt_in)), std::istreambuf_iterator<char>());
+    assert(srt_content.find("00:00:01,000 --> 00:00:03,500") != std::string::npos);
+    assert(srt_content.find("First line of subtitles") != std::string::npos);
+    assert(srt_content.find("00:00:04,000 --> 00:00:07,000") != std::string::npos);
+    assert(srt_content.find("Second line of subtitles") != std::string::npos);
+    fs::remove(srt_path);
+
+    // 3. Cascading Split on Multi-Selected Clips
+    Timeline tl;
+    Project p_split;
+    Track t0; t0.type = "video"; t0.name = "V0";
+    Clip c0; c0.id = "c0"; c0.start_time = 1.0; c0.duration = 4.0;
+    t0.clips.push_back(c0);
+    p_split.tracks.push_back(t0);
+
+    Track t1; t1.type = "audio"; t1.name = "A0";
+    Clip c1; c1.id = "c1"; c1.start_time = 2.0; c1.duration = 5.0;
+    t1.clips.push_back(c1);
+    p_split.tracks.push_back(t1);
+
+    // Select both clips across both tracks
+    tl.select_clip("c0", false, true);
+    tl.select_clip("c1", false, true);
+    assert(tl.get_selected_clip_ids().size() == 2);
+
+    // Playhead at t=3.0 intersects both c0 (1.0..5.0) and c1 (2.0..7.0)
+    bool split_ok = tl.split_selected_clips(p_split, 3.0);
+    assert(split_ok);
+    // Both tracks should now have 2 clips!
+    assert(p_split.tracks[0].clips.size() == 2);
+    assert(p_split.tracks[1].clips.size() == 2);
+    assert(std::abs(p_split.tracks[0].clips[0].duration - 2.0) < 1e-3);
+    assert(std::abs(p_split.tracks[0].clips[1].duration - 2.0) < 1e-3);
+    assert(std::abs(p_split.tracks[1].clips[0].duration - 1.0) < 1e-3);
+    assert(std::abs(p_split.tracks[1].clips[1].duration - 4.0) < 1e-3);
+
+    // 4. Multi-Clip Copy & Paste
+    tl.clear_selection();
+    tl.select_clip(p_split.tracks[0].clips[0].id, false, true);
+    tl.select_clip(p_split.tracks[1].clips[0].id, false, true);
+    tl.copy_selected_clips(p_split);
+
+    // Paste at t=10.0 starting on track 0
+    bool paste_ok = tl.paste_clip(p_split, 10.0, 0);
+    assert(paste_ok);
+    // Track 0 should now have 3 clips, Track 1 should now have 3 clips
+    assert(p_split.tracks[0].clips.size() == 3);
+    assert(p_split.tracks[1].clips.size() == 3);
+    assert(p_split.tracks[0].clips[2].start_time == 10.0);
+    assert(p_split.tracks[1].clips[2].start_time == 11.0); // 1s relative offset preserved!
+
+    std::cout << "[PASS] Accessibility, srt export, and cascading timeline tests passed." << std::endl;
+}
+
+void test_aicore_interfaces() {
+    std::cout << "[TEST] Running AICore interfaces test..." << std::endl;
+    AICore& ai = AICore::instance();
+    assert(!ai.is_busy());
+    assert(!ai.get_status().empty());
+
+    std::cout << "[PASS] AICore interfaces tests passed." << std::endl;
+}
+
+void test_swap_manager_and_disk_buffer() {
+    std::cout << "[TEST] Running SwapManager & disk-backed buffer tests..." << std::endl;
+    SwapManager& sm = SwapManager::instance();
+    sm.init();
+    std::string swap_dir = sm.get_swap_dir();
+    assert(!swap_dir.empty());
+    assert(fs::exists(swap_dir));
+
+    // Test SwapBuffer<float> for large audio PCM buffers
+    {
+        SwapBuffer<float> buf;
+        assert(buf.empty());
+        assert(buf.size() == 0);
+
+        // Append 10,000 floats
+        std::vector<float> sample_data(10000);
+        for (size_t i = 0; i < sample_data.size(); ++i) {
+            sample_data[i] = static_cast<float>(i) * 0.001f;
+        }
+        buf.append(sample_data.data(), sample_data.size());
+
+        assert(buf.size() == 10000);
+        assert(std::abs(buf[0] - 0.0f) < 1e-5f);
+        assert(std::abs(buf[500] - 0.5f) < 1e-5f);
+        assert(std::abs(buf[9999] - 9.999f) < 1e-5f);
+
+        // Verify disk-backed file was created in ~/.config/minicut/swap/
+        std::string path = buf.get_swap_path();
+        assert(!path.empty());
+        assert(fs::exists(path));
+    }
+
+    // Now test SwapBuffer<uint8_t> for decoded image caches
+    {
+        SwapBuffer<uint8_t> img_buf(1920 * 1080 * 4, 128);
+        assert(img_buf.size() == 1920 * 1080 * 4);
+        assert(img_buf[0] == 128);
+        assert(img_buf[1920 * 1080 * 4 - 1] == 128);
+        std::string img_path = img_buf.get_swap_path();
+        assert(!img_path.empty());
+        assert(fs::exists(img_path));
+    }
+
+    std::cout << "[PASS] SwapManager and disk-backed buffer tests passed." << std::endl;
+}
+
+void test_subtitle_addition_and_assets_menu() {
+    std::cout << "[TEST] Running subtitle addition and assets menu tests..." << std::endl;
+    LocaleManager& loc = LocaleManager::instance();
+    loc.set_locale("en");
+    assert(std::string(_TR("panel_clips")) == "Asset Browser");
+    assert(std::string(_TR("menu_assets")) == "Assets");
+    assert(std::string(_TR("timeline_add_subtitle")) == "+ Subtitle");
+
+    // Test timeline subtitle addition
+    Project p;
+    Timeline tl;
+    assert(p.tracks.empty());
+
+    // Adding subtitle clip should auto-create subtitle track with depth 90
+    std::string sub_id1 = tl.add_subtitle_clip(p, 1.5, 3.0, "Test Subtitle 1");
+    assert(!sub_id1.empty());
+    assert(p.tracks.size() == 1);
+    assert(p.tracks[0].type == "subtitle");
+    assert(p.tracks[0].depth == 90);
+    assert(p.tracks[0].clips.size() == 1);
+    assert(p.tracks[0].clips[0].id == sub_id1);
+    assert(p.tracks[0].clips[0].start_time == 1.5);
+    assert(p.tracks[0].clips[0].duration == 3.0);
+    assert(p.tracks[0].clips[0].subtitle_text == "Test Subtitle 1");
+
+    // Adding second subtitle clip should reuse existing subtitle track
+    std::string sub_id2 = tl.add_subtitle_clip(p, 5.0, 2.5, "Second Subtitle");
+    assert(!sub_id2.empty());
+    assert(p.tracks.size() == 1); // Reuses the track
+    assert(p.tracks[0].clips.size() == 2);
+    assert(p.tracks[0].clips[1].subtitle_text == "Second Subtitle");
+
+    // Test explicit add_track for subtitle
+    tl.add_track(p, "subtitle");
+    assert(p.tracks.size() == 2);
+    assert(p.tracks[1].type == "subtitle");
+    assert(p.tracks[1].name == "Subtitle 2");
+
+    std::cout << "[PASS] Subtitle addition and assets menu tests passed." << std::endl;
+}
+
+void test_multilanguage_tts_stereo_and_autolength() {
+    std::cout << "[TEST] Running multi-language TTS, stereo audio, and auto-length export tests..." << std::endl;
+
+    // 1. Language Detection for TTS
+    assert(TTSManager::detect_language_code("Hello world, this is a test.") == "en");
+    assert(TTSManager::detect_language_code("こんにちは世界") == "ja");
+    assert(TTSManager::detect_language_code("カタカナ") == "ja");
+    assert(TTSManager::detect_language_code("안녕하세요 한국어") == "ko");
+    assert(TTSManager::detect_language_code("Привіт, як справи? Україна") == "uk");
+    assert(TTSManager::detect_language_code("مرحبا بك في العالم") == "ar");
+    assert(TTSManager::detect_language_code("你好，世界") == "cmn");
+
+    // 2. SettingsLogic preview volume and live persistence
+    SettingsLogic& logic = SettingsLogic::instance();
+    logic.set_preview_volume_db(-6.0f);
+    assert(logic.get_preview_volume_db() == -6.0f);
+    logic.set_preview_volume_db(0.0f);
+    assert(logic.get_preview_volume_db() == 0.0f);
+
+    // 3. AudioEngine preview volume
+    AudioEngine ae;
+    ae.set_preview_volume_db(-14.5f);
+    assert(std::abs(ae.get_preview_volume_db() - (-14.5f)) < 0.001f);
+
+    // 4. Asset Duration vs Total Timeline Duration
+    Project proj;
+    assert(proj.get_assets_duration() == 0.0);
+    assert(proj.get_total_duration() == 10.0); // minimum 10s timeline view
+
+    Track v0; v0.id = "v0"; v0.type = "video"; v0.name = "Video 1";
+    Clip c0; c0.id = "c0"; c0.start_time = 0.0; c0.duration = 4.2;
+    v0.clips.push_back(c0);
+    proj.tracks.push_back(v0);
+
+    assert(std::abs(proj.get_assets_duration() - 4.2) < 0.001);
+    assert(proj.get_total_duration() == 10.0);
+
+    Clip c1; c1.id = "c1"; c1.start_time = 10.0; c1.duration = 6.0;
+    proj.tracks[0].clips.push_back(c1);
+    assert(std::abs(proj.get_assets_duration() - 16.0) < 0.001);
+    assert(std::abs(proj.get_total_duration() - 16.0) < 0.001);
+
+    // 5. Stereo Audio Keyframes (volume, volume_left, volume_right)
+    proj.set_or_add_keyframe("c0", "volume", 0.0, 1.0);
+    proj.set_or_add_keyframe("c0", "volume_left", 0.0, 0.8);
+    proj.set_or_add_keyframe("c0", "volume_right", 0.0, 0.2);
+
+    double v_master = proj.evaluate_keyframe("c0", "volume", 0.0, 1.0);
+    double v_left = proj.evaluate_keyframe("c0", "volume_left", 0.0, 1.0);
+    double v_right = proj.evaluate_keyframe("c0", "volume_right", 0.0, 1.0);
+    assert(std::abs(v_master - 1.0) < 0.001);
+    assert(std::abs(v_left - 0.8) < 0.001);
+    assert(std::abs(v_right - 0.2) < 0.001);
+
+    // 6. Cross-track Clip Dragging
+    Track v1; v1.id = "v1"; v1.type = "video"; v1.name = "Video 2";
+    Track a0; a0.id = "a0"; a0.type = "audio"; a0.name = "Audio 1";
+    proj.tracks.push_back(v1);
+    proj.tracks.push_back(a0);
+
+    // Drag clip c0 from v0 to v1 (both video) -> allowed
+    assert(proj.tracks[0].clips.size() == 2);
+    assert(proj.tracks[1].clips.empty());
+    if (proj.tracks[0].type == proj.tracks[1].type) {
+        Clip moved = proj.tracks[0].clips[0];
+        proj.tracks[0].clips.erase(proj.tracks[0].clips.begin());
+        proj.tracks[1].clips.push_back(moved);
+    }
+    assert(proj.tracks[0].clips.size() == 1);
+    assert(proj.tracks[1].clips.size() == 1);
+    assert(proj.tracks[1].clips[0].id == "c0");
+
+    // Cross-track drag from v1 to a0 (video to audio) -> mismatched type rejected
+    bool can_drag_mismatched = (proj.tracks[1].type == proj.tracks[2].type);
+    assert(!can_drag_mismatched);
+
+    // 7. ExportConfig Auto-length defaults
+    ExportConfig exp_cfg;
+    assert(exp_cfg.auto_length == true);
+    assert(exp_cfg.manual_duration == 0.0);
+
+    std::cout << "[PASS] Multi-language TTS, stereo audio, and auto-length export tests passed." << std::endl;
+}
+
+extern ImGuiKey ImGui_ImplSDL2_KeyEventToImGuiKey(SDL_Keycode keycode, SDL_Scancode scancode);
+
+void test_preview_aspect_ratio_and_japanese_kanji_tts_and_hotkeys() {
+    std::cout << "[TEST] Running preview aspect ratio, Japanese Kanji TTS, and layout-independent hotkeys tests..." << std::endl;
+
+    // 1. Japanese Kanji Transliteration
+    assert(JapaneseTransliteration::contains_kanji("こんにちは世界"));
+    assert(JapaneseTransliteration::contains_kanji("世界"));
+    assert(JapaneseTransliteration::contains_kanji("日本"));
+    assert(!JapaneseTransliteration::contains_kanji("こんにちは"));
+    assert(!JapaneseTransliteration::contains_kanji("Hello World 123"));
+
+    std::string t1 = JapaneseTransliteration::kanji_to_hiragana("こんにちは世界");
+    assert(t1 == "こんにちはせかい");
+
+    std::string t2 = JapaneseTransliteration::kanji_to_hiragana("日本");
+    assert(t2 == "にほん");
+
+    std::string t3 = JapaneseTransliteration::kanji_to_hiragana("動画編集");
+    assert(t3 == "どうがへんしゅう");
+
+    std::string t4 = JapaneseTransliteration::kanji_to_hiragana("音声と字幕");
+    assert(t4.find("おんせい") != std::string::npos);
+    assert(t4.find("じまく") != std::string::npos);
+
+    // 2. TTSManager Japanese Synthesis with Kanji
+    assert(TTSManager::detect_language_code("こんにちは世界") == "ja");
+    std::string ja_wav = "/tmp/test_ja_kanji.wav";
+    std::string tts_err;
+    bool synth_ok = TTSManager::instance().synthesize("こんにちは世界", ja_wav, 1.0f, 1.0f, "ja", &tts_err);
+    assert(synth_ok);
+    assert(fs::exists(ja_wav));
+    assert(fs::file_size(ja_wav) > 1000);
+    fs::remove(ja_wav);
+
+    // 3. Project largest asset aspect ratio
+    Project p_empty;
+    double ar_empty = p_empty.get_largest_asset_aspect_ratio();
+    assert(std::abs(ar_empty - (16.0 / 9.0)) < 1e-4);
+
+    Project p_custom;
+    VideoAsset a_16_9; a_16_9.id = "a_wide"; a_16_9.width = 1920; a_16_9.height = 1080;
+    VideoAsset a_21_9; a_21_9.id = "a_cinema"; a_21_9.width = 2560; a_21_9.height = 1080;
+    VideoAsset a_9_16; a_9_16.id = "a_shorts"; a_9_16.width = 1080; a_9_16.height = 1920;
+    p_custom.video_assets = { a_16_9, a_21_9, a_9_16 };
+
+    Track trk; trk.id = "t1"; trk.type = "video";
+    Clip c1; c1.id = "c1"; c1.asset_id = "a_wide"; c1.duration = 5.0;
+    Clip c2; c2.id = "c2"; c2.asset_id = "a_cinema"; c2.duration = 5.0;
+    trk.clips = { c1, c2 };
+    p_custom.tracks = { trk };
+
+    // With 16:9 (1.777) and 21:9 (2.370) on timeline, largest is 21:9 (~2.370)
+    double ar_largest = p_custom.get_largest_asset_aspect_ratio();
+    assert(std::abs(ar_largest - (2560.0 / 1080.0)) < 1e-4);
+
+    // Only vertical video clip placed on timeline -> adapts to 9:16 (~0.5625)
+    p_custom.tracks[0].clips.clear();
+    Clip c_vert; c_vert.id = "c3"; c_vert.asset_id = "a_shorts"; c_vert.duration = 5.0;
+    p_custom.tracks[0].clips = { c_vert };
+    double ar_vert = p_custom.get_largest_asset_aspect_ratio();
+    assert(std::abs(ar_vert - (1080.0 / 1920.0)) < 1e-4);
+
+    // 4. Keyboard Layout-Independent Scancode Hotkeys
+    assert(ImGui_ImplSDL2_KeyEventToImGuiKey(SDLK_UNKNOWN, SDL_SCANCODE_S) == ImGuiKey_S);
+    assert(ImGui_ImplSDL2_KeyEventToImGuiKey(SDLK_UNKNOWN, SDL_SCANCODE_SPACE) == ImGuiKey_Space);
+    assert(ImGui_ImplSDL2_KeyEventToImGuiKey(SDLK_UNKNOWN, SDL_SCANCODE_DELETE) == ImGuiKey_Delete);
+    assert(ImGui_ImplSDL2_KeyEventToImGuiKey(SDLK_UNKNOWN, SDL_SCANCODE_BACKSPACE) == ImGuiKey_Backspace);
+    assert(ImGui_ImplSDL2_KeyEventToImGuiKey(SDLK_UNKNOWN, SDL_SCANCODE_A) == ImGuiKey_A);
+    assert(ImGui_ImplSDL2_KeyEventToImGuiKey(SDLK_UNKNOWN, SDL_SCANCODE_Z) == ImGuiKey_Z);
+    assert(ImGui_ImplSDL2_KeyEventToImGuiKey(SDLK_UNKNOWN, SDL_SCANCODE_C) == ImGuiKey_C);
+    assert(ImGui_ImplSDL2_KeyEventToImGuiKey(SDLK_UNKNOWN, SDL_SCANCODE_V) == ImGuiKey_V);
+    assert(ImGui_ImplSDL2_KeyEventToImGuiKey(SDLK_UNKNOWN, SDL_SCANCODE_X) == ImGuiKey_X);
+    assert(ImGui_ImplSDL2_KeyEventToImGuiKey(SDLK_UNKNOWN, SDL_SCANCODE_LEFT) == ImGuiKey_LeftArrow);
+    assert(ImGui_ImplSDL2_KeyEventToImGuiKey(SDLK_UNKNOWN, SDL_SCANCODE_RIGHT) == ImGuiKey_RightArrow);
+
+    std::cout << "[PASS] Preview aspect ratio, Japanese Kanji TTS, and layout-independent hotkeys tests passed." << std::endl;
+}
+
+void test_preview_transform_and_popout_and_export_progress() {
+    std::cout << "[TEST] Running Preview Transform Gizmo, Modeless Export & Script API tests..." << std::endl;
+
+    // 1. ExportManager audio progress & modeless status
+    ExportManager em;
+    assert(std::abs(em.get_audio_progress() - 0.0f) < 1e-5f);
+    assert(std::abs(em.get_progress() - 0.0f) < 1e-5f);
+    assert(em.is_exporting() == false);
+    assert(em.get_status_text() == "Idle");
+    assert(em.is_dialog_open() == false);
+    assert(em.is_window_active() == false);
+    em.open_export_dialog();
+    assert(em.is_dialog_open() == true);
+    assert(em.is_window_active() == true);
+    em.close_export_dialog();
+    assert(em.is_dialog_open() == false);
+    assert(em.is_window_active() == false);
+
+    // 2. ScriptEngine Lua API for clip transform, preview popout & export
+    Project proj_lua;
+    Timeline tl_lua;
+    ClipManager cm_lua;
+    double playhead_lua = 0.0;
+    std::string selected_clip_lua = "";
+
+    Track v0; v0.type = "video"; v0.name = "Video 1"; v0.id = "v0";
+    proj_lua.tracks.push_back(v0);
+    VideoAsset va; va.id = "vasset_1"; va.path = "/test/v1.mp4"; va.duration = 10.0;
+    proj_lua.video_assets.push_back(va);
+
+    ScriptEngine se_lua;
+    bool init_lua_ok = se_lua.init(
+        &proj_lua, &tl_lua, &cm_lua, &playhead_lua, &selected_clip_lua
+    );
+    assert(init_lua_ok);
+
+    se_lua.run_string("cid = timeline.place_video('vasset_1', 0, 0.0, 5.0, 0.0)");
+    assert(!proj_lua.tracks[0].clips.empty());
+    Clip& c_lua = proj_lua.tracks[0].clips[0];
+
+    // Test clip.set_transform in Lua
+    se_lua.run_string("clip.set_transform(cid, 120.0, -45.0, 1.75, 30.0)");
+    assert(std::abs(c_lua.pos_x - 120.0) < 1e-4);
+    assert(std::abs(c_lua.pos_y - (-45.0)) < 1e-4);
+    assert(std::abs(c_lua.scale - 1.75) < 1e-4);
+    assert(std::abs(c_lua.rotation - 30.0) < 1e-4);
+
+    // Test clip.get_transform in Lua
+    se_lua.run_string(R"(
+        t = clip.get_transform(cid)
+        assert(t ~= nil)
+        assert(math.abs(t.x - 120.0) < 0.01)
+        assert(math.abs(t.y - (-45.0)) < 0.01)
+        assert(math.abs(t.scale - 1.75) < 0.01)
+        assert(math.abs(t.rotation - 30.0) < 0.01)
+    )");
+
+    // Test clip.reset_transform in Lua
+    se_lua.run_string("clip.reset_transform(cid)");
+    assert(std::abs(c_lua.pos_x - 0.0) < 1e-4);
+    assert(std::abs(c_lua.pos_y - 0.0) < 1e-4);
+    assert(std::abs(c_lua.scale - 1.0) < 1e-4);
+    assert(std::abs(c_lua.rotation - 0.0) < 1e-4);
+
+    // Test keyframe-aware transform updates in Lua
+    proj_lua.set_or_add_keyframe(c_lua.id, "pos_x", 0.0, 50.0);
+    proj_lua.set_or_add_keyframe(c_lua.id, "scale", 0.0, 1.5);
+    playhead_lua = 0.0;
+    se_lua.run_string("clip.set_transform(cid, 300.0, 150.0, 3.0, 45.0)");
+    assert(std::abs(proj_lua.get_clip_param(c_lua, "pos_x", 0.0) - 300.0) < 1e-4);
+    assert(std::abs(proj_lua.get_clip_param(c_lua, "scale", 0.0) - 3.0) < 1e-4);
+    se_lua.run_string("clip.reset_transform(cid)");
+    assert(std::abs(proj_lua.get_clip_param(c_lua, "pos_x", 0.0) - 0.0) < 1e-4);
+    assert(std::abs(proj_lua.get_clip_param(c_lua, "scale", 0.0) - 1.0) < 1e-4);
+
+    // Test gui preview methods in Lua (safe fallbacks when headless/no App)
+    se_lua.run_string("gui.popout_preview(true)");
+    se_lua.run_string("local popped = gui.is_preview_popped_out()");
+    se_lua.run_string("gui.set_preview_aspect_mode(2)");
+    se_lua.run_string("local amode = gui.get_preview_aspect_mode()");
+    se_lua.run_string("gui.set_transform_tool('scale')");
+    se_lua.run_string("local ttool = gui.get_transform_tool()");
+
+    // Test export API in Lua
+    se_lua.run_string(R"(
+        local a_prog = export.get_audio_progress()
+        local prog = export.get_progress()
+        local exporting = export.is_exporting()
+        local status = export.get_status()
+        assert(type(a_prog) == "number")
+        assert(type(prog) == "number")
+        assert(type(exporting) == "boolean")
+        assert(type(status) == "string")
+    )");
+
+    // 3. ScriptEngine JavaScript API for clip transform, preview popout & export
+    Project proj_js;
+    Timeline tl_js;
+    ClipManager cm_js;
+
+    Track v_js; v_js.type = "video"; v_js.name = "Video JS"; v_js.id = "v_js";
+    proj_js.tracks.push_back(v_js);
+    VideoAsset va_js; va_js.id = "vasset_js"; va_js.path = "/test/v_js.mp4"; va_js.duration = 10.0;
+    proj_js.video_assets.push_back(va_js);
+
+    ScriptEngine se_js;
+    bool init_js_ok = se_js.init(&proj_js, &tl_js, &cm_js);
+    assert(init_js_ok);
+
+    se_js.run_js_string("var cid = timeline.place_video(0, 'vasset_js', 0.0, 5.0);");
+    assert(!proj_js.tracks[0].clips.empty());
+    Clip& c_js = proj_js.tracks[0].clips[0];
+
+    // Test clip.set_transform in JS
+    se_js.run_js_string("clip.set_transform(cid, 85.0, 60.0, 2.25, 45.0);");
+    assert(std::abs(c_js.pos_x - 85.0) < 1e-4);
+    assert(std::abs(c_js.pos_y - 60.0) < 1e-4);
+    assert(std::abs(c_js.scale - 2.25) < 1e-4);
+    assert(std::abs(c_js.rotation - 45.0) < 1e-4);
+
+    // Test clip.get_transform in JS
+    se_js.run_js_string(R"(
+        var t = clip.get_transform(cid);
+        if (!t || Math.abs(t.x - 85.0) > 0.01 || Math.abs(t.y - 60.0) > 0.01 ||
+            Math.abs(t.scale - 2.25) > 0.01 || Math.abs(t.rotation - 45.0) > 0.01) {
+            throw new Error("clip.get_transform returned invalid values in JS");
+        }
+    )");
+
+    // Test clip.reset_transform in JS
+    se_js.run_js_string("clip.reset_transform(cid);");
+    assert(std::abs(c_js.pos_x - 0.0) < 1e-4);
+    assert(std::abs(c_js.pos_y - 0.0) < 1e-4);
+    assert(std::abs(c_js.scale - 1.0) < 1e-4);
+    assert(std::abs(c_js.rotation - 0.0) < 1e-4);
+
+    // Test keyframe-aware transform updates in JS
+    proj_js.set_or_add_keyframe(c_js.id, "pos_x", 0.0, 40.0);
+    proj_js.set_or_add_keyframe(c_js.id, "scale", 0.0, 1.2);
+    se_js.run_js_string("clip.set_transform(cid, 500.0, 250.0, 4.0, 90.0);");
+    assert(std::abs(proj_js.get_clip_param(c_js, "pos_x", 0.0) - 500.0) < 1e-4);
+    assert(std::abs(proj_js.get_clip_param(c_js, "scale", 0.0) - 4.0) < 1e-4);
+    se_js.run_js_string("clip.reset_transform(cid);");
+    assert(std::abs(proj_js.get_clip_param(c_js, "pos_x", 0.0) - 0.0) < 1e-4);
+    assert(std::abs(proj_js.get_clip_param(c_js, "scale", 0.0) - 1.0) < 1e-4);
+
+    // Test gui & export in JS
+    bool js_gui_exp_ok = se_js.run_js_string(R"(
+        gui.popout_preview(true);
+        var popped = gui.is_preview_popped_out();
+        gui.set_preview_aspect_mode(1);
+        var mode = gui.get_preview_aspect_mode();
+        gui.set_transform_tool("rotate");
+        var tool = gui.get_transform_tool();
+
+        var ap = exporter.get_audio_progress();
+        var p = minicut.export.get_progress();
+        var exp = this['export'].is_exporting();
+        var st = exporter.get_status();
+        if (typeof ap !== 'number' || typeof p !== 'number' || typeof exp !== 'boolean' || typeof st !== 'string') {
+            throw new Error("export API types invalid in JS");
+        }
+    )");
+    assert(js_gui_exp_ok);
+
+    std::cout << "[PASS] Preview Transform Gizmo, Modeless Export & Script API tests passed." << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Running minicut Comprehensive Test Suite" << std::endl;
@@ -1278,6 +2039,19 @@ int main() {
     test_window_title_and_version();
     test_dock_localization();
     test_javascript_engine();
+    test_filebrowser_cancel_behavior();
+    test_export_format_presets_and_formats();
+    test_subtitle_track_and_serialization();
+    test_render_subsystem();
+    test_settings_logic_and_auth();
+    test_tts_manager();
+    test_aicore_interfaces();
+    test_accessibility_and_cascading_timeline();
+    test_swap_manager_and_disk_buffer();
+    test_subtitle_addition_and_assets_menu();
+    test_multilanguage_tts_stereo_and_autolength();
+    test_preview_aspect_ratio_and_japanese_kanji_tts_and_hotkeys();
+    test_preview_transform_and_popout_and_export_progress();
 
     std::cout << "========================================" << std::endl;
     std::cout << "ALL MINICUT UNIT & PIPELINE TESTS PASSED" << std::endl;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(minicut VERSION 1.0.0 LANGUAGES CXX C)
+project(minicut VERSION 1.4.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -127,6 +127,18 @@ set(MINICUT_SOURCES
     src/ScriptEngine.cpp
     src/ArabicShaper.cpp
     src/TextGenerator.cpp
+    src/SettingsLogic.cpp
+    src/SettingsDialog.cpp
+    src/TTSManager.cpp
+    src/TTSDialog.cpp
+    src/AICore.cpp
+    src/AIDialog.cpp
+    src/render/RenderBackend.cpp
+    src/render/RenderBackendOpenGL3.cpp
+    src/render/RenderBackendVulkan.cpp
+    src/render/RenderSystem.cpp
+    src/SwapManager.cpp
+    src/JapaneseTransliteration.cpp
     ${DUKTAPE_DIR}/duktape.c
     ${IMGUI_SOURCES}
 )
@@ -200,6 +212,15 @@ add_executable(test_minicut
     src/ScriptEngine.cpp
     src/ArabicShaper.cpp
     src/TextGenerator.cpp
+    src/SettingsLogic.cpp
+    src/TTSManager.cpp
+    src/AICore.cpp
+    src/render/RenderBackend.cpp
+    src/render/RenderBackendOpenGL3.cpp
+    src/render/RenderBackendVulkan.cpp
+    src/render/RenderSystem.cpp
+    src/SwapManager.cpp
+    src/JapaneseTransliteration.cpp
     ${DUKTAPE_DIR}/duktape.c
     ${IMGUI_SOURCES}
 )

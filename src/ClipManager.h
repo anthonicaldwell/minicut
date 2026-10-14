@@ -81,7 +81,8 @@ public:
                    const std::function<void()>& on_import_image,
                    const std::function<void()>& on_import_audio,
                    const std::function<void()>& on_import_prefab,
-                   const std::function<void()>& on_add_text = nullptr);
+                   const std::function<void()>& on_add_text = nullptr,
+                   const std::function<void()>& on_add_tts = nullptr);
 
     const std::string& get_selected_asset_id() const { return m_selected_asset_id; }
     bool is_selected_video() const { return m_selected_is_video; }

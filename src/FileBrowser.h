@@ -49,8 +49,10 @@ public:
               const std::string& default_filename,
               const std::string& default_extension,
               const std::function<void(const std::string& path)>& on_confirm,
-              const std::string& confirm_btn_label = "");
+              const std::string& confirm_btn_label = "",
+              const std::function<void()>& on_cancel = nullptr);
 
+    void cancel();
     void close();
     bool is_open() const { return m_is_open; }
 
@@ -87,4 +89,5 @@ private:
     std::map<std::string, GLuint> m_thumbnail_cache;
 
     std::function<void(const std::string& path)> m_on_confirm;
+    std::function<void()> m_on_cancel;
 };

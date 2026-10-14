@@ -28,6 +28,8 @@ private:
     void render_audio_tools(Project& project, Clip* clip, const Track& track, double playhead_time,
                             const std::function<void(double)>& on_scrub,
                             const std::function<void()>& on_project_changed);
+    void render_subtitle_tools(Project& project, Clip* clip, const Track& track, double playhead_time,
+                               const std::function<void()>& on_project_changed);
 
     void render_parameter_row(Project& project, Clip* clip, const std::string& param, const char* label,
                               double rel_playhead, double default_val, float min_val, float max_val,

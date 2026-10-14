@@ -19,6 +19,7 @@ public:
 
     // Timeline editing actions (for Menu & Shortcuts)
     bool split_selected_clip(Project& project, double playhead_time);
+    bool split_selected_clips(Project& project, double playhead_time);
     bool split_clip_at(Project& project, const std::string& clip_id, double playhead_time);
     bool delete_selected_clip(Project& project);
     bool delete_selected_clips(Project& project);
@@ -38,6 +39,7 @@ public:
 
     // Track management & reordering
     void add_track(Project& project, const std::string& type);
+    std::string add_subtitle_clip(Project& project, double start_time, double duration = 3.0, const std::string& text = "New Subtitle");
     void delete_track(Project& project, int track_idx);
     void move_track_up(Project& project, int track_idx);
     void move_track_down(Project& project, int track_idx);
@@ -98,10 +100,14 @@ private:
     float m_scrollbar_drag_start_mouse_x = 0.0f;
 
     // Clipboard
+    struct ClipboardItem {
+        Clip clip;
+        int track_offset = 0;
+        double time_offset = 0.0;
+        std::vector<Keyframe> keyframes;
+    };
     bool m_has_clipboard = false;
-    Clip m_clipboard_clip;
-    std::vector<Clip> m_clipboard_clips;
-    std::vector<Keyframe> m_clipboard_keyframes;
+    std::vector<ClipboardItem> m_clipboard_items;
 
     // Drag / Trim states
     enum class DragMode { None, MoveClip, TrimLeft, TrimRight, ScrubPlayhead, BoxSelect };

@@ -70,6 +70,10 @@ void LocaleManager::init(const std::string& locales_dir) {
     set_locale(m_current_locale);
 }
 
+void LocaleManager::reload_locales() {
+    init(m_locales_dir);
+}
+
 bool LocaleManager::set_locale(const std::string& lang_code) {
     std::string code = lang_code.empty() ? "en" : lang_code;
     if (code == "jp") code = "ja"; // Alias support
@@ -176,11 +180,11 @@ const char* LocaleManager::tr(const char* key, const char* fallback) const {
 void LocaleManager::populate_embedded_fallbacks() {
     // English
     m_embedded["en"] = {
-        {"menu_file", "File"}, {"menu_edit", "Edit"}, {"menu_project", "Project"},
+        {"menu_file", "File"}, {"menu_edit", "Edit"}, {"menu_assets", "Assets"}, {"menu_project", "Project"},
         {"menu_settings", "Settings"}, {"menu_help", "Help"},
         {"file_new", "New Project"}, {"file_open", "Open Project..."},
         {"file_save", "Save Project"}, {"file_save_as", "Save Project As..."},
-        {"file_export", "Export Video (.mp4)..."}, {"file_exit", "Exit"},
+        {"file_export", "Export Video..."}, {"file_exit", "Exit"},
         {"edit_undo", "Undo"}, {"edit_redo", "Redo"}, {"edit_cut", "Cut"},
         {"edit_copy", "Copy"}, {"edit_paste", "Paste"},
         {"edit_split", "Split Selected Clip"}, {"edit_delete", "Delete Selected Clip"},
@@ -189,10 +193,10 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"project_generate_demo", "Generate Demo Media"}, {"project_cleanup_temp", "Cleanup Temporary Files"},
         {"settings_system_dialog", "Use System File Dialog"}, {"settings_language", "Language"},
         {"help_about", "About minicut..."},
-        {"panel_clips", "Clips & Assets"}, {"panel_preview", "Preview & Program"},
+        {"panel_clips", "Asset Browser"}, {"panel_preview", "Preview & Program"},
         {"panel_timeline", "Timeline"}, {"panel_context", "Context Inspector & Tools"},
         {"timeline_play", "Play"}, {"timeline_pause", "Pause"}, {"timeline_stop", "Stop"},
-        {"timeline_add_video", "+ Video Track"}, {"timeline_add_audio", "+ Audio Track"},
+        {"timeline_add_video", "+ Video Track"}, {"timeline_add_audio", "+ Audio Track"}, {"timeline_add_subtitle", "+ Subtitle"},
         {"timeline_separate_audio", "Separate Audio Track"}, {"timeline_split_playhead", "Split at Playhead"},
         {"timeline_paste_here", "Paste Here"}, {"timeline_depth", "Render Depth"},
         {"timeline_move_front", "Move to Front (Depth 100)"}, {"timeline_move_back", "Move to Back (Depth 0)"},
@@ -229,11 +233,11 @@ void LocaleManager::populate_embedded_fallbacks() {
 
     // Japanese
     m_embedded["ja"] = {
-        {"menu_file", "ファイル"}, {"menu_edit", "編集"}, {"menu_project", "プロジェクト"},
+        {"menu_file", "ファイル"}, {"menu_edit", "編集"}, {"menu_assets", "素材"}, {"menu_project", "プロジェクト"},
         {"menu_settings", "設定"}, {"menu_help", "ヘルプ"},
         {"file_new", "新規プロジェクト"}, {"file_open", "プロジェクトを開く..."},
         {"file_save", "プロジェクトを保存"}, {"file_save_as", "名前を付けて保存..."},
-        {"file_export", "動画を書き出し (.mp4)..."}, {"file_exit", "終了"},
+        {"file_export", "動画を書き出し..."}, {"file_exit", "終了"},
         {"edit_undo", "元に戻す"}, {"edit_redo", "やり直し"}, {"edit_cut", "切り取り"},
         {"edit_copy", "コピー"}, {"edit_paste", "貼り付け"},
         {"edit_split", "選択クリップを分割"}, {"edit_delete", "選択クリップを削除"},
@@ -242,10 +246,10 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"project_generate_demo", "デモメディアを生成"}, {"project_cleanup_temp", "一時ファイルをクリーンアップ"},
         {"settings_system_dialog", "システムファイルダイアログを使用"}, {"settings_language", "言語 (Language)"},
         {"help_about", "minicut について..."},
-        {"panel_clips", "クリップと素材"}, {"panel_preview", "プレビューとプログラム"},
+        {"panel_clips", "アセットブラウザ"}, {"panel_preview", "プレビューとプログラム"},
         {"panel_timeline", "タイムライン"}, {"panel_context", "コンテキストインスペクターとツール"},
         {"timeline_play", "再生"}, {"timeline_pause", "一時停止"}, {"timeline_stop", "停止"},
-        {"timeline_add_video", "+ 動画トラック"}, {"timeline_add_audio", "+ 音声トラック"},
+        {"timeline_add_video", "+ 動画トラック"}, {"timeline_add_audio", "+ 音声トラック"}, {"timeline_add_subtitle", "+ 字幕"},
         {"timeline_separate_audio", "音声トラックを分離"}, {"timeline_split_playhead", "再生ヘッド位置で分割"},
         {"timeline_paste_here", "ここに貼り付け"}, {"timeline_depth", "描画深度 (Depth)"},
         {"timeline_move_front", "最前面に移動 (深度 100)"}, {"timeline_move_back", "最背面に移動 (深度 0)"},
@@ -283,11 +287,11 @@ void LocaleManager::populate_embedded_fallbacks() {
 
     // Korean
     m_embedded["ko"] = {
-        {"menu_file", "파일"}, {"menu_edit", "편집"}, {"menu_project", "프로젝트"},
+        {"menu_file", "파일"}, {"menu_edit", "편집"}, {"menu_assets", "에셋"}, {"menu_project", "프로젝트"},
         {"menu_settings", "설정"}, {"menu_help", "도움말"},
         {"file_new", "새 프로젝트"}, {"file_open", "프로젝트 열기..."},
         {"file_save", "프로젝트 저장"}, {"file_save_as", "다른 이름으로 저장..."},
-        {"file_export", "동영상 내보내기 (.mp4)..."}, {"file_exit", "종료"},
+        {"file_export", "동영상 내보내기..."}, {"file_exit", "종료"},
         {"edit_undo", "실행 취소"}, {"edit_redo", "다시 실행"}, {"edit_cut", "잘라내기"},
         {"edit_copy", "복사"}, {"edit_paste", "붙여넣기"},
         {"edit_split", "선택한 클립 분할"}, {"edit_delete", "선택한 클립 삭제"},
@@ -296,10 +300,10 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"project_generate_demo", "데모 미디어 생성"}, {"project_cleanup_temp", "임시 파일 정리"},
         {"settings_system_dialog", "시스템 파일 대화상자 사용"}, {"settings_language", "언어 (Language)"},
         {"help_about", "minicut 정보..."},
-        {"panel_clips", "클립 및 에셋"}, {"panel_preview", "미리보기 및 프로그램"},
+        {"panel_clips", "에셋 브라우저"}, {"panel_preview", "미리보기 및 프로그램"},
         {"panel_timeline", "타임라인"}, {"panel_context", "컨텍스트 인스펙터 및 도구"},
         {"timeline_play", "재생"}, {"timeline_pause", "일시 정지"}, {"timeline_stop", "정지"},
-        {"timeline_add_video", "+ 비디오 트랙"}, {"timeline_add_audio", "+ 오디오 트랙"},
+        {"timeline_add_video", "+ 비디오 트랙"}, {"timeline_add_audio", "+ 오디오 트랙"}, {"timeline_add_subtitle", "+ 자막"},
         {"timeline_separate_audio", "오디오 트랙 분리"}, {"timeline_split_playhead", "재생헤드 위치에서 분할"},
         {"timeline_paste_here", "여기에 붙여넣기"}, {"timeline_depth", "렌더링 깊이 (Depth)"},
         {"timeline_move_front", "맨 앞으로 이동 (깊이 100)"}, {"timeline_move_back", "맨 뒤로 이동 (깊이 0)"},
@@ -336,11 +340,11 @@ void LocaleManager::populate_embedded_fallbacks() {
 
     // Ukrainian
     m_embedded["uk"] = {
-        {"menu_file", "Файл"}, {"menu_edit", "Правка"}, {"menu_project", "Проєкт"},
+        {"menu_file", "Файл"}, {"menu_edit", "Правка"}, {"menu_assets", "Ресурси"}, {"menu_project", "Проєкт"},
         {"menu_settings", "Налаштування"}, {"menu_help", "Довідка"},
         {"file_new", "Новий проєкт"}, {"file_open", "Відкрити проєкт..."},
         {"file_save", "Зберегти проєкт"}, {"file_save_as", "Зберегти проєкт як..."},
-        {"file_export", "Експортувати відео (.mp4)..."}, {"file_exit", "Вихід"},
+        {"file_export", "Експортувати відео..."}, {"file_exit", "Вихід"},
         {"edit_undo", "Скасувати"}, {"edit_redo", "Повторити"}, {"edit_cut", "Вирізати"},
         {"edit_copy", "Копіювати"}, {"edit_paste", "Вставити"},
         {"edit_split", "Розрізати вибраний кліп"}, {"edit_delete", "Видалити вибраний кліп"},
@@ -349,10 +353,10 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"project_generate_demo", "Створити демо-медіа"}, {"project_cleanup_temp", "Очистити тимчасові файли"},
         {"settings_system_dialog", "Використовувати системні діалоги"}, {"settings_language", "Мова (Language)"},
         {"help_about", "Про minicut..."},
-        {"panel_clips", "Кліпи та ресурси"}, {"panel_preview", "Попередній перегляд"},
+        {"panel_clips", "Браузер ресурсів"}, {"panel_preview", "Попередній перегляд"},
         {"panel_timeline", "Часова шкала"}, {"panel_context", "Контекстний інспектор та інструменти"},
         {"timeline_play", "Відтворити"}, {"timeline_pause", "Пауза"}, {"timeline_stop", "Зупинити"},
-        {"timeline_add_video", "+ Відеодоріжка"}, {"timeline_add_audio", "+ Аудіодоріжка"},
+        {"timeline_add_video", "+ Відеодоріжка"}, {"timeline_add_audio", "+ Аудіодоріжка"}, {"timeline_add_subtitle", "+ Субтитри"},
         {"timeline_separate_audio", "Відокремити аудіодоріжку"}, {"timeline_split_playhead", "Розрізати за курсором"},
         {"timeline_paste_here", "Вставити сюди"}, {"timeline_depth", "Глибина рендерингу"},
         {"timeline_move_front", "На передній план (глибина 100)"}, {"timeline_move_back", "На задній план (глибина 0)"},
@@ -389,11 +393,11 @@ void LocaleManager::populate_embedded_fallbacks() {
 
     // Arabic
     m_embedded["ar"] = {
-        {"menu_file", "ملف"}, {"menu_edit", "تعديل"}, {"menu_project", "مشروع"},
+        {"menu_file", "ملف"}, {"menu_edit", "تعديل"}, {"menu_assets", "الوسائط"}, {"menu_project", "مشروع"},
         {"menu_settings", "إعدادات"}, {"menu_help", "مساعدة"},
         {"file_new", "مشروع جديد"}, {"file_open", "فتح مشروع..."},
         {"file_save", "حفظ المشروع"}, {"file_save_as", "حفظ المشروع كـ..."},
-        {"file_export", "تصدير الفيديو (.mp4)..."}, {"file_exit", "خروج"},
+        {"file_export", "تصدير الفيديو..."}, {"file_exit", "خروج"},
         {"edit_undo", "تراجع"}, {"edit_redo", "إعادة"}, {"edit_cut", "قص"},
         {"edit_copy", "نسخ"}, {"edit_paste", "لصق"},
         {"edit_split", "تقسيم المقطع المحدد"}, {"edit_delete", "حذف المقطع المحدد"},
@@ -402,10 +406,10 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"project_generate_demo", "إنشاء وسائط تجريبية"}, {"project_cleanup_temp", "تنظيف الملفات المؤقتة"},
         {"settings_system_dialog", "استخدام مربعات حوار النظام"}, {"settings_language", "اللغة (Language)"},
         {"help_about", "حول minicut..."},
-        {"panel_clips", "المقاطع والوسائط"}, {"panel_preview", "المعاينة والشاشة"},
+        {"panel_clips", "متصفح الوسائط"}, {"panel_preview", "المعاينة والشاشة"},
         {"panel_timeline", "المخطط الزمني"}, {"panel_context", "لوحة الخصائص والأدوات"},
         {"timeline_play", "تشغيل"}, {"timeline_pause", "إيقاف مؤقت"}, {"timeline_stop", "إيقاف"},
-        {"timeline_add_video", "+ مسار فيديو"}, {"timeline_add_audio", "+ مسار صوت"},
+        {"timeline_add_video", "+ مسار فيديو"}, {"timeline_add_audio", "+ مسار صوت"}, {"timeline_add_subtitle", "+ مسار ترجمة"},
         {"timeline_separate_audio", "فصل مسار الصوت"}, {"timeline_split_playhead", "تقسيم عند المؤشر"},
         {"timeline_paste_here", "لصق هنا"}, {"timeline_depth", "عمق العرض"},
         {"timeline_move_front", "إحضار إلى المقدمة (عمق 100)"}, {"timeline_move_back", "إرسال إلى الخلف (عمق 0)"},

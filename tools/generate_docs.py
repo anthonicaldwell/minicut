@@ -316,6 +316,9 @@ end</pre>
     <tr><td><code>clip.get_volume(clip_id)</code></td><td><code>number</code></td><td>Gets audio volume gain multiplier [0.0, 2.0].</td></tr>
     <tr><td><code>clip.set_volume(clip_id, v)</code></td><td><code>void</code></td><td>Sets audio volume gain multiplier.</td></tr>
     <tr><td><code>clip.get_time(clip_id)</code></td><td><code>number, number, number</code></td><td>Gets (start_time, duration, offset).</td></tr>
+    <tr><td><code>clip.get_transform(clip_id)</code></td><td><code>table</code></td><td>Gets transform table <code>{{x, y, scale, rotation}}</code>.</td></tr>
+    <tr><td><code>clip.set_transform(clip_id, x, y, s, r)</code></td><td><code>void</code></td><td>Sets translation X, Y, scale, and rotation simultaneously.</td></tr>
+    <tr><td><code>clip.reset_transform(clip_id)</code></td><td><code>void</code></td><td>Resets transform to origin (x=0, y=0, scale=1.0, rotation=0).</td></tr>
 </tbody>
 </table>
 
@@ -337,6 +340,12 @@ end</pre>
     <tr><td><code>gui.separator()</code></td><td><code>void</code></td><td>Draws horizontal separator line.</td></tr>
     <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Opens file dialog matching user settings (Native/Built-in).</td></tr>
     <tr><td><code>gui.native_file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Forces native Zenity/KDialog system file dialog.</td></tr>
+    <tr><td><code>gui.popout_preview(popped)</code></td><td><code>void</code></td><td>Detaches (true) or docks (false) the video preview panel into a floating window.</td></tr>
+    <tr><td><code>gui.is_preview_popped_out()</code></td><td><code>boolean</code></td><td>Returns whether preview is currently detached/floating.</td></tr>
+    <tr><td><code>gui.set_preview_aspect_mode(mode)</code></td><td><code>void</code></td><td>Sets aspect mode: 0 (Auto), 1 (16:9), 2 (9:16), 3 (4:3), 4 (1:1), 5 (21:9), 6 (4:5).</td></tr>
+    <tr><td><code>gui.get_preview_aspect_mode()</code></td><td><code>integer</code></td><td>Returns current preview aspect mode index (0-6).</td></tr>
+    <tr><td><code>gui.set_transform_tool(tool)</code></td><td><code>void</code></td><td>Sets active preview gizmo tool ("select", "translate", "scale", "rotate").</td></tr>
+    <tr><td><code>gui.get_transform_tool()</code></td><td><code>string</code></td><td>Returns active preview gizmo tool name.</td></tr>
 </tbody>
 </table>
 
@@ -349,6 +358,19 @@ end</pre>
     <tr><td><code>minicut.push_undo()</code></td><td><code>void</code></td><td>Records snapshot for Undo history.</td></tr>
     <tr><td><code>minicut.set_status(msg, [dur])</code></td><td><code>void</code></td><td>Displays temporary toast status message.</td></tr>
     <tr><td><code>minicut.log(msg)</code></td><td><code>void</code></td><td>Outputs debug log message to console.</td></tr>
+</tbody>
+</table>
+
+<h3>3.7. Export Automation & Progress (<code>export</code>)</h3>
+<table>
+<thead>
+    <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
+</thead>
+<tbody>
+    <tr><td><code>export.get_audio_progress()</code></td><td><code>number</code></td><td>Audio mixing progress (stereo mixing & keyframes, 0.0 to 1.0).</td></tr>
+    <tr><td><code>export.get_progress()</code></td><td><code>number</code></td><td>Overall export pipeline progress (0.0 to 1.0).</td></tr>
+    <tr><td><code>export.is_exporting()</code></td><td><code>boolean</code></td><td>True if background render/encode is actively running.</td></tr>
+    <tr><td><code>export.get_status()</code></td><td><code>string</code></td><td>Human-readable pipeline status description.</td></tr>
 </tbody>
 </table>
 
@@ -493,6 +515,9 @@ end</pre>
     <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>不透明度を設定します。</td></tr>
     <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>音声ボリュームゲイン [0.0, 2.0] を取得します。</td></tr>
     <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>音声ボリュームゲインを設定します。</td></tr>
+    <tr><td><code>clip.get_transform(clip_id)</code></td><td><code>table</code></td><td>変形情報テーブル <code>{{x, y, scale, rotation}}</code> を取得します。</td></tr>
+    <tr><td><code>clip.set_transform(clip_id, x, y, s, r)</code></td><td><code>void</code></td><td>位置(X, Y)、拡大率、回転角を一括設定します。</td></tr>
+    <tr><td><code>clip.reset_transform(clip_id)</code></td><td><code>void</code></td><td>変形を初期状態（x=0, y=0, scale=1.0, rotation=0）にリセットします。</td></tr>
 </tbody>
 </table>
 
@@ -507,6 +532,23 @@ end</pre>
     <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>整数スライダーを表示します。</td></tr>
     <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>テキスト入力フィールドを表示します。</td></tr>
     <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>ファイルダイアログを開き結果を返します。</td></tr>
+    <tr><td><code>gui.popout_preview(popped)</code></td><td><code>void</code></td><td>プレビュー画面を独立ウィンドウに分離（true）またはドッキング（false）します。</td></tr>
+    <tr><td><code>gui.is_preview_popped_out()</code></td><td><code>boolean</code></td><td>プレビューが現在分離されているかを取得します。</td></tr>
+    <tr><td><code>gui.set_preview_aspect_mode(mode)</code></td><td><code>void</code></td><td>アスペクト比モード（0:自動, 1:16:9, 2:9:16, 3:4:3, 4:1:1, 5:21:9, 6:4:5）を設定します。</td></tr>
+    <tr><td><code>gui.get_preview_aspect_mode()</code></td><td><code>integer</code></td><td>現在のアスペクト比モード（0〜6）を取得します。</td></tr>
+    <tr><td><code>gui.set_transform_tool(tool)</code></td><td><code>void</code></td><td>ギズモ変形ツール（"select", "translate", "scale", "rotate"）を設定します。</td></tr>
+    <tr><td><code>gui.get_transform_tool()</code></td><td><code>string</code></td><td>現在の変形ツール名を取得します。</td></tr>
+</tbody>
+</table>
+
+<h3>3.6. エクスポート操作 & 進捗状況 (<code>export</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr></thead>
+<tbody>
+    <tr><td><code>export.get_audio_progress()</code></td><td><code>number</code></td><td>音声ミキシングの進捗率（ステレオ・キーフレーム処理、0.0〜1.0）を取得します。</td></tr>
+    <tr><td><code>export.get_progress()</code></td><td><code>number</code></td><td>全体のエクスポート進捗率（0.0〜1.0）を取得します。</td></tr>
+    <tr><td><code>export.is_exporting()</code></td><td><code>boolean</code></td><td>エクスポート処理が実行中かを取得します。</td></tr>
+    <tr><td><code>export.get_status()</code></td><td><code>string</code></td><td>パイプラインの現在の状態文字列を取得します。</td></tr>
 </tbody>
 </table>
 
@@ -653,6 +695,9 @@ end</pre>
     <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>불투명도를 설정합니다.</td></tr>
     <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>오디오 볼륨 게인 [0.0, 2.0]을 반환합니다.</td></tr>
     <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>오디오 볼륨 게인을 설정합니다.</td></tr>
+    <tr><td><code>clip.get_transform(clip_id)</code></td><td><code>table</code></td><td>변형 속성 테이블 <code>{{x, y, scale, rotation}}</code>을 반환합니다.</td></tr>
+    <tr><td><code>clip.set_transform(clip_id, x, y, s, r)</code></td><td><code>void</code></td><td>위치(X, Y), 크기 비율, 회전 각도를 일괄 설정합니다.</td></tr>
+    <tr><td><code>clip.reset_transform(clip_id)</code></td><td><code>void</code></td><td>클립 변형을 기본값(x=0, y=0, scale=1.0, rotation=0)으로 초기화합니다.</td></tr>
 </tbody>
 </table>
 
@@ -667,6 +712,23 @@ end</pre>
     <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>정수형 슬라이더를 렌더링합니다.</td></tr>
     <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>텍스트 입력 상자를 렌더링합니다.</td></tr>
     <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>파일 대화상자를 열고 결과를 콜백으로 전달합니다.</td></tr>
+    <tr><td><code>gui.popout_preview(popped)</code></td><td><code>void</code></td><td>미리보기 창을 독립 플로팅 창으로 분리(true)하거나 도킹(false)합니다.</td></tr>
+    <tr><td><code>gui.is_preview_popped_out()</code></td><td><code>boolean</code></td><td>미리보기가 분리된 플로팅 상태인지 여부를 반환합니다.</td></tr>
+    <tr><td><code>gui.set_preview_aspect_mode(mode)</code></td><td><code>void</code></td><td>종횡비 모드(0:자동, 1:16:9, 2:9:16, 3:4:3, 4:1:1, 5:21:9, 6:4:5)를 설정합니다.</td></tr>
+    <tr><td><code>gui.get_preview_aspect_mode()</code></td><td><code>integer</code></td><td>현재 종횡비 모드 번호(0~6)를 반환합니다.</td></tr>
+    <tr><td><code>gui.set_transform_tool(tool)</code></td><td><code>void</code></td><td>기즈모 변형 도구("select", "translate", "scale", "rotate")를 설정합니다.</td></tr>
+    <tr><td><code>gui.get_transform_tool()</code></td><td><code>string</code></td><td>현재 활성 변형 도구 이름을 반환합니다.</td></tr>
+</tbody>
+</table>
+
+<h3>3.6. 내보내기 자동화 및 진행률 (<code>export</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">함수</th><th style="width: 22%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>export.get_audio_progress()</code></td><td><code>number</code></td><td>오디오 믹싱 진행률(스테레오 및 키프레임, 0.0~1.0)을 반환합니다.</td></tr>
+    <tr><td><code>export.get_progress()</code></td><td><code>number</code></td><td>전체 내보내기 파이프라인 진행률(0.0~1.0)을 반환합니다.</td></tr>
+    <tr><td><code>export.is_exporting()</code></td><td><code>boolean</code></td><td>내보내기 작업이 진행 중인지 여부를 반환합니다.</td></tr>
+    <tr><td><code>export.get_status()</code></td><td><code>string</code></td><td>내보내기 상태 설명을 반환합니다.</td></tr>
 </tbody>
 </table>
 
@@ -813,6 +875,9 @@ end</pre>
     <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>Встановлює непрозорість кліпу.</td></tr>
     <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>Отримує підсилення гучності [0.0, 2.0].</td></tr>
     <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>Встановлює підсилення гучності.</td></tr>
+    <tr><td><code>clip.get_transform(clip_id)</code></td><td><code>table</code></td><td>Повертає таблицю трансформацій <code>{{x, y, scale, rotation}}</code>.</td></tr>
+    <tr><td><code>clip.set_transform(clip_id, x, y, s, r)</code></td><td><code>void</code></td><td>Одночасно встановлює зміщення X, Y, масштаб та обертання.</td></tr>
+    <tr><td><code>clip.reset_transform(clip_id)</code></td><td><code>void</code></td><td>Скидає трансформацію до початкового стану (x=0, y=0, scale=1.0, rotation=0).</td></tr>
 </tbody>
 </table>
 
@@ -827,6 +892,23 @@ end</pre>
     <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>Створює повзунок для цілих чисел.</td></tr>
     <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>Створює поле введення тексту.</td></tr>
     <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Відкриває діалогове вікно вибору файлів.</td></tr>
+    <tr><td><code>gui.popout_preview(popped)</code></td><td><code>void</code></td><td>Відокремлює (true) або прикріплює (false) вікно попереднього перегляду.</td></tr>
+    <tr><td><code>gui.is_preview_popped_out()</code></td><td><code>boolean</code></td><td>Повертає, чи є вікно попереднього перегляду плаваючим.</td></tr>
+    <tr><td><code>gui.set_preview_aspect_mode(mode)</code></td><td><code>void</code></td><td>Встановлює режим співвідношення сторін (0: Авто, 1: 16:9, 2: 9:16, 3: 4:3, 4: 1:1, 5: 21:9, 6: 4:5).</td></tr>
+    <tr><td><code>gui.get_preview_aspect_mode()</code></td><td><code>integer</code></td><td>Повертає поточний індекс режиму співвідношення сторін (0–6).</td></tr>
+    <tr><td><code>gui.set_transform_tool(tool)</code></td><td><code>void</code></td><td>Встановлює інструмент трансформації ("select", "translate", "scale", "rotate").</td></tr>
+    <tr><td><code>gui.get_transform_tool()</code></td><td><code>string</code></td><td>Повертає назву активного інструмента трансформації.</td></tr>
+</tbody>
+</table>
+
+<h3>3.6. Автоматизація експорту та прогрес (<code>export</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">Функція</th><th style="width: 22%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>export.get_audio_progress()</code></td><td><code>number</code></td><td>Прогрес мікшування аудіо (стереозведення та ключові кадри, 0.0 до 1.0).</td></tr>
+    <tr><td><code>export.get_progress()</code></td><td><code>number</code></td><td>Загальний прогрес конвеєра експорту (0.0 до 1.0).</td></tr>
+    <tr><td><code>export.is_exporting()</code></td><td><code>boolean</code></td><td>Повертає true, якщо фоновий рендеринг/кодування активні.</td></tr>
+    <tr><td><code>export.get_status()</code></td><td><code>string</code></td><td>Текстовий опис поточного стану експорту.</td></tr>
 </tbody>
 </table>
 
@@ -973,6 +1055,9 @@ end</pre>
     <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>تعيين درجة الشفافية.</td></tr>
     <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>الحصول على مضخم الصوت [0.0, 2.0].</td></tr>
     <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>تعيين مستوى الصوت.</td></tr>
+    <tr><td><code>clip.get_transform(clip_id)</code></td><td><code>table</code></td><td>الحصول على جدول خصائص التحويل <code>{{x, y, scale, rotation}}</code>.</td></tr>
+    <tr><td><code>clip.set_transform(clip_id, x, y, s, r)</code></td><td><code>void</code></td><td>تعيين الإزاحة الأفقية والعمودية والمقياس وزاوية الدوران معاً.</td></tr>
+    <tr><td><code>clip.reset_transform(clip_id)</code></td><td><code>void</code></td><td>إعادة تعيين التحويل للوضع الافتراضي (x=0, y=0, scale=1.0, rotation=0).</td></tr>
 </tbody>
 </table>
 
@@ -987,6 +1072,23 @@ end</pre>
     <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>شريط تمرير للأرقام الصحيحة.</td></tr>
     <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>حقل إدخال نصي.</td></tr>
     <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>فتح نافذة حوار اختيار الملفات.</td></tr>
+    <tr><td><code>gui.popout_preview(popped)</code></td><td><code>void</code></td><td>فصل نافذة المعاينة كنافذة عائمة مستقلة (true) أو إرساؤها (false).</td></tr>
+    <tr><td><code>gui.is_preview_popped_out()</code></td><td><code>boolean</code></td><td>معرفة ما إذا كانت نافذة المعاينة عائمة حالياً.</td></tr>
+    <tr><td><code>gui.set_preview_aspect_mode(mode)</code></td><td><code>void</code></td><td>تعيين نسبة أبعاد المعاينة (0: تلقائي، 1: 16:9، 2: 9:16، 3: 4:3، 4: 1:1، 5: 21:9، 6: 4:5).</td></tr>
+    <tr><td><code>gui.get_preview_aspect_mode()</code></td><td><code>integer</code></td><td>الحصول على مؤشر نسبة الأبعاد الحالي (0-6).</td></tr>
+    <tr><td><code>gui.set_transform_tool(tool)</code></td><td><code>void</code></td><td>تعيين أداة التحويل النشطة ("select", "translate", "scale", "rotate").</td></tr>
+    <tr><td><code>gui.get_transform_tool()</code></td><td><code>string</code></td><td>الحصول على اسم أداة التحويل النشطة للمعاينة.</td></tr>
+</tbody>
+</table>
+
+<h3>3.6. أتمتة التصدير ومتابعة التقدم (<code>export</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">الدالة</th><th style="width: 22%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>export.get_audio_progress()</code></td><td><code>number</code></td><td>نسبة تقدم معالجة ومزج الصوت المجسم والإطارات المفتاحية (0.0 إلى 1.0).</td></tr>
+    <tr><td><code>export.get_progress()</code></td><td><code>number</code></td><td>نسبة التقدم الإجمالية لعملية التصدير (0.0 إلى 1.0).</td></tr>
+    <tr><td><code>export.is_exporting()</code></td><td><code>boolean</code></td><td>معرفة ما إذا كانت عملية التصدير والترميز قيد التشغيل حالياً.</td></tr>
+    <tr><td><code>export.get_status()</code></td><td><code>string</code></td><td>وصف نصي لحالة خط أنابيب التصدير الحالية.</td></tr>
 </tbody>
 </table>
 
@@ -1137,6 +1239,9 @@ plugin.init_panel = function() {{
     <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>Sets opacity.</td></tr>
     <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>Gets audio volume gain multiplier [0.0, 2.0].</td></tr>
     <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>Sets audio volume gain multiplier.</td></tr>
+    <tr><td><code>clip.get_transform(id)</code></td><td><code>object</code></td><td>Gets transform object <code>{{x, y, scale, rotation}}</code>.</td></tr>
+    <tr><td><code>clip.set_transform(id, x, y, s, r)</code></td><td><code>void</code></td><td>Sets translation X, Y, scale, and rotation simultaneously.</td></tr>
+    <tr><td><code>clip.reset_transform(id)</code></td><td><code>void</code></td><td>Resets clip transform to origin (x=0, y=0, scale=1.0, rotation=0).</td></tr>
 </tbody>
 </table>
 
@@ -1151,6 +1256,23 @@ plugin.init_panel = function() {{
     <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>Renders integer slider.</td></tr>
     <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>Renders text entry box.</td></tr>
     <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Opens file dialog matching user settings.</td></tr>
+    <tr><td><code>gui.popout_preview(popped)</code></td><td><code>void</code></td><td>Detaches (true) or docks (false) the video preview panel into a floating window.</td></tr>
+    <tr><td><code>gui.is_preview_popped_out()</code></td><td><code>boolean</code></td><td>Returns whether preview is currently detached/floating.</td></tr>
+    <tr><td><code>gui.set_preview_aspect_mode(mode)</code></td><td><code>void</code></td><td>Sets aspect mode: 0 (Auto), 1 (16:9), 2 (9:16), 3 (4:3), 4 (1:1), 5 (21:9), 6 (4:5).</td></tr>
+    <tr><td><code>gui.get_preview_aspect_mode()</code></td><td><code>number</code></td><td>Returns current preview aspect mode index (0-6).</td></tr>
+    <tr><td><code>gui.set_transform_tool(tool)</code></td><td><code>void</code></td><td>Sets active preview gizmo tool ("select", "translate", "scale", "rotate").</td></tr>
+    <tr><td><code>gui.get_transform_tool()</code></td><td><code>string</code></td><td>Returns active preview gizmo tool name.</td></tr>
+</tbody>
+</table>
+
+<h3>3.6. Export Automation & Progress (<code>export</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr></thead>
+<tbody>
+    <tr><td><code>export.get_audio_progress()</code></td><td><code>number</code></td><td>Audio mixing progress (stereo mixing & keyframes, 0.0 to 1.0).</td></tr>
+    <tr><td><code>export.get_progress()</code></td><td><code>number</code></td><td>Overall export pipeline progress (0.0 to 1.0).</td></tr>
+    <tr><td><code>export.is_exporting()</code></td><td><code>boolean</code></td><td>True if background render/encode is actively running.</td></tr>
+    <tr><td><code>export.get_status()</code></td><td><code>string</code></td><td>Human-readable pipeline status description.</td></tr>
 </tbody>
 </table>
 
@@ -1233,7 +1355,56 @@ plugin.init_panel = function() {{
 }};</pre>
 
 <h2>3. コアモジュール API</h2>
-<p>JavaScript から利用可能な主要モジュールは <code>project</code>, <code>timeline</code>, <code>clip</code>, <code>gui</code>, <code>net</code>, <code>minicut</code> です。</p>
+<p>JavaScript から利用可能な主要モジュールは <code>project</code>, <code>timeline</code>, <code>clip</code>, <code>gui</code>, <code>net</code>, <code>minicut</code>, <code>export</code> です。</p>
+
+<h3>3.1. クリップ変形 & 属性 (<code>clip</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr></thead>
+<tbody>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>array [x, y]</code></td><td>中心基準の (x, y) 座標を取得します。</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>中心座標を設定します。</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>スケール倍率（1.0 = 100%）を取得します。</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>スケール倍率を設定します。</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>不透明度 [0.0, 1.0] を取得します。</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>不透明度を設定します。</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>音声ボリュームゲイン [0.0, 2.0] を取得します。</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>音声ボリュームゲインを設定します。</td></tr>
+    <tr><td><code>clip.get_transform(id)</code></td><td><code>object</code></td><td>変形オブジェクト <code>{{x, y, scale, rotation}}</code> を取得します。</td></tr>
+    <tr><td><code>clip.set_transform(id, x, y, s, r)</code></td><td><code>void</code></td><td>位置(X, Y)、拡大率、回転角を一括設定します。</td></tr>
+    <tr><td><code>clip.reset_transform(id)</code></td><td><code>void</code></td><td>変形を初期状態（x=0, y=0, scale=1.0, rotation=0）にリセットします。</td></tr>
+</tbody>
+</table>
+
+<h3>3.2. GUI コントロール (<code>gui</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr></thead>
+<tbody>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>テキストを表示します。</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>色付きテキストを表示します。</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>ボタンを表示しクリック時に実行します。</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>浮動小数点スライダーを表示します。</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>整数スライダーを表示します。</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>テキスト入力フィールドを表示します。</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>ファイルダイアログを開き結果を返します。</td></tr>
+    <tr><td><code>gui.popout_preview(popped)</code></td><td><code>void</code></td><td>プレビュー画面を独立ウィンドウに分離（true）またはドッキング（false）します。</td></tr>
+    <tr><td><code>gui.is_preview_popped_out()</code></td><td><code>boolean</code></td><td>プレビューが現在分離されているかを取得します。</td></tr>
+    <tr><td><code>gui.set_preview_aspect_mode(mode)</code></td><td><code>void</code></td><td>アスペクト比モード（0:自動, 1:16:9, 2:9:16, 3:4:3, 4:1:1, 5:21:9, 6:4:5）を設定します。</td></tr>
+    <tr><td><code>gui.get_preview_aspect_mode()</code></td><td><code>number</code></td><td>現在のアスペクト比モード（0〜6）を取得します。</td></tr>
+    <tr><td><code>gui.set_transform_tool(tool)</code></td><td><code>void</code></td><td>ギズモ変形ツール（"select", "translate", "scale", "rotate"）を設定します。</td></tr>
+    <tr><td><code>gui.get_transform_tool()</code></td><td><code>string</code></td><td>現在の変形ツール名を取得します。</td></tr>
+</tbody>
+</table>
+
+<h3>3.3. エクスポート操作 & 進捗状況 (<code>export</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr></thead>
+<tbody>
+    <tr><td><code>export.get_audio_progress()</code></td><td><code>number</code></td><td>音声ミキシングの進捗率（ステレオ・キーフレーム処理、0.0〜1.0）を取得します。</td></tr>
+    <tr><td><code>export.get_progress()</code></td><td><code>number</code></td><td>全体のエクスポート進捗率（0.0〜1.0）を取得します。</td></tr>
+    <tr><td><code>export.is_exporting()</code></td><td><code>boolean</code></td><td>エクスポート処理が実行中かを取得します。</td></tr>
+    <tr><td><code>export.get_status()</code></td><td><code>string</code></td><td>パイプラインの現在の状態文字列を取得します。</td></tr>
+</tbody>
+</table>
 
 <div class="footer">
     minicut v1.2.0 • 軽量マルチトラック動画編集エディタ • ドキュメント自動生成
@@ -1314,7 +1485,56 @@ plugin.init_panel = function() {{
 }};</pre>
 
 <h2>3. 코어 모듈 API</h2>
-<p>JavaScript 환경에서는 <code>project</code>, <code>timeline</code>, <code>clip</code>, <code>gui</code>, <code>net</code>, <code>minicut</code> 모듈을 동일하게 사용할 수 있습니다.</p>
+<p>JavaScript 환경에서는 <code>project</code>, <code>timeline</code>, <code>clip</code>, <code>gui</code>, <code>net</code>, <code>minicut</code>, <code>export</code> 모듈을 동일하게 사용할 수 있습니다.</p>
+
+<h3>3.1. 클립 변형 & 속성 (<code>clip</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">함수</th><th style="width: 22%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>array [x, y]</code></td><td>캔버스 중심 기준 (x, y) 좌표를 반환합니다.</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>중심 좌표를 설정합니다.</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>크기 비율(1.0 = 100%)을 반환합니다.</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>크기 비율을 설정합니다.</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>불투명도 [0.0, 1.0]를 반환합니다.</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>불투명도를 설정합니다.</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>오디오 볼륨 게인 [0.0, 2.0]을 반환합니다.</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>오디오 볼륨 게인을 설정합니다.</td></tr>
+    <tr><td><code>clip.get_transform(id)</code></td><td><code>object</code></td><td>변형 객체 <code>{{x, y, scale, rotation}}</code>을 반환합니다.</td></tr>
+    <tr><td><code>clip.set_transform(id, x, y, s, r)</code></td><td><code>void</code></td><td>위치(X, Y), 크기 비율, 회전 각도를 일괄 설정합니다.</td></tr>
+    <tr><td><code>clip.reset_transform(id)</code></td><td><code>void</code></td><td>클립 변형을 기본값(x=0, y=0, scale=1.0, rotation=0)으로 초기화합니다.</td></tr>
+</tbody>
+</table>
+
+<h3>3.2. GUI 위젯 (<code>gui</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">함수</th><th style="width: 22%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>텍스트 라벨을 렌더링합니다.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>색상 텍스트를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>버튼을 렌더링하고 클릭 시 콜백을 실행합니다.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>실수형 슬라이더를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>정수형 슬라이더를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>텍스트 입력 상자를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>파일 대화상자를 열고 결과를 콜백으로 전달합니다.</td></tr>
+    <tr><td><code>gui.popout_preview(popped)</code></td><td><code>void</code></td><td>미리보기 창을 독립 플로팅 창으로 분리(true)하거나 도킹(false)합니다.</td></tr>
+    <tr><td><code>gui.is_preview_popped_out()</code></td><td><code>boolean</code></td><td>미리보기가 분리된 플로팅 상태인지 여부를 반환합니다.</td></tr>
+    <tr><td><code>gui.set_preview_aspect_mode(mode)</code></td><td><code>void</code></td><td>종횡비 모드(0:자동, 1:16:9, 2:9:16, 3:4:3, 4:1:1, 5:21:9, 6:4:5)를 설정합니다.</td></tr>
+    <tr><td><code>gui.get_preview_aspect_mode()</code></td><td><code>number</code></td><td>현재 종횡비 모드 번호(0~6)를 반환합니다.</td></tr>
+    <tr><td><code>gui.set_transform_tool(tool)</code></td><td><code>void</code></td><td>기즈모 변형 도구("select", "translate", "scale", "rotate")를 설정합니다.</td></tr>
+    <tr><td><code>gui.get_transform_tool()</code></td><td><code>string</code></td><td>현재 활성 변형 도구 이름을 반환합니다.</td></tr>
+</tbody>
+</table>
+
+<h3>3.3. 내보내기 자동화 및 진행률 (<code>export</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">함수</th><th style="width: 22%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>export.get_audio_progress()</code></td><td><code>number</code></td><td>오디오 믹싱 진행률(스테레오 및 키프레임, 0.0~1.0)을 반환합니다.</td></tr>
+    <tr><td><code>export.get_progress()</code></td><td><code>number</code></td><td>전체 내보내기 파이프라인 진행률(0.0~1.0)을 반환합니다.</td></tr>
+    <tr><td><code>export.is_exporting()</code></td><td><code>boolean</code></td><td>내보내기 작업이 진행 중인지 여부를 반환합니다.</td></tr>
+    <tr><td><code>export.get_status()</code></td><td><code>string</code></td><td>내보내기 상태 설명을 반환합니다.</td></tr>
+</tbody>
+</table>
 
 <div class="footer">
     minicut v1.2.0 • 가벼운 리눅스 멀티트랙 비디오 편집기 • 자동 생성 문서
@@ -1395,7 +1615,56 @@ plugin.init_panel = function() {{
 }};</pre>
 
 <h2>3. Модулі API</h2>
-<p>У JavaScript доступні всі основні модулі: <code>project</code>, <code>timeline</code>, <code>clip</code>, <code>gui</code>, <code>net</code>, <code>minicut</code>.</p>
+<p>У JavaScript доступні всі основні модулі: <code>project</code>, <code>timeline</code>, <code>clip</code>, <code>gui</code>, <code>net</code>, <code>minicut</code>, <code>export</code>.</p>
+
+<h3>3.1. Трансформація та властивості кліпів (<code>clip</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">Функція</th><th style="width: 22%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>array [x, y]</code></td><td>Отримує координати (x, y) відносно центру.</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>Встановлює координати центру кліпу.</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>Отримує коефіцієнт масштабування (1.0 = 100%).</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>Встановлює коефіцієнт масштабування.</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>Отримує рівень непрозорості [0.0, 1.0].</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>Встановлює непрозорість кліпу.</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>Отримує підсилення гучності [0.0, 2.0].</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>Встановлює підсилення гучності.</td></tr>
+    <tr><td><code>clip.get_transform(id)</code></td><td><code>object</code></td><td>Отримує об'єкт трансформацій <code>{{x, y, scale, rotation}}</code>.</td></tr>
+    <tr><td><code>clip.set_transform(id, x, y, s, r)</code></td><td><code>void</code></td><td>Одночасно встановлює зміщення X, Y, масштаб та обертання.</td></tr>
+    <tr><td><code>clip.reset_transform(id)</code></td><td><code>void</code></td><td>Скидає трансформацію до початкового стану (x=0, y=0, scale=1.0, rotation=0).</td></tr>
+</tbody>
+</table>
+
+<h3>3.2. Графічні елементи керування (<code>gui</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">Функція</th><th style="width: 22%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>Виводить текстовий напис.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>Виводить кольоровий текст RGBA.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>Створює кнопку з можливістю виклику функції.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>Створює повзунок для дійсних чисел.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>Створює повзунок для цілих чисел.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>Створює поле введення тексту.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Відкриває діалогове вікно вибору файлів.</td></tr>
+    <tr><td><code>gui.popout_preview(popped)</code></td><td><code>void</code></td><td>Відокремлює (true) або прикріплює (false) вікно попереднього перегляду.</td></tr>
+    <tr><td><code>gui.is_preview_popped_out()</code></td><td><code>boolean</code></td><td>Повертає, чи є вікно попереднього перегляду плаваючим.</td></tr>
+    <tr><td><code>gui.set_preview_aspect_mode(mode)</code></td><td><code>void</code></td><td>Встановлює режим співвідношення сторін (0: Авто, 1: 16:9, 2: 9:16, 3: 4:3, 4: 1:1, 5: 21:9, 6: 4:5).</td></tr>
+    <tr><td><code>gui.get_preview_aspect_mode()</code></td><td><code>number</code></td><td>Повертає поточний індекс режиму співвідношення сторін (0–6).</td></tr>
+    <tr><td><code>gui.set_transform_tool(tool)</code></td><td><code>void</code></td><td>Встановлює інструмент трансформації ("select", "translate", "scale", "rotate").</td></tr>
+    <tr><td><code>gui.get_transform_tool()</code></td><td><code>string</code></td><td>Повертає назву активного інструмента трансформації.</td></tr>
+</tbody>
+</table>
+
+<h3>3.3. Автоматизація експорту та прогрес (<code>export</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">Функція</th><th style="width: 22%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>export.get_audio_progress()</code></td><td><code>number</code></td><td>Прогрес мікшування аудіо (стереозведення та ключові кадри, 0.0 до 1.0).</td></tr>
+    <tr><td><code>export.get_progress()</code></td><td><code>number</code></td><td>Загальний прогрес конвеєра експорту (0.0 до 1.0).</td></tr>
+    <tr><td><code>export.is_exporting()</code></td><td><code>boolean</code></td><td>Повертає true, якщо фоновий рендеринг/кодування активні.</td></tr>
+    <tr><td><code>export.get_status()</code></td><td><code>string</code></td><td>Текстовий опис поточного стану експорту.</td></tr>
+</tbody>
+</table>
 
 <div class="footer">
     minicut v1.2.0 • Легкий мультитрековий відеоредактор для Linux • Автоматична документація
@@ -1476,7 +1745,56 @@ plugin.init_panel = function() {{
 }};</pre>
 
 <h2>3. الوحدات البرمجية المتوفرة</h2>
-<p>توفر بيئة JavaScript كافة الوحدات البرمجية: <code>project</code> و<code>timeline</code> و<code>clip</code> و<code>gui</code> و<code>net</code> و<code>minicut</code>.</p>
+<p>توفر بيئة JavaScript كافة الوحدات البرمجية: <code>project</code> و<code>timeline</code> و<code>clip</code> و<code>gui</code> و<code>net</code> و<code>minicut</code> و<code>export</code>.</p>
+
+<h3>3.1. تحويلات وخصائص المقاطع (<code>clip</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">الدالة</th><th style="width: 22%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>array [x, y]</code></td><td>الحصول على إحداثيات (x, y) بالنسبة لمركز الشاشة.</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>تعيين موقع مركز المقطع.</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>الحصول على معامل المقياس (1.0 = 100%).</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>تعيين معامل المقياس.</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>الحصول على درجة الشفافية [0.0, 1.0].</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>تعيين درجة الشفافية.</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>الحصول على مضخم الصوت [0.0, 2.0].</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>تعيين مستوى الصوت.</td></tr>
+    <tr><td><code>clip.get_transform(id)</code></td><td><code>object</code></td><td>الحصول على كائن التحويلات <code>{{x, y, scale, rotation}}</code>.</td></tr>
+    <tr><td><code>clip.set_transform(id, x, y, s, r)</code></td><td><code>void</code></td><td>تعيين الإزاحة الأفقية والعمودية والمقياس والدوران دفعة واحدة.</td></tr>
+    <tr><td><code>clip.reset_transform(id)</code></td><td><code>void</code></td><td>إعادة تعيين التحويل للوضع الافتراضي (x=0, y=0, scale=1.0, rotation=0).</td></tr>
+</tbody>
+</table>
+
+<h3>3.2. عناصر الواجهة الرسومية (<code>gui</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">الدالة</th><th style="width: 22%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>عرض نص في اللوحة.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>عرض نص ملون بتنسيق RGBA.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>إنشاء زر وتنفيذ دالة عند الضغط عليه.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>شريط تمرير للأرقام العشرية.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>شريط تمرير للأرقام الصحيحة.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>حقل إدخال نصي.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>فتح نافذة حوار اختيار الملفات.</td></tr>
+    <tr><td><code>gui.popout_preview(popped)</code></td><td><code>void</code></td><td>فصل نافذة المعاينة كنافذة عائمة مستقلة (true) أو إرساؤها (false).</td></tr>
+    <tr><td><code>gui.is_preview_popped_out()</code></td><td><code>boolean</code></td><td>معرفة ما إذا كانت نافذة المعاينة عائمة حالياً.</td></tr>
+    <tr><td><code>gui.set_preview_aspect_mode(mode)</code></td><td><code>void</code></td><td>تعيين نسبة أبعاد المعاينة (0: تلقائي، 1: 16:9، 2: 9:16، 3: 4:3، 4: 1:1، 5: 21:9، 6: 4:5).</td></tr>
+    <tr><td><code>gui.get_preview_aspect_mode()</code></td><td><code>number</code></td><td>الحصول على مؤشر نسبة الأبعاد الحالي (0-6).</td></tr>
+    <tr><td><code>gui.set_transform_tool(tool)</code></td><td><code>void</code></td><td>تعيين أداة التحويل النشطة ("select", "translate", "scale", "rotate").</td></tr>
+    <tr><td><code>gui.get_transform_tool()</code></td><td><code>string</code></td><td>الحصول على اسم أداة التحويل النشطة للمعاينة.</td></tr>
+</tbody>
+</table>
+
+<h3>3.3. أتمتة التصدير ومتابعة التقدم (<code>export</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">الدالة</th><th style="width: 22%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>export.get_audio_progress()</code></td><td><code>number</code></td><td>نسبة تقدم معالجة ومزج الصوت المجسم والإطارات المفتاحية (0.0 إلى 1.0).</td></tr>
+    <tr><td><code>export.get_progress()</code></td><td><code>number</code></td><td>نسبة التقدم الإجمالية لعملية التصدير (0.0 إلى 1.0).</td></tr>
+    <tr><td><code>export.is_exporting()</code></td><td><code>boolean</code></td><td>معرفة ما إذا كانت عملية التصدير والترميز قيد التشغيل حالياً.</td></tr>
+    <tr><td><code>export.get_status()</code></td><td><code>string</code></td><td>وصف نصي لحالة خط أنابيب التصدير الحالية.</td></tr>
+</tbody>
+</table>
 
 <div class="footer">
     minicut v1.2.0 • محرر فيديو خفيف ومتعدد المسارات لنظام لينكس • تم إنشاء الدليل تلقائياً
@@ -1534,6 +1852,7 @@ def main():
 
     dest_dirs = [
         os.path.expanduser("~/.config/minicut/docs"),
+        "/home/kaiju/Git/minicut/docs",
         "/home/kaiju/Projects/minicut/docs"
     ]
 

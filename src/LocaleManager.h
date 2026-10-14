@@ -14,6 +14,7 @@ public:
     static LocaleManager& instance();
 
     void init(const std::string& locales_dir = "");
+    void reload_locales();
     bool set_locale(const std::string& lang_code);
     std::string current_locale() const { return m_current_locale; }
     std::string current_locale_name() const;

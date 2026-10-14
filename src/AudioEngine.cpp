@@ -54,6 +54,8 @@ void AudioEngine::shutdown() {
         SDL_CloseAudioDevice(m_device_id);
         m_device_id = 0;
     }
+    std::lock_guard<std::mutex> lock(m_cache_mutex);
+    m_audio_cache.clear();
 }
 
 void AudioEngine::update_project_snapshot(const Project& project) {
@@ -69,8 +71,8 @@ bool AudioEngine::is_asset_cached(const std::string& path) const {
 size_t AudioEngine::get_cached_sample_count(const std::string& path) const {
     std::lock_guard<std::mutex> lock(const_cast<std::mutex&>(m_cache_mutex));
     auto it = m_audio_cache.find(path);
-    if (it != m_audio_cache.end()) {
-        return it->second.pcm_samples.size();
+    if (it != m_audio_cache.end() && it->second.pcm_samples) {
+        return it->second.pcm_samples->size();
     }
     return 0;
 }
@@ -138,6 +140,7 @@ void AudioEngine::preload_asset_audio(const std::string& path) {
     cache.path = path;
     cache.sample_rate = 48000;
     cache.channels = 2;
+    cache.pcm_samples = std::make_shared<SwapBuffer<float>>();
 
     SwrContext* swr = nullptr;
     AVChannelLayout out_ch_layout = AV_CHANNEL_LAYOUT_STEREO;
@@ -193,9 +196,7 @@ void AudioEngine::preload_asset_audio(const std::string& path) {
                         int converted = swr_convert(swr, out_data, dst_nb_samples,
                                                     (const uint8_t**)frame->data, frame->nb_samples);
                         if (converted > 0) {
-                            cache.pcm_samples.insert(cache.pcm_samples.end(),
-                                                     temp_buf.begin(),
-                                                     temp_buf.begin() + (converted * 2));
+                            cache.pcm_samples->append(temp_buf.data(), converted * 2);
                         }
                     }
                 }
@@ -219,9 +220,7 @@ void AudioEngine::preload_asset_audio(const std::string& path) {
                 int converted = swr_convert(swr, out_data, dst_nb_samples,
                                             (const uint8_t**)frame->data, frame->nb_samples);
                 if (converted > 0) {
-                    cache.pcm_samples.insert(cache.pcm_samples.end(),
-                                             temp_buf.begin(),
-                                             temp_buf.begin() + (converted * 2));
+                    cache.pcm_samples->append(temp_buf.data(), converted * 2);
                 }
             }
         }
@@ -235,9 +234,7 @@ void AudioEngine::preload_asset_audio(const std::string& path) {
             uint8_t* out_data[1] = { reinterpret_cast<uint8_t*>(temp_buf.data()) };
             int converted = swr_convert(swr, out_data, delay, nullptr, 0);
             if (converted > 0) {
-                cache.pcm_samples.insert(cache.pcm_samples.end(),
-                                         temp_buf.begin(),
-                                         temp_buf.begin() + (converted * 2));
+                cache.pcm_samples->append(temp_buf.data(), converted * 2);
             }
         }
     }
@@ -349,16 +346,26 @@ void AudioEngine::process_audio(float* stream, int num_samples) {
                 if (media_sec < 0.0) continue;
 
                 int64_t sample_idx = static_cast<int64_t>(media_sec * 48000.0) * 2;
-                if (sample_idx + 1 < static_cast<int64_t>(cache.pcm_samples.size())) {
-                    // Evaluate volume keyframe
-                    double gain = proj.evaluate_keyframe(clip.id, "volume", clip.clip_relative_time(frame_time), 1.0);
-                    gain = std::clamp(gain, 0.0, 2.0);
+                if (cache.pcm_samples && sample_idx + 1 < static_cast<int64_t>(cache.pcm_samples->size())) {
+                    // Evaluate stereo volume and channel keyframes
+                    double rel_t = clip.clip_relative_time(frame_time);
+                    double gain = proj.evaluate_keyframe(clip.id, "volume", rel_t, 1.0);
+                    double gain_l = proj.evaluate_keyframe(clip.id, "volume_left", rel_t, 1.0);
+                    double gain_r = proj.evaluate_keyframe(clip.id, "volume_right", rel_t, 1.0);
+                    float eff_l = static_cast<float>(std::clamp(gain * gain_l, 0.0, 4.0));
+                    float eff_r = static_cast<float>(std::clamp(gain * gain_r, 0.0, 4.0));
 
-                    mix_l += cache.pcm_samples[sample_idx] * static_cast<float>(gain);
-                    mix_r += cache.pcm_samples[sample_idx + 1] * static_cast<float>(gain);
+                    mix_l += (*cache.pcm_samples)[sample_idx] * eff_l;
+                    mix_r += (*cache.pcm_samples)[sample_idx + 1] * eff_r;
                 }
             }
         }
+
+        // Apply preview volume adjustment (dB)
+        float vol_db = m_preview_volume_db.load();
+        float preview_scale = (vol_db <= -59.5f) ? 0.0f : std::pow(10.0f, vol_db / 20.0f);
+        mix_l *= preview_scale;
+        mix_r *= preview_scale;
 
         // Soft limit
         stream[f * 2 + 0] = std::clamp(mix_l, -1.0f, 1.0f);

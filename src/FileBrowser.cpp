@@ -210,7 +210,8 @@ void FileBrowser::open(const std::string& title,
                        const std::string& default_filename,
                        const std::string& default_extension,
                        const std::function<void(const std::string& path)>& on_confirm,
-                       const std::string& confirm_btn_label) {
+                       const std::string& confirm_btn_label,
+                       const std::function<void()>& on_cancel) {
     m_title = title;
     m_mode = mode;
     m_filters = filters;
@@ -218,6 +219,7 @@ void FileBrowser::open(const std::string& title,
     m_default_ext = default_extension;
     m_on_confirm = on_confirm;
     m_confirm_btn_label = confirm_btn_label;
+    m_on_cancel = on_cancel;
     m_is_open = true;
 
     strncpy(m_filename_input, default_filename.c_str(), sizeof(m_filename_input) - 1);
@@ -236,7 +238,21 @@ void FileBrowser::open(const std::string& title,
     refresh_directory();
 }
 
+void FileBrowser::cancel() {
+    if (m_on_cancel) {
+        auto cb = m_on_cancel;
+        m_on_cancel = nullptr;
+        cb();
+    }
+    close();
+}
+
 void FileBrowser::close() {
+    if (m_on_cancel) {
+        auto cb = m_on_cancel;
+        m_on_cancel = nullptr;
+        cb();
+    }
     clear_thumbnail_cache();
     m_is_open = false;
 }
@@ -320,7 +336,8 @@ void FileBrowser::render() {
     bool popup_open = true;
     if (ImGui::BeginPopupModal(m_title.c_str(), &popup_open, ImGuiWindowFlags_NoCollapse)) {
         if (!popup_open) {
-            close();
+            cancel();
+            ImGui::CloseCurrentPopup();
             ImGui::EndPopup();
             return;
         }
@@ -570,6 +587,7 @@ void FileBrowser::render() {
                     full_path += m_default_ext;
                 }
 
+                m_on_cancel = nullptr; // Confirmed, do not invoke cancel callback
                 if (m_on_confirm) {
                     m_on_confirm(full_path.string());
                 }
@@ -579,8 +597,8 @@ void FileBrowser::render() {
         }
 
         ImGui::SameLine();
-        if (ImGui::Button("Cancel", ImVec2(80, 26))) {
-            close();
+        if (ImGui::Button("Cancel", ImVec2(80, 26)) || ImGui::IsKeyPressed(ImGuiKey_Escape)) {
+            cancel();
             ImGui::CloseCurrentPopup();
         }
 
