@@ -2,6 +2,8 @@
 
 **minicut** is a fast, lightweight, and modern multi-track non-linear video editor built specifically for Linux desktop environments. It delivers a streamlined, responsive workflow for video, audio, image, and text editing without unnecessary bloat or complex subscription layers.
 
+![minicut Interface](docs/screenshot.png)
+
 ---
 
 ## The Story: How It Was Made (Vibe Coded)
