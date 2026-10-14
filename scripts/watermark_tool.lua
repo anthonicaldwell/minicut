@@ -1,6 +1,7 @@
 -- ============================================================================
 -- watermark_tool.lua (Menu Script)
 -- Demonstrates placing and positioning an overlay watermark
+-- Uses gui.file_dialog for dynamic file picking
 -- ============================================================================
 
 local watermark_path = "minicut.png"
@@ -33,12 +34,23 @@ function logic_callback()
     minicut.set_status("Watermark overlay placed across full timeline!")
 end
 
+function choose_file()
+    gui.file_dialog("Select Watermark Image", function(selected)
+        if selected and selected ~= "" then
+            watermark_path = selected
+            minicut.set_status("Selected watermark: " .. selected)
+        end
+    end, "Image Files (*.png *.jpg *.jpeg *.bmp *.webp)|*.png;*.jpg;*.jpeg;*.bmp;*.webp|All Files (*.*)|*.*")
+end
+
 function plugin:init_panel()
     gui.text_colored(0.4, 0.7, 1.0, 1.0, "Watermark Overlay Tool")
     gui.separator()
 
     gui.text("Watermark Image:")
     watermark_path = gui.input_text("##wm_path", watermark_path)
+    gui.same_line()
+    gui.button("Browse...##wm_browse", choose_file)
 
     gui.text("Scale:")
     wm_scale = gui.slider_float("##wm_s", wm_scale, 0.05, 1.0)

@@ -1,6 +1,7 @@
 -- ============================================================================
 -- quick_placement.lua (Autorun Script)
 -- Demonstrates GUI controls, media placement on timeline, transforms & status
+-- Uses gui.file_dialog for dynamic media file selection
 -- ============================================================================
 
 -- gui state
@@ -26,6 +27,15 @@ function logic_callback()
     end
 end
 
+function choose_media_file()
+    gui.file_dialog("Select Media File", function(selected)
+        if selected and selected ~= "" then
+            media_path = selected
+            minicut.set_status("Selected media: " .. selected)
+        end
+    end, "Media Files (*.png *.jpg *.jpeg *.mp4 *.mov *.mkv *.ogv *.ogg)|*.png;*.jpg;*.jpeg;*.mp4;*.mov;*.mkv;*.ogv;*.ogg|All Files (*.*)|*.*")
+end
+
 function plugin:init_panel()
     -- add your gui controls here
     gui.text_colored(0.24, 0.68, 0.91, 1.0, "Quick Media Placement Tool")
@@ -33,6 +43,8 @@ function plugin:init_panel()
 
     gui.text("Media File Path:")
     media_path = gui.input_text("##file_path", media_path)
+    gui.same_line()
+    gui.button("Browse...##media_browse", choose_media_file)
 
     gui.text("Target Track:")
     gui.same_line()

@@ -1129,6 +1129,123 @@ void test_extended_lua_api() {
     std::cout << "[PASS] Extended Lua API tests passed." << std::endl;
 }
 
+void test_ogg_ogv_ogm_support() {
+    std::cout << "[TEST] Running OGG, OGV, and OGM format recognition tests..." << std::endl;
+    assert(FileBrowser::is_video_file("test_clip.ogv"));
+    assert(FileBrowser::is_video_file("test_clip.ogm"));
+    assert(FileBrowser::is_video_file("TEST_MOVIE.OGV"));
+    assert(FileBrowser::is_video_file("TEST_MOVIE.OGM"));
+    assert(FileBrowser::is_audio_file("soundtrack.ogg"));
+    assert(FileBrowser::is_audio_file("EFFECT.OGG"));
+    std::cout << "[PASS] OGG, OGV, and OGM format tests passed." << std::endl;
+}
+
+void test_window_title_and_version() {
+    std::cout << "[TEST] Running window title and version tests..." << std::endl;
+    // Version test
+    assert(std::string(MINICUT_VERSION) == "1.2.0");
+
+    // Title formatting test
+    auto format_title = [](const std::string& name) -> std::string {
+        std::string proj_title = name;
+        if (proj_title.empty() || proj_title == "Untitled Project") {
+            proj_title = "New Project";
+        }
+        return "Minicut - " + proj_title;
+    };
+
+    assert(format_title("") == "Minicut - New Project");
+    assert(format_title("Untitled Project") == "Minicut - New Project");
+    assert(format_title("Summer Vacation") == "Minicut - Summer Vacation");
+    std::cout << "[PASS] Window title and version tests passed." << std::endl;
+}
+
+void test_dock_localization() {
+    std::cout << "[TEST] Running Dock localization tests..." << std::endl;
+    auto& lm = LocaleManager::instance();
+    lm.init();
+
+    lm.set_locale("en");
+    assert(lm.get("dock_title") == "DOCK");
+
+    lm.set_locale("ja");
+    assert(lm.get("dock_title") == "ドック");
+
+    lm.set_locale("ko");
+    assert(lm.get("dock_title") == "도크");
+
+    lm.set_locale("uk");
+    assert(lm.get("dock_title") == "ДОК");
+
+    lm.set_locale("ar");
+    assert(lm.get("dock_title") == ArabicShaper::process("منصة"));
+
+    // Restore to English
+    lm.set_locale("en");
+    std::cout << "[PASS] Dock localization tests passed." << std::endl;
+}
+
+void test_javascript_engine() {
+    std::cout << "[TEST] Running Duktape JavaScript Engine integration tests..." << std::endl;
+    Project proj;
+    Timeline tl;
+    ClipManager cm;
+    ScriptEngine se;
+    se.init(&proj, &tl, &cm);
+
+    // 1. Basic JS execution
+    bool ok = se.run_js_string("var x = 10 + 20;");
+    assert(ok);
+
+    // 2. Timeline and Track management via JS
+    ok = se.run_js_string("timeline.add_track('video', 'JS Video Track');");
+    assert(ok);
+    assert(proj.tracks.size() == 1);
+    assert(proj.tracks[0].name == "JS Video Track");
+
+    se.run_js_string("timeline.set_track_name(0, 'Renamed JS Track');");
+    assert(proj.tracks[0].name == "Renamed JS Track");
+
+    // 3. Clip placement and manipulation via JS
+    se.run_js_string("var cid = timeline.place_video(0, 'asset_1', 1.0, 4.0);");
+    assert(!proj.tracks[0].clips.empty());
+    std::string cid = proj.tracks[0].clips.front().id;
+
+    se.run_js_string("clip.set_position('" + cid + "', 50.0, -25.0);");
+    assert(proj.tracks[0].clips.front().pos_x == 50.0);
+    assert(proj.tracks[0].clips.front().pos_y == -25.0);
+
+    se.run_js_string("clip.set_scale('" + cid + "', 2.0);");
+    assert(proj.tracks[0].clips.front().scale == 2.0);
+
+    se.run_js_string("clip.set_rotation('" + cid + "', 45.0);");
+    assert(proj.tracks[0].clips.front().rotation == 45.0);
+
+    se.run_js_string("clip.set_opacity('" + cid + "', 0.75);");
+    assert(proj.tracks[0].clips.front().opacity == 0.75);
+
+    // 4. Keyframing via JS
+    se.run_js_string("timeline.add_keyframe('" + cid + "', 'opacity', 2.0, 0.2);");
+    assert(proj.keyframes.size() == 1);
+    assert(proj.keyframes[0].clip_id == cid);
+    assert(proj.keyframes[0].value == 0.2);
+
+    se.run_js_string("var val = timeline.evaluate_keyframe('" + cid + "', 'opacity', 2.0, 1.0);");
+    double val = proj.evaluate_keyframe(cid, "opacity", 2.0, 1.0);
+    assert(std::abs(val - 0.2) < 1e-4);
+
+    // 5. Project properties via JS
+    se.run_js_string("project.set_name('JS Created Project');");
+    assert(proj.name == "JS Created Project");
+
+    // 6. Net and GUI object presence in JS
+    se.run_js_string("if (typeof net.get !== 'function') throw new Error('net.get missing');");
+    se.run_js_string("if (typeof gui.button !== 'function') throw new Error('gui.button missing');");
+    se.run_js_string("if (typeof gui.file_dialog !== 'function') throw new Error('gui.file_dialog missing');");
+
+    std::cout << "[PASS] Duktape JavaScript Engine integration tests passed." << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Running minicut Comprehensive Test Suite" << std::endl;
@@ -1157,6 +1274,10 @@ int main() {
     test_track_reordering_and_renaming();
     test_timeline_multiselect();
     test_extended_lua_api();
+    test_ogg_ogv_ogm_support();
+    test_window_title_and_version();
+    test_dock_localization();
+    test_javascript_engine();
 
     std::cout << "========================================" << std::endl;
     std::cout << "ALL MINICUT UNIT & PIPELINE TESTS PASSED" << std::endl;

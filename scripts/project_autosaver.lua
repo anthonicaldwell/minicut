@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- minicut Script: Project Auto-Saver & Snapshot Manager
--- Demonstrates project_save(), project_load(), and minicut status toasts
+-- Demonstrates project_save(), project_load(), and gui.file_dialog
 -- ==============================================================================
 
 local snapshot_name = "snapshot_backup.minicut"
@@ -29,12 +29,23 @@ function restore_last_snapshot()
     end
 end
 
+function choose_snapshot_file()
+    gui.file_dialog("Select Project Snapshot", function(selected)
+        if selected and selected ~= "" then
+            snapshot_name = selected
+            minicut.set_status("Selected snapshot path: " .. selected)
+        end
+    end, "Minicut Projects (*.minicut)|*.minicut|All Files (*.*)|*.*")
+end
+
 function plugin:init_panel()
     gui.text("Project Snapshot & Auto-Save")
     gui.separator()
     gui.text_colored("Current Project: " .. project.get_name(), 0.24, 0.68, 0.91)
     
     snapshot_name = gui.input_text("Snapshot Filename", snapshot_name)
+    gui.same_line()
+    gui.button("Browse...##snap_browse", choose_snapshot_file)
     
     if gui.button("Save Snapshot", save_current_snapshot) then
     end

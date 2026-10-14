@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>minicut Довідник з JavaScript та Plugin API</title>
+<style>
+@page {
+    size: letter portrait;
+    margin: 0.8in;
+    @bottom-right {
+        content: counter(page);
+    }
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans CJK JP", "Noto Sans CJK KR", "NanumGothic", "Noto Sans Arabic", "Noto Naskh Arabic", "Droid Sans Fallback", "DejaVu Sans", Arial, sans-serif;
+    color: #232629;
+    background: #ffffff;
+    line-height: 1.55;
+    font-size: 10pt;
+    margin: 0;
+    padding: 0;
+}
+.cover {
+    text-align: center;
+    padding: 40px 0 25px 0;
+    border-bottom: 3px solid #1a73e8;
+    margin-bottom: 25px;
+}
+.cover h1 {
+    font-size: 24pt;
+    color: #1a73e8;
+    margin: 0 0 10px 0;
+    font-weight: 700;
+}
+.cover .subtitle {
+    font-size: 13pt;
+    color: #5f6368;
+    margin: 0 0 18px 0;
+}
+.cover .badge {
+    display: inline-block;
+    background: #e8f0fe;
+    color: #1a73e8;
+    font-weight: bold;
+    padding: 5px 12px;
+    border-radius: 14px;
+    font-size: 9pt;
+    margin: 4px;
+}
+h2 {
+    color: #0d47a1;
+    font-size: 13.5pt;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 5px;
+    margin-top: 28px;
+    page-break-after: avoid;
+}
+h3 {
+    color: #1565c0;
+    font-size: 11pt;
+    margin-top: 18px;
+    margin-bottom: 6px;
+    page-break-after: avoid;
+}
+p {
+    margin: 8px 0;
+}
+ul, ol {
+    margin: 6px 0 12px 24px;
+    padding: 0;
+}
+li {
+    margin-bottom: 4px;
+}
+code {
+    background-color: #f1f3f4;
+    color: #c5221f;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-family: "DejaVu Sans Mono", Consolas, "Liberation Mono", Courier, monospace;
+    font-size: 9pt;
+}
+pre {
+    background-color: #f8f9fa;
+    border: 1px solid #dadce0;
+    border-left: 4px solid #1a73e8;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-family: "DejaVu Sans Mono", Consolas, "Liberation Mono", Courier, monospace;
+    font-size: 8.5pt;
+    line-height: 1.45;
+    overflow-x: auto;
+    page-break-inside: avoid;
+    margin: 10px 0;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 8.8pt;
+    page-break-inside: avoid;
+}
+th {
+    background-color: #1a73e8;
+    color: #ffffff;
+    font-weight: 600;
+    text-align: left;
+    padding: 7px 9px;
+    border: 1px solid #1a73e8;
+}
+td {
+    padding: 6px 9px;
+    border: 1px solid #dadce0;
+    vertical-align: top;
+}
+tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+.rtl {
+    direction: rtl;
+    text-align: right;
+}
+.rtl th {
+    text-align: right;
+}
+.rtl pre, .rtl code {
+    direction: ltr;
+    text-align: left;
+    display: inline-block;
+}
+.rtl pre {
+    display: block;
+}
+.footer {
+    text-align: center;
+    color: #70757a;
+    font-size: 8.5pt;
+    margin-top: 35px;
+    border-top: 1px solid #e0e0e0;
+    padding-top: 12px;
+}
+</style>
+</head>
+<body>
+<div class="cover">
+    <h1>Відеоредактор minicut</h1>
+    <div class="subtitle">Вбудований рушій JavaScript & Довідник з Plugin API</div>
+    <div>
+        <span class="badge">Рушій Duktape 2.7.0</span>
+        <span class="badge">Повна підтримка UTF-8</span>
+        <span class="badge">Панелі інструментів</span>
+        <span class="badge">Док інструментів</span>
+        <span class="badge">Мережева бібліотека (libcurl)</span>
+    </div>
+</div>
+
+<h2>1. Вступ та JavaScript архітектура</h2>
+<p>
+    <strong>minicut</strong> містить вбудований рушій <strong>JavaScript</strong> (Duktape 2.7.0) із повноцінною підтримкою кодування UTF-8.
+    Скрипти JavaScript мають повну функціональну еквівалентність із Lua API для розробки потужних локалізованих інструментів.
+</p>
+
+<h3>Каталоги розташування скриптів</h3>
+<table>
+<thead><tr><th style="width: 32%;">Розташування</th><th style="width: 28%;">Роль</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>~/.config/minicut/autorun/</code></td><td>Автозапуск при старті</td><td>Скрипти <code>.js</code> виконуються під час запуску та додають кнопку на панель Доку.</td></tr>
+    <tr><td><code>~/.config/minicut/scripts/</code></td><td>Запуск з меню</td><td>Скрипти <code>.js</code> відображаються в меню <strong>Скрипти</strong>.</td></tr>
+    <tr><td><code>~/.config/minicut/icons/</code></td><td>Іконки Доку</td><td>PNG файли іконок, що відповідають іменам скриптів.</td></tr>
+</tbody>
+</table>
+
+<h2>2. Архітектура JavaScript плагіна</h2>
+<pre>var targetTrack = 0;
+var clipDuration = 4.0;
+var mediaPath = "test_sample.png";
+
+function placeMedia() {
+    minicut.push_undo();
+    var playhead = timeline.get_playhead();
+    var cid = timeline.place_clip(mediaPath, targetTrack, playhead, clipDuration);
+    if (cid && cid.length > 0) {
+        clip.set_scale(cid, 1.25);
+        timeline.add_keyframe(cid, "opacity", 0.0, 0.0);
+        timeline.add_keyframe(cid, "opacity", 1.0, 1.0);
+        minicut.set_status("Кліп розміщено: " + cid);
+    }
+}
+
+function browseFile() {
+    gui.file_dialog("Оберіть файл (JS)", function(selected) {
+        if (selected && selected.length > 0) {
+            mediaPath = selected;
+            minicut.set_status("Обрано: " + selected);
+        }
+    });
+}
+
+plugin.init_panel = function() {
+    gui.text_colored(0.24, 0.68, 0.91, 1.0, "Інструмент розміщення медіа (JS)");
+    gui.separator();
+    targetTrack = gui.slider_int("Номер доріжки", targetTrack, 0, 4);
+    clipDuration = gui.slider_float("Тривалість (с)", clipDuration, 0.5, 30.0);
+    gui.button("Огляд файлів...", browseFile);
+    gui.button("Розмістити на таймлайні", placeMedia);
+};</pre>
+
+<h2>3. Модулі API</h2>
+<p>У JavaScript доступні всі основні модулі: <code>project</code>, <code>timeline</code>, <code>clip</code>, <code>gui</code>, <code>net</code>, <code>minicut</code>.</p>
+
+<div class="footer">
+    minicut v1.2.0 • Легкий мультитрековий відеоредактор для Linux • Автоматична документація
+</div>
+</body>
+</html>

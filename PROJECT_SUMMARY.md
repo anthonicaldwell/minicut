@@ -339,6 +339,47 @@
 - **Window Title Bar**: Dynamically updates to `"Minicut - <Project Title>"` or `"Minicut - New Project"`.
 - **System Portability**: Clean CMake configuration with multi-arch library detection for Debian/Ubuntu, Arch, Fedora, openSUSE, x86_64, and ARM64. Displays "Built for Linux" and `minicut v1.2.0` in Help/About.
 
+### DD. Korean Text Glyph Atlas & Font Resolution
+- Reordered CJK font candidates in `src/App.cpp` to prioritize `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc` over `DroidSansFallbackFull.ttf`.
+- Resolved the `?????` character rendering bug across the application; full Korean Hangul syllables (`0xAC00`-`0xD7A3`), Hangul Jamo (`0x3131`-`0x3163`), and Hanja glyphs now render crisp and sharp in all menus, panels, dialogs, and text tools.
+
+### EE. Japanese / IME Pre-edit Composition Rendering
+- Enabled `SDL_SetHint(SDL_HINT_IME_SHOW_UI, "1")` before window creation.
+- Implemented handling for `SDL_TEXTEDITING` and `SDL_TEXTINPUT` events in `App::process_events()`.
+- Integrated real-time IME composition display inside the Text Dialog:
+  - Dynamically updates `SDL_SetTextInputRect` so OS candidate windows display at the input box.
+  - Actively renders the pre-edit composition text inside the text entry widget with an authentic IME underline.
+  - Updates the live text preview texture in real time as the user types without requiring Enter/commit.
+  - Displays an active `[Composition]` status indicator in the dialog.
+
+### FF. "Add Text" Standardization & Localization
+- Renamed `+ Text` to `Add Text` across all 5 supported languages in both the main menu bar (**Project > Add Text**) and the Asset Browser button:
+  - English: `"Add Text"`
+  - Japanese: `"テキストを追加"`
+  - Korean: `"텍스트 추가"`
+  - Ukrainian: `"Додати текст"`
+  - Arabic: `"إضافة نص"`
+
+### GG. File Dialog API in Scripts
+- Upgraded default scripts to utilize `gui.file_dialog` / `gui.native_file_dialog` rather than static paths:
+  - `scripts/watermark_tool.lua`: Browse button for watermark image overlay.
+  - `autorun/quick_placement.lua`: Browse button for media assets.
+  - `scripts/project_autosaver.lua`: Browse button for snapshot file selection.
+  - `scripts/remote_media_downloader.lua`: Browse button for download save target.
+
+### HH. JavaScript Script Examples
+- Added `autorun/quick_fade_js.js`: Autorun JavaScript script featuring a quick fade-in/out keyframe animator panel with custom gold icon `icons/quick_fade_js.png` on the Dock.
+- Added `scripts/media_browser_tool.js`: Normal JavaScript script featuring file dialog browsing and timeline placement.
+
+### II. Multi-Lingual API Documentation (10 Reference Manuals)
+- Generated HTML and printable PDFs for both Lua and JavaScript across all 5 supported languages via headless LibreOffice:
+  - `minicut_lua_api.pdf` (en), `minicut_lua_api_ja.pdf` (ja), `minicut_lua_api_ko.pdf` (ko), `minicut_lua_api_uk.pdf` (uk), `minicut_lua_api_ar.pdf` (ar - RTL)
+  - `minicut_js_api.pdf` (en), `minicut_js_api_ja.pdf` (ja), `minicut_js_api_ko.pdf` (ko), `minicut_js_api_uk.pdf` (uk), `minicut_js_api_ar.pdf` (ar - RTL)
+- Deployed to `~/.config/minicut/docs/` and synced with Help menu opening.
+
+### JJ. Localized "Vibe Coded" READMEs
+- Created concise user guide READMEs in all 5 languages (`README.md`, `README_ja.md`, `README_ko.md`, `README_uk.md`, `README_ar.md`) detailing the application overview, the "vibe coding" journey with Google DeepMind Antigravity, and quick start instructions without mentioning proprietary software.
+
 ---
 
 ## 5. Build, Test, and Execution Commands

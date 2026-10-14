@@ -1,13 +1,25 @@
 #!/usr/bin/env python3
 """
 minicut Documentation Generator
-Generates comprehensive English and Japanese API reference manuals for both
-Lua and JavaScript as HTML, Markdown, and PDF.
+Generates comprehensive API reference manuals for all supported languages:
+  - English (en)
+  - Japanese (ja)
+  - Korean (ko)
+  - Ukrainian (uk)
+  - Arabic (ar)
+For both LuaJIT and JavaScript engines as HTML, Markdown, and PDF.
+
 Outputs:
-  - minicut_lua_api.pdf (English Lua API)
-  - minicut_lua_api_ja.pdf (Japanese Lua API)
-  - minicut_js_api.pdf (English JavaScript API)
-  - minicut_js_api_ja.pdf (Japanese JavaScript API)
+  - minicut_lua_api.pdf (en)
+  - minicut_lua_api_ja.pdf (ja)
+  - minicut_lua_api_ko.pdf (ko)
+  - minicut_lua_api_uk.pdf (uk)
+  - minicut_lua_api_ar.pdf (ar)
+  - minicut_js_api.pdf (en)
+  - minicut_js_api_ja.pdf (ja)
+  - minicut_js_api_ko.pdf (ko)
+  - minicut_js_api_uk.pdf (uk)
+  - minicut_js_api_ar.pdf (ar)
 """
 
 import os
@@ -24,7 +36,7 @@ CSS_TEMPLATE = """
     }
 }
 body {
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans CJK JP", "Droid Sans Fallback", "DejaVu Sans", "Helvetica Neue", Arial, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans CJK JP", "Noto Sans CJK KR", "NanumGothic", "Noto Sans Arabic", "Noto Naskh Arabic", "Droid Sans Fallback", "DejaVu Sans", Arial, sans-serif;
     color: #232629;
     background: #ffffff;
     line-height: 1.55;
@@ -34,7 +46,7 @@ body {
 }
 .cover {
     text-align: center;
-    padding: 50px 0 30px 0;
+    padding: 40px 0 25px 0;
     border-bottom: 3px solid #1a73e8;
     margin-bottom: 25px;
 }
@@ -128,17 +140,20 @@ td {
 tr:nth-child(even) {
     background-color: #f8f9fa;
 }
-.callout {
-    background-color: #e8f0fe;
-    border-left: 4px solid #1a73e8;
-    padding: 10px 14px;
-    margin: 12px 0;
-    border-radius: 0 4px 4px 0;
+.rtl {
+    direction: rtl;
+    text-align: right;
 }
-.callout-title {
-    font-weight: bold;
-    color: #1a73e8;
-    margin-bottom: 4px;
+.rtl th {
+    text-align: right;
+}
+.rtl pre, .rtl code {
+    direction: ltr;
+    text-align: left;
+    display: inline-block;
+}
+.rtl pre {
+    display: block;
 }
 .footer {
     text-align: center;
@@ -151,12 +166,12 @@ tr:nth-child(even) {
 """
 
 def generate_lua_en_html():
-    return """<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>minicut Lua Scripting & Plugin API Reference Manual</title>
-<style>" + CSS_TEMPLATE + "</style>
+<style>{CSS_TEMPLATE}</style>
 </head>
 <body>
 <div class="cover">
@@ -173,11 +188,12 @@ def generate_lua_en_html():
 
 <h2>1. Introduction & Architecture</h2>
 <p>
-    <strong>minicut</strong> features a fully embedded, high-performance <strong>LuaJIT</strong> scripting engine. minicut enables automation, timeline editing, clip keyframing, and custom interactive dockable tool panels.
+    <strong>minicut</strong> features a fully embedded, high-performance <strong>LuaJIT</strong> scripting engine.
+    minicut enables complete automation, timeline editing, clip keyframing, and custom interactive dockable tool panels.
 </p>
 
 <h3>Script Directory Locations</h3>
-<p>Scripts and icons are discovered in the user's configuration directory:</p>
+<p>Scripts and icons are discovered in the user configuration directory:</p>
 <table>
 <thead>
     <tr><th style="width: 32%;">Location</th><th style="width: 28%;">Trigger / Role</th><th style="width: 40%;">Description</th></tr>
@@ -196,7 +212,7 @@ def generate_lua_en_html():
     <tr>
         <td><code>~/.config/minicut/icons/</code></td>
         <td>Dock Icon Asset</td>
-        <td>32x32 PNG icon images matching script stems (e.g., <code>quick_placement.png</code> for <code>quick_placement.lua</code>).</td>
+        <td>PNG icon images matching script stems (e.g., <code>keyframe_animator.png</code> for <code>keyframe_animator.lua</code>).</td>
     </tr>
 </tbody>
 </table>
@@ -213,13 +229,11 @@ def generate_lua_en_html():
 local target_track = 0
 local clip_scale = 1.25
 
--- Timeline and clip manipulation logic
 function execute_placement()
     minicut.push_undo()
     local path = "/path/to/media.mp4"
-    local asset_id = project.import_video(path)
-    local clip_id = timeline.place_video(target_track, asset_id, timeline.get_playhead(), 5.0)
-    if clip_id ~= "" then
+    local clip_id = timeline.place_clip(path, target_track, timeline.get_playhead(), 5.0)
+    if clip_id and clip_id ~= "" then
         clip.set_scale(clip_id, clip_scale)
         timeline.add_keyframe(clip_id, "opacity", 0.0, 0.0)
         timeline.add_keyframe(clip_id, "opacity", 1.0, 1.0)
@@ -227,16 +241,13 @@ function execute_placement()
     end
 end
 
--- GUI panel declaration
 function plugin:init_panel()
     gui.text("Media Placement Tool")
     gui.separator()
     target_track = gui.slider_int("Track Lane", target_track, 0, 4)
     clip_scale = gui.slider_float("Initial Scale", clip_scale, 0.1, 5.0)
     
-    if gui.button("Place Clip At Playhead", execute_placement) then
-        -- Optional inline handling
-    end
+    gui.button("Place Clip At Playhead", execute_placement)
 end</pre>
 
 <h2>3. Core Lua Modules</h2>
@@ -251,10 +262,6 @@ end</pre>
     <tr><td><code>project_load(path)</code><br><code>project.load(path)</code></td><td><code>boolean, string</code></td><td>Loads a project from <code>path</code>, refreshing timeline and media.</td></tr>
     <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>Returns the current project name.</td></tr>
     <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>Sets the current project name.</td></tr>
-    <tr><td><code>project.import_video(path)</code></td><td><code>string (asset_id)</code></td><td>Imports video into the project media pool.</td></tr>
-    <tr><td><code>project.import_audio(path)</code></td><td><code>string (asset_id)</code></td><td>Imports audio into the project media pool.</td></tr>
-    <tr><td><code>project.import_image(path, [dur])</code></td><td><code>string (asset_id)</code></td><td>Imports image into the project media pool (default: 5.0s).</td></tr>
-    <tr><td><code>assets.create_text(text, [opts])</code></td><td><code>string (asset_id)</code></td><td>Generates FreeType text asset with font, outline, and alignment.</td></tr>
 </tbody>
 </table>
 
@@ -268,7 +275,6 @@ end</pre>
     <tr><td><code>net.post(url, body)</code></td><td><code>table</code></td><td>HTTP POST request with string or JSON payload.</td></tr>
     <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>Downloads remote asset directly to local disk.</td></tr>
     <tr><td><code>net.upload(url, path)</code></td><td><code>table</code></td><td>HTTP POST/upload local file binary stream.</td></tr>
-    <tr><td><code>net.request(options)</code></td><td><code>table</code></td><td>Custom HTTP request (url, method, headers, timeout).</td></tr>
 </tbody>
 </table>
 
@@ -282,65 +288,55 @@ end</pre>
     <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>Moves timeline playhead to <code>t</code> seconds.</td></tr>
     <tr><td><code>timeline.get_duration()</code></td><td><code>number</code></td><td>Total duration of the project timeline.</td></tr>
     <tr><td><code>timeline.get_track_count()</code></td><td><code>integer</code></td><td>Total number of video and audio tracks.</td></tr>
-    <tr><td><code>timeline.add_track(type, [name])</code></td><td><code>integer</code></td><td>Adds a track ("video" or "audio") with optional name.</td></tr>
-    <tr><td><code>timeline.place_video(track, id, start, dur)</code></td><td><code>string</code></td><td>Places video clip on track and returns clip ID.</td></tr>
-    <tr><td><code>timeline.place_audio(track, id, start, dur)</code></td><td><code>string</code></td><td>Places audio clip on track and returns clip ID.</td></tr>
-    <tr><td><code>timeline.place_image(track, id, start, dur)</code></td><td><code>string</code></td><td>Places image clip on track and returns clip ID.</td></tr>
-    <tr><td><code>timeline.place_text_clip(track, text, start, dur)</code></td><td><code>string</code></td><td>Generates and places text clip on track.</td></tr>
-    <tr><td><code>timeline.delete_clip(clip_id)</code></td><td><code>boolean</code></td><td>Deletes clip and removes its associated keyframes.</td></tr>
-    <tr><td><code>timeline.split_clip(clip_id, [t])</code></td><td><code>boolean</code></td><td>Splits clip at time <code>t</code> (defaults to playhead).</td></tr>
-    <tr><td><code>timeline.select_clips(ids_table)</code></td><td><code>void</code></td><td>Selects multiple clips simultaneously.</td></tr>
+    <tr><td><code>timeline.place_clip(path, track, t, dur)</code></td><td><code>string</code></td><td>Places video, audio, or image clip on track.</td></tr>
+    <tr><td><code>timeline.place_image(path, track, t, dur)</code></td><td><code>string</code></td><td>Places image clip on track and returns clip ID.</td></tr>
+    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>Adds animation keyframe (opacity, volume, pos_x, etc.).</td></tr>
+    <tr><td><code>timeline.clear_keyframes(id, prop)</code></td><td><code>void</code></td><td>Clears all keyframes for a property on a clip.</td></tr>
+    <tr><td><code>timeline.select_clips(ids)</code></td><td><code>void</code></td><td>Selects multiple clips simultaneously.</td></tr>
     <tr><td><code>timeline.get_selected_clips()</code></td><td><code>table</code></td><td>Returns array of selected clip IDs.</td></tr>
-    <tr><td><code>timeline.clear_selection()</code></td><td><code>void</code></td><td>Clears timeline selection.</td></tr>
     <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>Moves track up in stack order.</td></tr>
     <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>Moves track down in stack order.</td></tr>
     <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>Renames track at index.</td></tr>
     <tr><td><code>timeline.get_track_name(idx)</code></td><td><code>string</code></td><td>Gets track name at index.</td></tr>
-    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>Adds animation keyframe (opacity, volume, pos_x, etc.).</td></tr>
-    <tr><td><code>timeline.remove_keyframe(id, prop, t)</code></td><td><code>void</code></td><td>Removes keyframe near timestamp <code>t</code>.</td></tr>
-    <tr><td><code>timeline.evaluate_keyframe(id, prop, t, [def])</code></td><td><code>number</code></td><td>Returns linearly interpolated parameter value.</td></tr>
 </tbody>
 </table>
 
-<h3>3.4. Clip Transformations (<code>clip</code>)</h3>
+<h3>3.4. Clip Transforms & Attributes (<code>clip</code>)</h3>
 <table>
 <thead>
     <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
 </thead>
 <tbody>
-    <tr><td><code>clip.get_position(clip_id)</code></td><td><code>number, number</code></td><td>Returns (pos_x, pos_y) relative to canvas center.</td></tr>
-    <tr><td><code>clip.set_position(clip_id, x, y)</code></td><td><code>void</code></td><td>Sets center position offset in pixels.</td></tr>
-    <tr><td><code>clip.get_scale(clip_id)</code></td><td><code>number</code></td><td>Returns uniform scale multiplier (1.0 = 100%).</td></tr>
-    <tr><td><code>clip.set_scale(clip_id, s)</code></td><td><code>void</code></td><td>Sets uniform scale multiplier.</td></tr>
-    <tr><td><code>clip.get_rotation(clip_id)</code></td><td><code>number</code></td><td>Returns rotation angle in degrees.</td></tr>
-    <tr><td><code>clip.set_rotation(clip_id, r)</code></td><td><code>void</code></td><td>Sets rotation angle in degrees.</td></tr>
-    <tr><td><code>clip.get_opacity(clip_id)</code></td><td><code>number</code></td><td>Returns opacity multiplier [0.0, 1.0].</td></tr>
-    <tr><td><code>clip.set_opacity(clip_id, o)</code></td><td><code>void</code></td><td>Sets opacity multiplier.</td></tr>
-    <tr><td><code>clip.get_volume(clip_id)</code></td><td><code>number</code></td><td>Returns audio volume multiplier [0.0, 2.0].</td></tr>
-    <tr><td><code>clip.set_volume(clip_id, v)</code></td><td><code>void</code></td><td>Sets audio volume multiplier.</td></tr>
-    <tr><td><code>clip.get_time(clip_id)</code></td><td><code>number, number, number</code></td><td>Returns (start_time, duration, offset).</td></tr>
-    <tr><td><code>clip.set_time(clip_id, start, dur, [off])</code></td><td><code>void</code></td><td>Modifies clip timeline timing and media offset.</td></tr>
-    <tr><td><code>clip.get_info(clip_id)</code></td><td><code>table</code></td><td>Returns comprehensive metadata dictionary.</td></tr>
+    <tr><td><code>clip.get_position(clip_id)</code></td><td><code>number, number</code></td><td>Gets (x, y) coordinates relative to canvas center.</td></tr>
+    <tr><td><code>clip.set_position(clip_id, x, y)</code></td><td><code>void</code></td><td>Sets center position coordinates.</td></tr>
+    <tr><td><code>clip.get_scale(clip_id)</code></td><td><code>number</code></td><td>Gets uniform scale factor (1.0 = 100%).</td></tr>
+    <tr><td><code>clip.set_scale(clip_id, s)</code></td><td><code>void</code></td><td>Sets scale factor.</td></tr>
+    <tr><td><code>clip.get_opacity(clip_id)</code></td><td><code>number</code></td><td>Gets opacity [0.0, 1.0].</td></tr>
+    <tr><td><code>clip.set_opacity(clip_id, o)</code></td><td><code>void</code></td><td>Sets opacity.</td></tr>
+    <tr><td><code>clip.get_volume(clip_id)</code></td><td><code>number</code></td><td>Gets audio volume gain multiplier [0.0, 2.0].</td></tr>
+    <tr><td><code>clip.set_volume(clip_id, v)</code></td><td><code>void</code></td><td>Sets audio volume gain multiplier.</td></tr>
+    <tr><td><code>clip.get_time(clip_id)</code></td><td><code>number, number, number</code></td><td>Gets (start_time, duration, offset).</td></tr>
 </tbody>
 </table>
 
-<h3>3.5. GUI & UI Elements (<code>gui</code>)</h3>
+<h3>3.5. GUI Controls (<code>gui</code>)</h3>
 <table>
 <thead>
     <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
 </thead>
 <tbody>
-    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>Displays a standard text string.</td></tr>
-    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>Displays colored text with RGBA float components.</td></tr>
-    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>Renders push button, returns true if clicked.</td></tr>
-    <tr><td><code>gui.slider_float(label, val, min, max, [cb])</code></td><td><code>number</code></td><td>Renders horizontal float slider.</td></tr>
-    <tr><td><code>gui.slider_int(label, val, min, max, [cb])</code></td><td><code>integer</code></td><td>Renders integer slider.</td></tr>
-    <tr><td><code>gui.drag_float(label, val, [spd, min, max, cb])</code></td><td><code>number</code></td><td>Renders click-and-drag float value editor.</td></tr>
-    <tr><td><code>gui.input_text(label, text, [cb])</code></td><td><code>string</code></td><td>Single-line text entry input box.</td></tr>
-    <tr><td><code>gui.checkbox(label, state, [cb])</code></td><td><code>boolean</code></td><td>Toggle checkbox.</td></tr>
-    <tr><td><code>gui.same_line()</code></td><td><code>void</code></td><td>Positions next item on the same line horizontally.</td></tr>
-    <tr><td><code>gui.separator()</code></td><td><code>void</code></td><td>Draws horizontal divider rule.</td></tr>
-    <tr><td><code>gui.file_dialog(options)</code></td><td><code>void</code></td><td>Opens file dialog matching user settings (native or built-in).</td></tr>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>Renders text label.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>Renders colored RGBA text.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>Renders push button and executes callback on click.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>Renders float slider widget.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>Renders integer slider widget.</td></tr>
+    <tr><td><code>gui.drag_float(label, val, [speed, min, max])</code></td><td><code>number</code></td><td>Renders drag float box.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>Renders single-line text input field.</td></tr>
+    <tr><td><code>gui.checkbox(label, state)</code></td><td><code>boolean</code></td><td>Renders toggle checkbox.</td></tr>
+    <tr><td><code>gui.same_line()</code></td><td><code>void</code></td><td>Aligns next widget on the same horizontal line.</td></tr>
+    <tr><td><code>gui.separator()</code></td><td><code>void</code></td><td>Draws horizontal separator line.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Opens file dialog matching user settings (Native/Built-in).</td></tr>
+    <tr><td><code>gui.native_file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Forces native Zenity/KDialog system file dialog.</td></tr>
 </tbody>
 </table>
 
@@ -350,25 +346,25 @@ end</pre>
     <tr><th style="width: 35%;">Function</th><th style="width: 25%;">Returns</th><th style="width: 40%;">Description</th></tr>
 </thead>
 <tbody>
-    <tr><td><code>minicut.push_undo()</code></td><td><code>void</code></td><td>Pushes current project state onto undo history stack.</td></tr>
-    <tr><td><code>minicut.set_status(msg, [dur])</code></td><td><code>void</code></td><td>Displays temporary status toast notification.</td></tr>
-    <tr><td><code>minicut.log(msg)</code></td><td><code>void</code></td><td>Outputs debug line to standard console output.</td></tr>
+    <tr><td><code>minicut.push_undo()</code></td><td><code>void</code></td><td>Records snapshot for Undo history.</td></tr>
+    <tr><td><code>minicut.set_status(msg, [dur])</code></td><td><code>void</code></td><td>Displays temporary toast status message.</td></tr>
+    <tr><td><code>minicut.log(msg)</code></td><td><code>void</code></td><td>Outputs debug log message to console.</td></tr>
 </tbody>
 </table>
 
 <div class="footer">
-    minicut v1.2.0 • Lightweight Multi-Track Video Editor • Documentation generated automatically
+    minicut v1.2.0 • Lightweight Linux Multi-track Video Editor • Generated Documentation
 </div>
 </body>
 </html>"""
 
 def generate_lua_ja_html():
-    return """<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>minicut Lua スクリプティング & プラグイン API リファレンスマニュアル</title>
-<style>" + CSS_TEMPLATE + "</style>
+<title>minicut Lua スクリプト & プラグイン API リファレンスマニュアル</title>
+<style>{CSS_TEMPLATE}</style>
 </head>
 <body>
 <div class="cover">
@@ -377,7 +373,7 @@ def generate_lua_ja_html():
     <div>
         <span class="badge">LuaJIT 5.1 ランタイム</span>
         <span class="badge">ドッキング可能ツールパネル</span>
-        <span class="badge">ツールシェルフ・ドック</span>
+        <span class="badge">ツールシェルフドック</span>
         <span class="badge">ネットワークライブラリ (libcurl)</span>
         <span class="badge">FreeType テキスト生成</span>
     </div>
@@ -385,186 +381,132 @@ def generate_lua_ja_html():
 
 <h2>1. はじめに & アーキテクチャ</h2>
 <p>
-    <strong>minicut</strong> は高速な組み込み <strong>LuaJIT</strong> スクリプトエンジンを搭載しています。タイムライン編集、クリップ配置、キーフレームアニメーション、独自のインタラクティブなドッキングツールパネルの構築をすべてスクリプトから自動化できます。
+    <strong>minicut</strong> は高速な <strong>LuaJIT</strong> スクリプトエンジンを内蔵しています。
+    タイムライン編集、クリップ配置、キーフレームアニメーション、自由なUIツールパネルの構築を自動化できます。
 </p>
 
-<h3>スクリプトディレクトリの配置</h3>
-<p>スクリプトやアイコンは、ユーザーの設定ディレクトリから自動的に検出・ロードされます：</p>
+<h3>スクリプト配置ディレクトリ</h3>
 <table>
 <thead>
-    <tr><th style="width: 32%;">ディレクトリ</th><th style="width: 28%;">役割 / 実行タイミング</th><th style="width: 40%;">概要</th></tr>
+    <tr><th style="width: 32%;">配置場所</th><th style="width: 28%;">起動契機 / 役割</th><th style="width: 40%;">説明</th></tr>
 </thead>
 <tbody>
     <tr>
         <td><code>~/.config/minicut/autorun/</code></td>
-        <td>起動時自動登録</td>
-        <td>エディタ起動時に自動実行され、メニューバー下の水平「ドック (Dock)」にアイコンボタンを生成します。</td>
+        <td>起動時自動実行</td>
+        <td>起動時に自動読み込みされ、メニューバー下の「ドック」にアイコンが登録されます。</td>
     </tr>
     <tr>
         <td><code>~/.config/minicut/scripts/</code></td>
-        <td>メニュクリック時実行</td>
-        <td>メインメニューバーの <strong>Scripts (スクリプト)</strong> メニューに登録され、クリック時にパネルを開いて実行します。</td>
+        <td>メニュークリック時</td>
+        <td>メニューバーの「スクリプト」メニューに表示され、クリック時に実行されます。</td>
     </tr>
     <tr>
         <td><code>~/.config/minicut/icons/</code></td>
-        <td>ドック用アイコン画像</td>
-        <td>スクリプト名と同名の 32x32 PNG アイコン画像（例：<code>quick_placement.lua</code> 用の <code>quick_placement.png</code>）。</td>
+        <td>ドックアイコン画像</td>
+        <td>スクリプト名と一致するPNGアイコン画像（例: <code>keyframe_animator.png</code>）。</td>
     </tr>
 </tbody>
 </table>
 
-<h2>2. プラグインスクリプトの基本構造</h2>
-<p>
-    minicut のスクリプトは直感的なコールバック構造を持ちます。タイムラインやクリップのロジック関数を記述し、<code>plugin:init_panel()</code> メソッド内で Dear ImGui の UI コントロールを登録します。
-</p>
-
+<h2>2. プラグインスクリプト構成</h2>
 <pre>-- ============================================================================
--- 基本スクリプト例: my_tool.lua
+-- スクリプト例: my_tool.lua
 -- ============================================================================
 
 local target_track = 0
-local clip_scale = 1.25
+local clip_scale = 1.0
 
--- タイムライン & クリップ操作ロジック
-function execute_placement()
+function execute_action()
     minicut.push_undo()
-    local path = "/path/to/media.mp4"
-    local asset_id = project.import_video(path)
-    local clip_id = timeline.place_video(target_track, asset_id, timeline.get_playhead(), 5.0)
-    if clip_id ~= "" then
+    local clip_id = timeline.place_clip("sample.png", target_track, timeline.get_playhead(), 4.0)
+    if clip_id and clip_id ~= "" then
         clip.set_scale(clip_id, clip_scale)
         timeline.add_keyframe(clip_id, "opacity", 0.0, 0.0)
         timeline.add_keyframe(clip_id, "opacity", 1.0, 1.0)
-        minicut.set_status("トラック " .. target_track .. " にメディアを配置しました")
+        minicut.set_status("クリップを配置しました: " .. clip_id)
     end
 end
 
--- GUI パネル初期化
+function choose_file()
+    gui.file_dialog("ファイルを選択", function(path)
+        if path and path ~= "" then minicut.set_status("選択: " .. path) end
+    end)
+end
+
 function plugin:init_panel()
     gui.text("メディア配置ツール")
     gui.separator()
-    target_track = gui.slider_int("対象トラック", target_track, 0, 4)
-    clip_scale = gui.slider_float("初期スケール", clip_scale, 0.1, 5.0)
-    
-    if gui.button("再生ヘッド位置に配置", execute_placement) then
-        -- インライン処理も可能
-    end
+    target_track = gui.slider_int("トラック番号", target_track, 0, 4)
+    clip_scale = gui.slider_float("拡大率", clip_scale, 0.1, 4.0)
+    gui.button("参照...", choose_file)
+    gui.button("再生ヘッド位置に配置", execute_action)
 end</pre>
 
-<h2>3. コアモジュールリファレンス</h2>
+<h2>3. コアモジュール API</h2>
 
-<h3>3.1. プロジェクト & アセット操作 (<code>project</code> / Global)</h3>
+<h3>3.1. プロジェクト操作 (<code>project</code> / グローバル)</h3>
 <table>
-<thead>
-    <tr><th style="width: 35%;">関数</th><th style="width: 25%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
+<thead><tr><th style="width: 35%;">関数</th><th style="width: 25%;">戻り値</th><th style="width: 40%;">説明</th></tr></thead>
 <tbody>
-    <tr><td><code>project_save([path])</code><br><code>project.save([path])</code></td><td><code>boolean, string</code></td><td>プロジェクトを <code>.minicut</code> JSON ファイルとして保存します。</td></tr>
-    <tr><td><code>project_load(path)</code><br><code>project.load(path)</code></td><td><code>boolean, string</code></td><td>指定パスからプロジェクトを読み込み、タイムラインを再構築します。</td></tr>
-    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>現在のプロジェクト名を取得します。</td></tr>
-    <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>現在のプロジェクト名を設定します。</td></tr>
-    <tr><td><code>project.import_video(path)</code></td><td><code>string (asset_id)</code></td><td>動画ファイルをアセットプールにインポートします。</td></tr>
-    <tr><td><code>project.import_audio(path)</code></td><td><code>string (asset_id)</code></td><td>音声ファイルをアセットプールにインポートします。</td></tr>
-    <tr><td><code>project.import_image(path, [dur])</code></td><td><code>string (asset_id)</code></td><td>静止画像をアセットプールにインポートします（初期表示時間：5秒）。</td></tr>
-    <tr><td><code>assets.create_text(text, [opts])</code></td><td><code>string (asset_id)</code></td><td>FreeType を用いて高品質テキストアセットを生成します。</td></tr>
+    <tr><td><code>project_save([path])</code></td><td><code>boolean, string</code></td><td>プロジェクトを <code>.minicut</code> ファイルに保存します。</td></tr>
+    <tr><td><code>project_load(path)</code></td><td><code>boolean, string</code></td><td>指定パスからプロジェクトを読み込みます。</td></tr>
+    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>プロジェクト名を取得します。</td></tr>
+    <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>プロジェクト名を設定します。</td></tr>
 </tbody>
 </table>
 
-<h3>3.2. ネットワーク通信ライブラリ (<code>net</code>)</h3>
+<h3>3.2. ネットワーク通信 (<code>net</code>)</h3>
 <table>
-<thead>
-    <tr><th style="width: 35%;">関数</th><th style="width: 25%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
+<thead><tr><th style="width: 35%;">関数</th><th style="width: 25%;">戻り値</th><th style="width: 40%;">説明</th></tr></thead>
 <tbody>
-    <tr><td><code>net.get(url)</code></td><td><code>table</code></td><td>HTTP GET リクエストを送信します。<code>{{status, body, ok, headers}}</code> を返します。</td></tr>
-    <tr><td><code>net.post(url, body)</code></td><td><code>table</code></td><td>HTTP POST リクエストを文字列または JSON で送信します。</td></tr>
-    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>リモートファイルをローカルディスクに直接ダウンロード保存します。</td></tr>
-    <tr><td><code>net.upload(url, path)</code></td><td><code>table</code></td><td>ローカルファイルをリモートサーバへアップロードします。</td></tr>
-    <tr><td><code>net.request(options)</code></td><td><code>table</code></td><td>カスタム HTTP リクエスト（メソッド、ヘッダ、タイムアウト指定）。</td></tr>
+    <tr><td><code>net.get(url)</code></td><td><code>table</code></td><td>HTTP GET リクエストを実行します。</td></tr>
+    <tr><td><code>net.post(url, body)</code></td><td><code>table</code></td><td>HTTP POST リクエストを送信します。</td></tr>
+    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>リモートファイルをローカルへ直接ダウンロードします。</td></tr>
 </tbody>
 </table>
 
-<h3>3.3. タイムライン & トラック管理 (<code>timeline</code>)</h3>
+<h3>3.3. タイムライン & トラック (<code>timeline</code>)</h3>
 <table>
-<thead>
-    <tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
+<thead><tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr></thead>
 <tbody>
-    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>現在の再生ヘッド位置（秒）を取得します。</td></tr>
-    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>再生ヘッドを指定時刻（秒）へ移動します。</td></tr>
-    <tr><td><code>timeline.get_duration()</code></td><td><code>number</code></td><td>タイムライン全体の総再生時間を取得します。</td></tr>
-    <tr><td><code>timeline.get_track_count()</code></td><td><code>integer</code></td><td>全トラック数を取得します。</td></tr>
-    <tr><td><code>timeline.add_track(type, [name])</code></td><td><code>integer</code></td><td>新規トラック（"video" または "audio"）を追加します。</td></tr>
-    <tr><td><code>timeline.place_video(track, id, start, dur)</code></td><td><code>string</code></td><td>動画クリップを配置し、クリップIDを返します。</td></tr>
-    <tr><td><code>timeline.place_audio(track, id, start, dur)</code></td><td><code>string</code></td><td>音声クリップを配置し、クリップIDを返します。</td></tr>
-    <tr><td><code>timeline.place_image(track, id, start, dur)</code></td><td><code>string</code></td><td>画像クリップを配置し、クリップIDを返します。</td></tr>
-    <tr><td><code>timeline.place_text_clip(track, text, start, dur)</code></td><td><code>string</code></td><td>テキストクリップを生成して配置します。</td></tr>
-    <tr><td><code>timeline.delete_clip(clip_id)</code></td><td><code>boolean</code></td><td>クリップおよび関連キーフレームを削除します。</td></tr>
-    <tr><td><code>timeline.split_clip(clip_id, [t])</code></td><td><code>boolean</code></td><td>指定時刻でクリップを分割します（省略時は再生ヘッド位置）。</td></tr>
-    <tr><td><code>timeline.select_clips(ids_table)</code></td><td><code>void</code></td><td>複数クリップを一括選択します。</td></tr>
-    <tr><td><code>timeline.get_selected_clips()</code></td><td><code>table</code></td><td>選択中クリップIDの配列を取得します。</td></tr>
-    <tr><td><code>timeline.clear_selection()</code></td><td><code>void</code></td><td>クリップの選択をすべて解除します。</td></tr>
-    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>トラックの並び順を1つ上に移動します。</td></tr>
-    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>トラックの並び順を1つ下に移動します。</td></tr>
+    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>再生ヘッドの現在時刻（秒）を取得します。</td></tr>
+    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>再生ヘッドを時刻 <code>t</code> 秒へ移動します。</td></tr>
+    <tr><td><code>timeline.place_clip(path, trk, t, dur)</code></td><td><code>string</code></td><td>動画/音声/画像をトラックに配置します。</td></tr>
+    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>アニメーションキーフレームを追加します。</td></tr>
+    <tr><td><code>timeline.clear_keyframes(id, prop)</code></td><td><code>void</code></td><td>特定プロパティの全キーフレームを消去します。</td></tr>
+    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>トラックを上へ移動します。</td></tr>
+    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>トラックを下へ移動します。</td></tr>
     <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>トラック名を変更します。</td></tr>
-    <tr><td><code>timeline.get_track_name(idx)</code></td><td><code>string</code></td><td>トラック名を取得します。</td></tr>
-    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>アニメーションキーフレームを追加します（opacity, volume等）。</td></tr>
-    <tr><td><code>timeline.remove_keyframe(id, prop, t)</code></td><td><code>void</code></td><td>指定時刻のキーフレームを削除します。</td></tr>
-    <tr><td><code>timeline.evaluate_keyframe(id, prop, t, [def])</code></td><td><code>number</code></td><td>線形補間されたパラメータ値を取得します。</td></tr>
 </tbody>
 </table>
 
-<h3>3.4. クリップ変形 & 属性操作 (<code>clip</code>)</h3>
+<h3>3.4. クリップ変形 (<code>clip</code>)</h3>
 <table>
-<thead>
-    <tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
+<thead><tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr></thead>
 <tbody>
-    <tr><td><code>clip.get_position(clip_id)</code></td><td><code>number, number</code></td><td>キャンバス中央を基準とする (x, y) 座標を取得します。</td></tr>
-    <tr><td><code>clip.set_position(clip_id, x, y)</code></td><td><code>void</code></td><td>クリップの中心座標を設定します。</td></tr>
-    <tr><td><code>clip.get_scale(clip_id)</code></td><td><code>number</code></td><td>スケール倍率（1.0 = 100%）を取得します。</td></tr>
-    <tr><td><code>clip.set_scale(clip_id, s)</code></td><td><code>void</code></td><td>スケール倍率を設定します。</td></tr>
-    <tr><td><code>clip.get_rotation(clip_id)</code></td><td><code>number</code></td><td>回転角度（度数法）を取得します。</td></tr>
-    <tr><td><code>clip.set_rotation(clip_id, r)</code></td><td><code>void</code></td><td>回転角度を設定します。</td></tr>
-    <tr><td><code>clip.get_opacity(clip_id)</code></td><td><code>number</code></td><td>不透明度 [0.0, 1.0] を取得します。</td></tr>
-    <tr><td><code>clip.set_opacity(clip_id, o)</code></td><td><code>void</code></td><td>不透明度を設定します。</td></tr>
-    <tr><td><code>clip.get_volume(clip_id)</code></td><td><code>number</code></td><td>音量倍率 [0.0, 2.0] を取得します。</td></tr>
-    <tr><td><code>clip.set_volume(clip_id, v)</code></td><td><code>void</code></td><td>音量倍率を設定します。</td></tr>
-    <tr><td><code>clip.get_time(clip_id)</code></td><td><code>number, number, number</code></td><td>(開始時刻, 長さ, オフセット) を取得します。</td></tr>
-    <tr><td><code>clip.set_time(clip_id, start, dur, [off])</code></td><td><code>void</code></td><td>タイムライン上の配置タイミングとオフセットを設定します。</td></tr>
-    <tr><td><code>clip.get_info(clip_id)</code></td><td><code>table</code></td><td>クリップの詳細プロパティ辞書を取得します。</td></tr>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>number, number</code></td><td>中心基準の (x, y) 座標を取得します。</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>中心座標を設定します。</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>スケール倍率（1.0 = 100%）を取得します。</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>スケール倍率を設定します。</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>不透明度 [0.0, 1.0] を取得します。</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>不透明度を設定します。</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>音声ボリュームゲイン [0.0, 2.0] を取得します。</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>音声ボリュームゲインを設定します。</td></tr>
 </tbody>
 </table>
 
-<h3>3.5. GUI UI要素 (<code>gui</code>)</h3>
+<h3>3.5. GUI ウィジェット (<code>gui</code>)</h3>
 <table>
-<thead>
-    <tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
+<thead><tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr></thead>
 <tbody>
     <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>テキストを表示します。</td></tr>
-    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>RGBA色付きテキストを表示します。</td></tr>
-    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>プッシュボタンを表示し、クリック時にコールバックを実行します。</td></tr>
-    <tr><td><code>gui.slider_float(label, val, min, max, [cb])</code></td><td><code>number</code></td><td>浮動小数点スライダーを表示します。</td></tr>
-    <tr><td><code>gui.slider_int(label, val, min, max, [cb])</code></td><td><code>integer</code></td><td>整数スライダーを表示します。</td></tr>
-    <tr><td><code>gui.drag_float(label, val, [spd, min, max, cb])</code></td><td><code>number</code></td><td>数値ドラッグボックスを表示します。</td></tr>
-    <tr><td><code>gui.input_text(label, text, [cb])</code></td><td><code>string</code></td><td>1行テキスト入力欄を表示します。</td></tr>
-    <tr><td><code>gui.checkbox(label, state, [cb])</code></td><td><code>boolean</code></td><td>チェックボックスを表示します。</td></tr>
-    <tr><td><code>gui.same_line()</code></td><td><code>void</code></td><td>次のウィジェットを同じ行に配置します。</td></tr>
-    <tr><td><code>gui.separator()</code></td><td><code>void</code></td><td>水平区切り線を描画します。</td></tr>
-    <tr><td><code>gui.file_dialog(options)</code></td><td><code>void</code></td><td>ユーザー設定に基づきファイルダイアログを開きます。</td></tr>
-</tbody>
-</table>
-
-<h3>3.6. エンジンユーティリティ (<code>minicut</code>)</h3>
-<table>
-<thead>
-    <tr><th style="width: 35%;">関数</th><th style="width: 25%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
-<tbody>
-    <tr><td><code>minicut.push_undo()</code></td><td><code>void</code></td><td>元に戻す（Undo）用のスナップショットを記録します。</td></tr>
-    <tr><td><code>minicut.set_status(msg, [dur])</code></td><td><code>void</code></td><td>ステータスバーに一時的な通知メッセージを表示します。</td></tr>
-    <tr><td><code>minicut.log(msg)</code></td><td><code>void</code></td><td>コンソールへデバッグログを出力します。</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>色付きテキストを表示します。</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>ボタンを表示しクリック時に実行します。</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>浮動小数点スライダーを表示します。</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>整数スライダーを表示します。</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>テキスト入力フィールドを表示します。</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>ファイルダイアログを開き結果を返します。</td></tr>
 </tbody>
 </table>
 
@@ -574,13 +516,493 @@ end</pre>
 </body>
 </html>"""
 
+def generate_lua_ko_html():
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>minicut Lua 스크립팅 & 플러그인 API 참조 매뉴얼</title>
+<style>{CSS_TEMPLATE}</style>
+</head>
+<body>
+<div class="cover">
+    <h1>minicut 비디오 편집기</h1>
+    <div class="subtitle">임베디드 LuaJIT & 플러그인 API 참조 매뉴얼</div>
+    <div>
+        <span class="badge">LuaJIT 5.1 런타임</span>
+        <span class="badge">도킹 가능 도구 패널</span>
+        <span class="badge">도구 선반 도크</span>
+        <span class="badge">네트워크 라이브러리 (libcurl)</span>
+        <span class="badge">FreeType 텍스트 생성</span>
+    </div>
+</div>
+
+<h2>1. 소개 및 아키텍처</h2>
+<p>
+    <strong>minicut</strong>은 고성능 <strong>LuaJIT</strong> 스크립팅 엔진을 내장하고 있습니다.
+    타임라인 자동화, 클립 배치, 키프레임 애니메이션, 맞춤형 인터랙티브 도구 패널을 자유롭게 제작할 수 있습니다.
+</p>
+
+<h3>스크립트 디렉터리 경로</h3>
+<table>
+<thead>
+    <tr><th style="width: 32%;">경로</th><th style="width: 28%;">실행 시점 / 역할</th><th style="width: 40%;">설명</th></tr>
+</thead>
+<tbody>
+    <tr>
+        <td><code>~/.config/minicut/autorun/</code></td>
+        <td>시작 시 자동 실행</td>
+        <td>앱 실행 시 자동으로 로드되며 메뉴 표시줄 아래 '도크'에 아이콘 버튼이 생성됩니다.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/scripts/</code></td>
+        <td>메뉴 클릭 시</td>
+        <td>메뉴 표시줄의 <strong>스크립트</strong> 메뉴에 표시되며 클릭 시 실행됩니다.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/icons/</code></td>
+        <td>도크 아이콘 파일</td>
+        <td>스크립트 파일명과 일치하는 PNG 아이콘 이미지입니다.</td>
+    </tr>
+</tbody>
+</table>
+
+<h2>2. 플러그인 스크립트 구조</h2>
+<pre>-- ============================================================================
+-- 스크립트 예제: my_tool.lua
+-- ============================================================================
+
+local target_track = 0
+local clip_scale = 1.0
+
+function execute_action()
+    minicut.push_undo()
+    local clip_id = timeline.place_clip("test_sample.png", target_track, timeline.get_playhead(), 4.0)
+    if clip_id and clip_id ~= "" then
+        clip.set_scale(clip_id, clip_scale)
+        timeline.add_keyframe(clip_id, "opacity", 0.0, 0.0)
+        timeline.add_keyframe(clip_id, "opacity", 1.0, 1.0)
+        minicut.set_status("클립 배치 완료: " .. clip_id)
+    end
+end
+
+function choose_file()
+    gui.file_dialog("파일 선택", function(selected)
+        if selected and selected ~= "" then
+            minicut.set_status("선택된 파일: " .. selected)
+        end
+    end)
+end
+
+function plugin:init_panel()
+    gui.text("미디어 배치 도구")
+    gui.separator()
+    target_track = gui.slider_int("트랙 번호", target_track, 0, 4)
+    clip_scale = gui.slider_float("크기 비율", clip_scale, 0.1, 4.0)
+    gui.button("파일 찾아보기...", choose_file)
+    gui.button("재생헤드 위치에 배치", execute_action)
+end</pre>
+
+<h2>3. 코어 모듈 API</h2>
+
+<h3>3.1. 프로젝트 제어 (<code>project</code> / 전역)</h3>
+<table>
+<thead><tr><th style="width: 35%;">함수</th><th style="width: 25%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>project_save([path])</code></td><td><code>boolean, string</code></td><td>프로젝트를 <code>.minicut</code> 파일로 저장합니다.</td></tr>
+    <tr><td><code>project_load(path)</code></td><td><code>boolean, string</code></td><td>지정된 경로의 프로젝트를 로드합니다.</td></tr>
+    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>현재 프로젝트 이름을 가져옵니다.</td></tr>
+    <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>프로젝트 이름을 설정합니다.</td></tr>
+</tbody>
+</table>
+
+<h3>3.2. 네트워크 라이브러리 (<code>net</code>)</h3>
+<table>
+<thead><tr><th style="width: 35%;">함수</th><th style="width: 25%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>net.get(url)</code></td><td><code>table</code></td><td>HTTP GET 요청을 수행합니다.</td></tr>
+    <tr><td><code>net.post(url, body)</code></td><td><code>table</code></td><td>HTTP POST 요청을 전송합니다.</td></tr>
+    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>원격 파일을 로컬 디스크에 직접 다운로드합니다.</td></tr>
+</tbody>
+</table>
+
+<h3>3.3. 타임라인 및 트랙 (<code>timeline</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">함수</th><th style="width: 22%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>현재 재생헤드 위치(초)를 반환합니다.</td></tr>
+    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>재생헤드를 <code>t</code>초 위치로 이동합니다.</td></tr>
+    <tr><td><code>timeline.place_clip(path, trk, t, dur)</code></td><td><code>string</code></td><td>비디오/오디오/이미지를 트랙에 배치합니다.</td></tr>
+    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>애니메이션 키프레임을 추가합니다.</td></tr>
+    <tr><td><code>timeline.clear_keyframes(id, prop)</code></td><td><code>void</code></td><td>속성의 모든 키프레임을 제거합니다.</td></tr>
+    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>트랙을 위로 이동합니다.</td></tr>
+    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>트랙을 아래로 이동합니다.</td></tr>
+    <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>트랙 이름을 변경합니다.</td></tr>
+</tbody>
+</table>
+
+<h3>3.4. 클립 변형 (<code>clip</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">함수</th><th style="width: 22%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>number, number</code></td><td>캔버스 중심 기준 (x, y) 좌표를 반환합니다.</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>중심 좌표를 설정합니다.</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>크기 비율(1.0 = 100%)을 반환합니다.</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>크기 비율을 설정합니다.</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>불투명도 [0.0, 1.0]를 반환합니다.</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>불투명도를 설정합니다.</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>오디오 볼륨 게인 [0.0, 2.0]을 반환합니다.</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>오디오 볼륨 게인을 설정합니다.</td></tr>
+</tbody>
+</table>
+
+<h3>3.5. GUI 위젯 (<code>gui</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">함수</th><th style="width: 22%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>텍스트 라벨을 렌더링합니다.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>색상 텍스트를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>버튼을 렌더링하고 클릭 시 콜백을 실행합니다.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>실수형 슬라이더를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>정수형 슬라이더를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>텍스트 입력 상자를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>파일 대화상자를 열고 결과를 콜백으로 전달합니다.</td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+    minicut v1.2.0 • 가벼운 리눅스 멀티트랙 비디오 편집기 • 자동 생성 문서
+</div>
+</body>
+</html>"""
+
+def generate_lua_uk_html():
+    return f"""<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>minicut Довідник з LuaJIT та Plugin API</title>
+<style>{CSS_TEMPLATE}</style>
+</head>
+<body>
+<div class="cover">
+    <h1>Відеоредактор minicut</h1>
+    <div class="subtitle">Вбудований рушій LuaJIT & Довідник з Plugin API</div>
+    <div>
+        <span class="badge">Середовище LuaJIT 5.1</span>
+        <span class="badge">Панелі інструментів</span>
+        <span class="badge">Док інструментів</span>
+        <span class="badge">Мережева бібліотека (libcurl)</span>
+        <span class="badge">Генерація тексту FreeType</span>
+    </div>
+</div>
+
+<h2>1. Вступ та архітектура</h2>
+<p>
+    <strong>minicut</strong> має повністю вбудований, високопродуктивний рушій <strong>LuaJIT</strong>.
+    Він забезпечує автоматизацію редагування таймлайну, розміщення медіа, анімацію ключових кадрів та створення власних панелей інструментів.
+</p>
+
+<h3>Каталоги розташування скриптів</h3>
+<table>
+<thead>
+    <tr><th style="width: 32%;">Розташування</th><th style="width: 28%;">Запуск / Роль</th><th style="width: 40%;">Опис</th></tr>
+</thead>
+<tbody>
+    <tr>
+        <td><code>~/.config/minicut/autorun/</code></td>
+        <td>Автозапуск при старті</td>
+        <td>Скрипти завантажуються під час запуску та додають кнопку з іконкою на панель Доку під головним меню.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/scripts/</code></td>
+        <td>Вибір у меню</td>
+        <td>Скрипти з'являються в меню <strong>Скрипти</strong> головного меню і запускаються за запитом користувача.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/icons/</code></td>
+        <td>Файли іконок Доку</td>
+        <td>PNG іконки, що відповідають іменам скриптів (наприклад: <code>keyframe_animator.png</code>).</td>
+    </tr>
+</tbody>
+</table>
+
+<h2>2. Архітектура плагіна</h2>
+<pre>-- ============================================================================
+-- Приклад скрипта: my_tool.lua
+-- ============================================================================
+
+local target_track = 0
+local clip_scale = 1.0
+
+function execute_action()
+    minicut.push_undo()
+    local clip_id = timeline.place_clip("test_sample.png", target_track, timeline.get_playhead(), 4.0)
+    if clip_id and clip_id ~= "" then
+        clip.set_scale(clip_id, clip_scale)
+        timeline.add_keyframe(clip_id, "opacity", 0.0, 0.0)
+        timeline.add_keyframe(clip_id, "opacity", 1.0, 1.0)
+        minicut.set_status("Кліп успішно розміщено: " .. clip_id)
+    end
+end
+
+function choose_file()
+    gui.file_dialog("Оберіть файл", function(selected)
+        if selected and selected ~= "" then
+            minicut.set_status("Обрано: " .. selected)
+        end
+    end)
+end
+
+function plugin:init_panel()
+    gui.text("Інструмент розміщення медіа")
+    gui.separator()
+    target_track = gui.slider_int("Номер доріжки", target_track, 0, 4)
+    clip_scale = gui.slider_float("Масштаб", clip_scale, 0.1, 4.0)
+    gui.button("Огляд файлів...", choose_file)
+    gui.button("Розмістити на курсорі", execute_action)
+end</pre>
+
+<h2>3. Опис основних модулів</h2>
+
+<h3>3.1. Керування проєктом (<code>project</code> / Глобальні)</h3>
+<table>
+<thead><tr><th style="width: 35%;">Функція</th><th style="width: 25%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>project_save([path])</code></td><td><code>boolean, string</code></td><td>Зберігає стан проєкту у файл <code>.minicut</code>.</td></tr>
+    <tr><td><code>project_load(path)</code></td><td><code>boolean, string</code></td><td>Завантажує проєкт за вказаним шляхом.</td></tr>
+    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>Повертає поточну назву проєкту.</td></tr>
+    <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>Встановлює назву проєкту.</td></tr>
+</tbody>
+</table>
+
+<h3>3.2. Мережева бібліотека (<code>net</code>)</h3>
+<table>
+<thead><tr><th style="width: 35%;">Функція</th><th style="width: 25%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>net.get(url)</code></td><td><code>table</code></td><td>Виконує запит HTTP GET.</td></tr>
+    <tr><td><code>net.post(url, body)</code></td><td><code>table</code></td><td>Надсилає запит HTTP POST.</td></tr>
+    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>Завантажує віддалений файл безпосередньо на диск.</td></tr>
+</tbody>
+</table>
+
+<h3>3.3. Часова шкала та доріжки (<code>timeline</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">Функція</th><th style="width: 22%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>Повертає поточну позицію курсору в секундах.</td></tr>
+    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>Переміщує курсор у позицію <code>t</code> секунд.</td></tr>
+    <tr><td><code>timeline.place_clip(path, trk, t, dur)</code></td><td><code>string</code></td><td>Розміщує відео, аудіо або зображення на доріжці.</td></tr>
+    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>Додає ключовий кадр анімації (opacity, volume тощо).</td></tr>
+    <tr><td><code>timeline.clear_keyframes(id, prop)</code></td><td><code>void</code></td><td>Видаляє всі ключові кадри для властивості.</td></tr>
+    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>Переміщує доріжку вгору в стеку.</td></tr>
+    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>Переміщує доріжку вниз в стеку.</td></tr>
+    <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>Перейменовує доріжку за індексом.</td></tr>
+</tbody>
+</table>
+
+<h3>3.4. Трансформація кліпів (<code>clip</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">Функція</th><th style="width: 22%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>number, number</code></td><td>Отримує координати (x, y) відносно центру.</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>Встановлює координати центру кліпу.</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>Отримує коефіцієнт масштабування (1.0 = 100%).</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>Встановлює коефіцієнт масштабування.</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>Отримує рівень непрозорості [0.0, 1.0].</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>Встановлює непрозорість кліпу.</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>Отримує підсилення гучності [0.0, 2.0].</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>Встановлює підсилення гучності.</td></tr>
+</tbody>
+</table>
+
+<h3>3.5. Графічні елементи керування (<code>gui</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">Функція</th><th style="width: 22%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>Виводить текстовий напис.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>Виводить кольоровий текст RGBA.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>Створює кнопку з можливістю виклику функції.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>Створює повзунок для дійсних чисел.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>Створює повзунок для цілих чисел.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>Створює поле введення тексту.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Відкриває діалогове вікно вибору файлів.</td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+    minicut v1.2.0 • Легкий мультитрековий відеоредактор для Linux • Автоматична документація
+</div>
+</body>
+</html>"""
+
+def generate_lua_ar_html():
+    return f"""<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>minicut دليل مرجعي للبرمجة بلغة LuaJIT وواجهة Plugin API</title>
+<style>{CSS_TEMPLATE}</style>
+</head>
+<body class="rtl">
+<div class="cover">
+    <h1>محرر الفيديو minicut</h1>
+    <div class="subtitle">دليل مرجعي لبيئة البرمجة LuaJIT والإضافات البرمجية</div>
+    <div>
+        <span class="badge">محرك LuaJIT 5.1</span>
+        <span class="badge">لوحات أدوات قابلة للتثبيت</span>
+        <span class="badge">منصة الأدوات (Dock)</span>
+        <span class="badge">مكتبة الشبكة (libcurl)</span>
+        <span class="badge">توليد النصوص عبر FreeType</span>
+    </div>
+</div>
+
+<h2>1. المقدمة والبنية البرمجية</h2>
+<p>
+    يحتوي برنامج <strong>minicut</strong> على محرك برمجي مدمج عالي الأداء بلغة <strong>LuaJIT</strong>.
+    يتيح المحرك أتمتة عمليات المخطط الزمني بالكامل، إدراج الوسائط، تحريك الإطارات المفتاحية (Keyframing)، وبناء لوحات تحكم تفاعلية مخصصة.
+</p>
+
+<h3>مسارات مجلدات السكربتات</h3>
+<table>
+<thead>
+    <tr><th style="width: 32%;">المسار</th><th style="width: 28%;">وقت التشغيل / الدور</th><th style="width: 40%;">الوصف</th></tr>
+</thead>
+<tbody>
+    <tr>
+        <td><code>~/.config/minicut/autorun/</code></td>
+        <td>التشغيل التلقائي عند البدء</td>
+        <td>يتم تحميل السكربتات تلقائياً عند بدء التشغيل وتنشئ زراً في منصة الأدوات (Dock) أسفل شريط القوائم.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/scripts/</code></td>
+        <td>النقر في شريط القوائم</td>
+        <td>تظهر السكربتات في قائمة <strong>البرمجيات (Scripts)</strong> ويتم تشغيلها عند اختيارها من قبل المستخدم.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/icons/</code></td>
+        <td>أيقونات منصة الأدوات</td>
+        <td>ملفات أيقونات PNG مطابقة لاسم السكربت (مثال: <code>keyframe_animator.png</code>).</td>
+    </tr>
+</tbody>
+</table>
+
+<h2>2. بنية ملف السكربت البرمجي</h2>
+<pre>-- ============================================================================
+-- سكربت توضيحي: my_tool.lua
+-- ============================================================================
+
+local target_track = 0
+local clip_scale = 1.0
+
+function execute_action()
+    minicut.push_undo()
+    local clip_id = timeline.place_clip("sample.png", target_track, timeline.get_playhead(), 4.0)
+    if clip_id and clip_id ~= "" then
+        clip.set_scale(clip_id, clip_scale)
+        timeline.add_keyframe(clip_id, "opacity", 0.0, 0.0)
+        timeline.add_keyframe(clip_id, "opacity", 1.0, 1.0)
+        minicut.set_status("تم إدراج المقطع: " .. clip_id)
+    end
+end
+
+function choose_file()
+    gui.file_dialog("اختر ملفاً", function(selected)
+        if selected and selected ~= "" then
+            minicut.set_status("تم اختيار: " .. selected)
+        end
+    end)
+end
+
+function plugin:init_panel()
+    gui.text("أداة إدراج الوسائط")
+    gui.separator()
+    target_track = gui.slider_int("رقم المسار", target_track, 0, 4)
+    clip_scale = gui.slider_float("المقياس", clip_scale, 0.1, 4.0)
+    gui.button("تصفح الملفات...", choose_file)
+    gui.button("إدراج عند المؤشر", execute_action)
+end</pre>
+
+<h2>3. مكتبات ووحدات النظام البرمجية</h2>
+
+<h3>3.1. إدارة المشروع (<code>project</code> / عام)</h3>
+<table>
+<thead><tr><th style="width: 35%;">الدالة</th><th style="width: 25%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>project_save([path])</code></td><td><code>boolean, string</code></td><td>حفظ حالة المشروع في ملف <code>.minicut</code>.</td></tr>
+    <tr><td><code>project_load(path)</code></td><td><code>boolean, string</code></td><td>تحميل مشروع من المسار المحدد.</td></tr>
+    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>الحصول على اسم المشروع الحالي.</td></tr>
+    <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>تعيين اسم المشروع.</td></tr>
+</tbody>
+</table>
+
+<h3>3.2. مكتبة الشبكة والإنترنت (<code>net</code>)</h3>
+<table>
+<thead><tr><th style="width: 35%;">الدالة</th><th style="width: 25%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>net.get(url)</code></td><td><code>table</code></td><td>تنفيذ طلب HTTP GET عبر الشبكة.</td></tr>
+    <tr><td><code>net.post(url, body)</code></td><td><code>table</code></td><td>إرسال طلب HTTP POST.</td></tr>
+    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>تنزيل ملف عبر الإنترنت وتخزينه محلياً.</td></tr>
+</tbody>
+</table>
+
+<h3>3.3. المخطط الزمني والمسارات (<code>timeline</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">الدالة</th><th style="width: 22%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>موقع مؤشر التشغيل بالثواني.</td></tr>
+    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>تحريك مؤشر التشغيل إلى الثانية <code>t</code>.</td></tr>
+    <tr><td><code>timeline.place_clip(path, trk, t, dur)</code></td><td><code>string</code></td><td>إدراج مقطع فيديو أو صوت أو صورة في المسار.</td></tr>
+    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>إضافة إطار مفتاحي للحركة (الشفافية، الصوت، إلخ).</td></tr>
+    <tr><td><code>timeline.clear_keyframes(id, prop)</code></td><td><code>void</code></td><td>مسح كافة الإطارات المفتاحية للخاصية.</td></tr>
+    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>تحريك المسار لأعلى.</td></tr>
+    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>تحريك المسار لأسفل.</td></tr>
+    <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>إعادة تسمية المسار.</td></tr>
+</tbody>
+</table>
+
+<h3>3.4. خصائص وتحويلات المقاطع (<code>clip</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">الدالة</th><th style="width: 22%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>number, number</code></td><td>الحصول على إحداثيات (x, y) بالنسبة لمركز الشاشة.</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>تعيين موقع مركز المقطع.</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>الحصول على معامل المقياس (1.0 = 100%).</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>تعيين معامل المقياس.</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>الحصول على درجة الشفافية [0.0, 1.0].</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>تعيين درجة الشفافية.</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>الحصول على مضخم الصوت [0.0, 2.0].</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>تعيين مستوى الصوت.</td></tr>
+</tbody>
+</table>
+
+<h3>3.5. عناصر الواجهة الرسومية (<code>gui</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">الدالة</th><th style="width: 22%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>عرض نص في اللوحة.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>عرض نص ملون بتنسيق RGBA.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>إنشاء زر وتنفيذ دالة عند الضغط عليه.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>شريط تمرير للأرقام العشرية.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>شريط تمرير للأرقام الصحيحة.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>حقل إدخال نصي.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>فتح نافذة حوار اختيار الملفات.</td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+    minicut v1.2.0 • محرر فيديو خفيف ومتعدد المسارات لنظام لينكس • تم إنشاء الدليل تلقائياً
+</div>
+</body>
+</html>"""
+
 def generate_js_en_html():
-    return """<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>minicut JavaScript Scripting & Plugin API Reference Manual</title>
-<style>" + CSS_TEMPLATE + "</style>
+<style>{CSS_TEMPLATE}</style>
 </head>
 <body>
 <div class="cover">
@@ -597,7 +1019,8 @@ def generate_js_en_html():
 
 <h2>1. Introduction & JavaScript Architecture</h2>
 <p>
-    <strong>minicut</strong> embeds a complete <strong>JavaScript</strong> engine (Duktape 2.7.0) with native UTF-8 and Unicode string support. JavaScript plugins provide full parity with the minicut scripting API, making it easy to create internationalized tools in Japanese, Arabic, and other languages.
+    <strong>minicut</strong> embeds a complete <strong>JavaScript</strong> engine (Duktape 2.7.0) with native UTF-8 and Unicode string support.
+    JavaScript plugins provide complete parity with the minicut scripting API, making it easy to create internationalized tools across all supported languages.
 </p>
 
 <h3>Script Directory Locations</h3>
@@ -609,181 +1032,141 @@ def generate_js_en_html():
     <tr>
         <td><code>~/.config/minicut/autorun/</code></td>
         <td>Startup / Auto-register</td>
-        <td><code>.js</code> scripts execute on startup and add an icon button on the horizontal Tool Shelf Dock below the menu bar.</td>
+        <td><code>.js</code> files execute on startup and generate an icon button on the horizontal Tool Shelf Dock below the main menu bar.</td>
     </tr>
     <tr>
         <td><code>~/.config/minicut/scripts/</code></td>
         <td>Menu Click / On Demand</td>
-        <td><code>.js</code> scripts appear in the top-level <strong>Scripts</strong> menu on the main menu bar.</td>
+        <td><code>.js</code> files appear in the top-level <strong>Scripts</strong> menu on the main menu bar.</td>
     </tr>
     <tr>
         <td><code>~/.config/minicut/icons/</code></td>
         <td>Dock Icon Asset</td>
-        <td>32x32 PNG icon images matching script stems (e.g., <code>text_animator.png</code> for <code>text_animator.js</code>).</td>
+        <td>PNG icon images matching script stems (e.g., <code>quick_fade_js.png</code> for <code>quick_fade_js.js</code>).</td>
     </tr>
 </tbody>
 </table>
 
 <h2>2. JavaScript Plugin Architecture</h2>
-<pre>// ============================================================================
-// Example JavaScript Plugin: custom_animator.js
-// ============================================================================
+<pre>// ==============================================================================
+// Example JavaScript Plugin: sample_tool.js
+// ==============================================================================
 
 var targetTrack = 0;
-var textContent = "日本語テキスト字幕";
+var clipDuration = 4.0;
+var mediaPath = "test_sample.png";
 
-function applyAnimation() {
+function placeMedia() {{
     minicut.push_undo();
-    var clipId = timeline.place_text_clip(targetTrack, textContent, timeline.get_playhead(), 5.0);
-    if (clipId) {
-        clip.set_position(clipId, 0.0, 150.0);
-        clip.set_scale(clipId, 1.2);
-        timeline.add_keyframe(clipId, "opacity", 0.0, 0.0);
-        timeline.add_keyframe(clipId, "opacity", 0.5, 1.0);
-        minicut.set_status("Placed text clip: " + textContent);
-    }
-}
+    var playhead = timeline.get_playhead();
+    var cid = timeline.place_clip(mediaPath, targetTrack, playhead, clipDuration);
+    if (cid && cid.length > 0) {{
+        clip.set_scale(cid, 1.25);
+        timeline.add_keyframe(cid, "opacity", 0.0, 0.0);
+        timeline.add_keyframe(cid, "opacity", 1.0, 1.0);
+        minicut.set_status("Placed media clip: " + cid);
+    }}
+}}
 
-plugin.init_panel = function() {
-    gui.text("JavaScript Text Animator");
+function browseFile() {{
+    gui.file_dialog("Select Media", function(selected) {{
+        if (selected && selected.length > 0) {{
+            mediaPath = selected;
+            minicut.set_status("Selected: " + selected);
+        }}
+    }});
+}}
+
+plugin.init_panel = function() {{
+    gui.text_colored(0.24, 0.68, 0.91, 1.0, "Media Placer (JS)");
     gui.separator();
     targetTrack = gui.slider_int("Track Lane", targetTrack, 0, 4);
-    textContent = gui.input_text("Caption Text", textContent);
-    
-    if (gui.button("Place Animated Text", applyAnimation)) {
-        // inline logic
-    }
-};</pre>
+    clipDuration = gui.slider_float("Duration", clipDuration, 0.5, 30.0);
+    gui.button("Browse Media...", browseFile);
+    gui.button("Place on Timeline", placeMedia);
+}};</pre>
 
-<h2>3. Core JavaScript Modules</h2>
+<h2>3. JavaScript Modules API</h2>
 
 <h3>3.1. Project & File Automation (<code>project</code> / Global)</h3>
 <table>
-<thead>
-    <tr><th style="width: 35%;">Function</th><th style="width: 25%;">Returns</th><th style="width: 40%;">Description</th></tr>
-</thead>
+<thead><tr><th style="width: 35%;">Function</th><th style="width: 25%;">Returns</th><th style="width: 40%;">Description</th></tr></thead>
 <tbody>
-    <tr><td><code>project.save([path])</code><br><code>project_save([path])</code></td><td><code>boolean</code></td><td>Saves current project state to <code>.minicut</code> file.</td></tr>
-    <tr><td><code>project.load(path)</code><br><code>project_load(path)</code></td><td><code>boolean</code></td><td>Loads a project from <code>path</code>.</td></tr>
-    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>Returns the current project name.</td></tr>
+    <tr><td><code>project_save([path])</code><br><code>project.save([path])</code></td><td><code>boolean</code></td><td>Saves project to <code>.minicut</code> JSON file.</td></tr>
+    <tr><td><code>project_load(path)</code><br><code>project.load(path)</code></td><td><code>boolean</code></td><td>Loads project from path.</td></tr>
+    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>Returns current project name.</td></tr>
     <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>Sets current project name.</td></tr>
-    <tr><td><code>project.import_video(path)</code></td><td><code>string</code></td><td>Imports video into the project media asset pool.</td></tr>
-    <tr><td><code>project.import_audio(path)</code></td><td><code>string</code></td><td>Imports audio into the project media asset pool.</td></tr>
-    <tr><td><code>project.import_image(path)</code></td><td><code>string</code></td><td>Imports static image into media asset pool.</td></tr>
-    <tr><td><code>assets.create_text(text, [opts])</code></td><td><code>string</code></td><td>Creates text asset with font, outline, and alignment.</td></tr>
 </tbody>
 </table>
 
 <h3>3.2. Network & Internet Library (<code>net</code>)</h3>
 <table>
-<thead>
-    <tr><th style="width: 35%;">Function</th><th style="width: 25%;">Returns</th><th style="width: 40%;">Description</th></tr>
-</thead>
+<thead><tr><th style="width: 35%;">Function</th><th style="width: 25%;">Returns</th><th style="width: 40%;">Description</th></tr></thead>
 <tbody>
-    <tr><td><code>net.get(url)</code></td><td><code>object</code></td><td>HTTP GET request. Returns <code>{{status, body, ok, error}}</code>.</td></tr>
-    <tr><td><code>net.post(url, body)</code></td><td><code>object</code></td><td>HTTP POST request with string or JSON data.</td></tr>
+    <tr><td><code>net.get(url)</code></td><td><code>object</code></td><td>HTTP GET request returning <code>{{status, body, ok, headers}}</code>.</td></tr>
+    <tr><td><code>net.post(url, body)</code></td><td><code>object</code></td><td>HTTP POST request.</td></tr>
     <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>Downloads remote asset directly to file.</td></tr>
-    <tr><td><code>net.upload(url, path)</code></td><td><code>object</code></td><td>Uploads file binary stream to remote URL.</td></tr>
-    <tr><td><code>net.request(options)</code></td><td><code>object</code></td><td>Custom HTTP request with method, body, timeout.</td></tr>
 </tbody>
 </table>
 
 <h3>3.3. Timeline & Track Management (<code>timeline</code>)</h3>
 <table>
-<thead>
-    <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
-</thead>
+<thead><tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr></thead>
 <tbody>
-    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>Current playhead position in seconds.</td></tr>
-    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>Moves playhead to <code>t</code> seconds.</td></tr>
-    <tr><td><code>timeline.get_duration()</code></td><td><code>number</code></td><td>Total duration of timeline in seconds.</td></tr>
-    <tr><td><code>timeline.get_track_count()</code></td><td><code>number</code></td><td>Total count of tracks.</td></tr>
-    <tr><td><code>timeline.add_track(type, [name])</code></td><td><code>number</code></td><td>Adds a track ("video" or "audio") and returns index.</td></tr>
-    <tr><td><code>timeline.place_video(trk, id, start, dur)</code></td><td><code>string</code></td><td>Places video clip and returns clip ID.</td></tr>
-    <tr><td><code>timeline.place_audio(trk, id, start, dur)</code></td><td><code>string</code></td><td>Places audio clip and returns clip ID.</td></tr>
-    <tr><td><code>timeline.place_image(trk, id, start, dur)</code></td><td><code>string</code></td><td>Places image clip and returns clip ID.</td></tr>
-    <tr><td><code>timeline.place_text_clip(trk, text, start, dur)</code></td><td><code>string</code></td><td>Generates and places text clip on track.</td></tr>
-    <tr><td><code>timeline.delete_clip(clip_id)</code></td><td><code>boolean</code></td><td>Deletes clip and keyframes.</td></tr>
-    <tr><td><code>timeline.split_clip(clip_id, [t])</code></td><td><code>boolean</code></td><td>Splits clip at time <code>t</code> (or playhead).</td></tr>
-    <tr><td><code>timeline.select_clips(ids_array)</code></td><td><code>void</code></td><td>Selects multiple clips by ID array.</td></tr>
-    <tr><td><code>timeline.get_selected_clips()</code></td><td><code>Array&lt;string&gt;</code></td><td>Returns array of selected clip IDs.</td></tr>
-    <tr><td><code>timeline.clear_selection()</code></td><td><code>void</code></td><td>Clears clip selection.</td></tr>
-    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>Moves track up in stack order.</td></tr>
-    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>Moves track down in stack order.</td></tr>
+    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>Gets playhead time in seconds.</td></tr>
+    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>Sets playhead time in seconds.</td></tr>
+    <tr><td><code>timeline.place_clip(path, track, t, dur)</code></td><td><code>string</code></td><td>Places media clip on track and returns clip ID.</td></tr>
+    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>Adds keyframe for property at timestamp.</td></tr>
+    <tr><td><code>timeline.clear_keyframes(id, prop)</code></td><td><code>void</code></td><td>Clears all keyframes for property.</td></tr>
+    <tr><td><code>timeline.select_clips(ids_array)</code></td><td><code>void</code></td><td>Selects multiple clips simultaneously.</td></tr>
+    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>Moves track up in stack.</td></tr>
+    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>Moves track down in stack.</td></tr>
     <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>Renames track at index.</td></tr>
-    <tr><td><code>timeline.get_track_name(idx)</code></td><td><code>string</code></td><td>Gets track name at index.</td></tr>
-    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>Adds keyframe for property at time <code>t</code>.</td></tr>
-    <tr><td><code>timeline.remove_keyframe(id, prop, t)</code></td><td><code>void</code></td><td>Removes keyframe near timestamp <code>t</code>.</td></tr>
-    <tr><td><code>timeline.evaluate_keyframe(id, prop, t, [def])</code></td><td><code>number</code></td><td>Calculates interpolated value at time <code>t</code>.</td></tr>
 </tbody>
 </table>
 
-<h3>3.4. Clip Transformations (<code>clip</code>)</h3>
+<h3>3.4. Clip Attributes & Transforms (<code>clip</code>)</h3>
 <table>
-<thead>
-    <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
-</thead>
+<thead><tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr></thead>
 <tbody>
-    <tr><td><code>clip.get_position(clip_id)</code></td><td><code>{{x, y}}</code></td><td>Returns center offset object <code>{{x: 0, y: 0}}</code>.</td></tr>
-    <tr><td><code>clip.set_position(clip_id, x, y)</code></td><td><code>void</code></td><td>Sets center position offset in pixels.</td></tr>
-    <tr><td><code>clip.get_scale(clip_id)</code></td><td><code>number</code></td><td>Returns scale multiplier (1.0 = 100%).</td></tr>
-    <tr><td><code>clip.set_scale(clip_id, s)</code></td><td><code>void</code></td><td>Sets uniform scale multiplier.</td></tr>
-    <tr><td><code>clip.get_rotation(clip_id)</code></td><td><code>number</code></td><td>Returns rotation in degrees.</td></tr>
-    <tr><td><code>clip.set_rotation(clip_id, r)</code></td><td><code>void</code></td><td>Sets rotation in degrees.</td></tr>
-    <tr><td><code>clip.get_opacity(clip_id)</code></td><td><code>number</code></td><td>Returns opacity multiplier [0.0, 1.0].</td></tr>
-    <tr><td><code>clip.set_opacity(clip_id, o)</code></td><td><code>void</code></td><td>Sets opacity multiplier.</td></tr>
-    <tr><td><code>clip.get_volume(clip_id)</code></td><td><code>number</code></td><td>Returns volume multiplier [0.0, 2.0].</td></tr>
-    <tr><td><code>clip.set_volume(clip_id, v)</code></td><td><code>void</code></td><td>Sets volume multiplier.</td></tr>
-    <tr><td><code>clip.get_time(clip_id)</code></td><td><code>{{start_time, duration, offset}}</code></td><td>Returns timing object.</td></tr>
-    <tr><td><code>clip.set_time(clip_id, start, dur, [off])</code></td><td><code>void</code></td><td>Updates clip timing and media offset.</td></tr>
-    <tr><td><code>clip.get_info(clip_id)</code></td><td><code>object</code></td><td>Returns comprehensive metadata dictionary.</td></tr>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>array [x, y]</code></td><td>Gets position coordinates relative to canvas center.</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>Sets center position coordinates.</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>Gets uniform scale factor (1.0 = 100%).</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>Sets uniform scale factor.</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>Gets opacity [0.0, 1.0].</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>Sets opacity.</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>Gets audio volume gain multiplier [0.0, 2.0].</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>Sets audio volume gain multiplier.</td></tr>
 </tbody>
 </table>
 
-<h3>3.5. GUI UI Elements (<code>gui</code>)</h3>
+<h3>3.5. GUI Controls (<code>gui</code>)</h3>
 <table>
-<thead>
-    <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
-</thead>
+<thead><tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr></thead>
 <tbody>
-    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>Displays text string.</td></tr>
-    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>Displays RGBA colored text.</td></tr>
-    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>Renders push button and calls callback if clicked.</td></tr>
-    <tr><td><code>gui.slider_float(label, val, min, max, [cb])</code></td><td><code>number</code></td><td>Renders float slider.</td></tr>
-    <tr><td><code>gui.slider_int(label, val, min, max, [cb])</code></td><td><code>number</code></td><td>Renders integer slider.</td></tr>
-    <tr><td><code>gui.input_text(label, text, [cb])</code></td><td><code>string</code></td><td>Single-line text entry box.</td></tr>
-    <tr><td><code>gui.checkbox(label, state, [cb])</code></td><td><code>boolean</code></td><td>Toggle checkbox.</td></tr>
-    <tr><td><code>gui.same_line()</code></td><td><code>void</code></td><td>Places next widget horizontally on same line.</td></tr>
-    <tr><td><code>gui.separator()</code></td><td><code>void</code></td><td>Draws horizontal divider.</td></tr>
-    <tr><td><code>gui.file_dialog(options)</code></td><td><code>void</code></td><td>Opens file dialog matching user settings.</td></tr>
-</tbody>
-</table>
-
-<h3>3.6. Engine Utilities (<code>minicut</code> / <code>console</code>)</h3>
-<table>
-<thead>
-    <tr><th style="width: 35%;">Function</th><th style="width: 25%;">Returns</th><th style="width: 40%;">Description</th></tr>
-</thead>
-<tbody>
-    <tr><td><code>minicut.push_undo()</code></td><td><code>void</code></td><td>Pushes undo state.</td></tr>
-    <tr><td><code>minicut.set_status(msg, [dur])</code></td><td><code>void</code></td><td>Shows toast notification.</td></tr>
-    <tr><td><code>minicut.log(...)</code><br><code>console.log(...)</code></td><td><code>void</code></td><td>Outputs debug log to terminal.</td></tr>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>Renders text label.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>Renders colored text with RGBA.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>Renders button and triggers callback on click.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>Renders float slider.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>Renders integer slider.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>Renders text entry box.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Opens file dialog matching user settings.</td></tr>
 </tbody>
 </table>
 
 <div class="footer">
-    minicut v1.2.0 • Lightweight Multi-Track Video Editor • Documentation generated automatically
+    minicut v1.2.0 • Lightweight Linux Multi-track Video Editor • Generated Documentation
 </div>
 </body>
 </html>"""
 
 def generate_js_ja_html():
-    return """<!DOCTYPE html>
+    return f"""<!DOCTYPE html>
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>minicut JavaScript スクリプティング & プラグイン API リファレンスマニュアル</title>
-<style>" + CSS_TEMPLATE + "</style>
+<title>minicut JavaScript スクリプト & プラグイン API リファレンスマニュアル</title>
+<style>{CSS_TEMPLATE}</style>
 </head>
 <body>
 <div class="cover">
@@ -791,191 +1174,312 @@ def generate_js_ja_html():
     <div class="subtitle">組み込み JavaScript & プラグイン API リファレンスマニュアル</div>
     <div>
         <span class="badge">Duktape 2.7.0 エンジン</span>
-        <span class="badge">完全 UTF-8 / 日本語対応</span>
+        <span class="badge">完全な UTF-8 / 多言語対応</span>
         <span class="badge">ドッキング可能ツールパネル</span>
-        <span class="badge">ツールシェルフ・ドック</span>
+        <span class="badge">ツールシェルフドック</span>
         <span class="badge">ネットワークライブラリ (libcurl)</span>
     </div>
 </div>
 
 <h2>1. はじめに & JavaScript アーキテクチャ</h2>
 <p>
-    <strong>minicut</strong> は完全な <strong>JavaScript</strong> エンジン（Duktape 2.7.0）を内蔵しており、標準で完全な UTF-8 / Unicode 文字列操作をサポートしています。日本語の文字化けやバイト境界の問題がなく、国際化されたツールや自動化スクリプトをスムーズに開発できます。
+    <strong>minicut</strong> は完全な <strong>JavaScript</strong> エンジン（Duktape 2.7.0）を内蔵しており、標準でネイティブ UTF-8 および多言語 Unicode 文字列を扱えます。
+    Lua と完全に同等の API が提供されており、日本語などのスクリプトツールを容易に構築できます。
 </p>
 
-<h3>スクリプトディレクトリの配置</h3>
+<h3>スクリプト配置場所</h3>
 <table>
-<thead>
-    <tr><th style="width: 32%;">ディレクトリ</th><th style="width: 28%;">役割 / 実行タイミング</th><th style="width: 40%;">概要</th></tr>
-</thead>
+<thead><tr><th style="width: 32%;">配置場所</th><th style="width: 28%;">役割</th><th style="width: 40%;">説明</th></tr></thead>
 <tbody>
-    <tr>
-        <td><code>~/.config/minicut/autorun/</code></td>
-        <td>起動時自動登録</td>
-        <td>起動時に自動実行され、メニューバー下の「ドック (Dock)」にアイコンボタンを登録します（<code>.js</code> ファイル対応）。</td>
-    </tr>
-    <tr>
-        <td><code>~/.config/minicut/scripts/</code></td>
-        <td>メニュークリック時実行</td>
-        <td>メインメニューバーの <strong>Scripts (スクリプト)</strong> メニューに登録され、クリック時にパネルを開いて実行します。</td>
-    </tr>
-    <tr>
-        <td><code>~/.config/minicut/icons/</code></td>
-        <td>ドック用アイコン画像</td>
-        <td>スクリプト名と同名の 32x32 PNG アイコン画像（例：<code>text_animator.js</code> 用の <code>text_animator.png</code>）。</td>
-    </tr>
+    <tr><td><code>~/.config/minicut/autorun/</code></td><td>起動時自動実行</td><td><code>.js</code> ファイルは起動時に自動読み込みされ、「ドック」にアイコンが追加されます。</td></tr>
+    <tr><td><code>~/.config/minicut/scripts/</code></td><td>メニュー実行</td><td><code>.js</code> ファイルは「スクリプト」メニューに表示されます。</td></tr>
+    <tr><td><code>~/.config/minicut/icons/</code></td><td>ドックアイコン</td><td>スクリプト名と一致するPNGアイコン画像です。</td></tr>
 </tbody>
 </table>
 
-<h2>2. JavaScript プラグインの基本構造</h2>
-<pre>// ============================================================================
-// JavaScript プラグインの基本例: custom_animator.js
-// ============================================================================
+<h2>2. JavaScript プラグイン構成</h2>
+<pre>var targetTrack = 0;
+var clipDuration = 4.0;
+var mediaPath = "test_sample.png";
 
-var targetTrack = 0;
-var textContent = "日本語テキスト字幕";
-
-function applyAnimation() {
+function placeMedia() {{
     minicut.push_undo();
-    var clipId = timeline.place_text_clip(targetTrack, textContent, timeline.get_playhead(), 5.0);
-    if (clipId) {
-        clip.set_position(clipId, 0.0, 150.0);
-        clip.set_scale(clipId, 1.2);
-        timeline.add_keyframe(clipId, "opacity", 0.0, 0.0);
-        timeline.add_keyframe(clipId, "opacity", 0.5, 1.0);
-        minicut.set_status("字幕クリップを配置しました: " + textContent);
-    }
-}
+    var playhead = timeline.get_playhead();
+    var cid = timeline.place_clip(mediaPath, targetTrack, playhead, clipDuration);
+    if (cid && cid.length > 0) {{
+        clip.set_scale(cid, 1.25);
+        timeline.add_keyframe(cid, "opacity", 0.0, 0.0);
+        timeline.add_keyframe(cid, "opacity", 1.0, 1.0);
+        minicut.set_status("クリップを配置しました: " + cid);
+    }}
+}}
 
-plugin.init_panel = function() {
-    gui.text("JavaScript テキストアニメーションツール");
+function browseFile() {{
+    gui.file_dialog("ファイルを選択", function(selected) {{
+        if (selected && selected.length > 0) {{
+            mediaPath = selected;
+            minicut.set_status("選択: " + selected);
+        }}
+    }});
+}}
+
+plugin.init_panel = function() {{
+    gui.text_colored(0.24, 0.68, 0.91, 1.0, "メディア配置ツール (JS)");
     gui.separator();
-    targetTrack = gui.slider_int("対象トラック", targetTrack, 0, 4);
-    textContent = gui.input_text("字幕テキスト", textContent);
-    
-    if (gui.button("アニメーションテキストを配置", applyAnimation)) {
-        // インライン処理
-    }
-};</pre>
+    targetTrack = gui.slider_int("トラック番号", targetTrack, 0, 4);
+    clipDuration = gui.slider_float("長さ(秒)", clipDuration, 0.5, 30.0);
+    gui.button("ファイル参照...", browseFile);
+    gui.button("タイムラインに配置", placeMedia);
+}};</pre>
 
-<h2>3. コアモジュールリファレンス</h2>
-
-<h3>3.1. プロジェクト & アセット操作 (<code>project</code> / Global)</h3>
-<table>
-<thead>
-    <tr><th style="width: 35%;">関数</th><th style="width: 25%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
-<tbody>
-    <tr><td><code>project.save([path])</code><br><code>project_save([path])</code></td><td><code>boolean</code></td><td>プロジェクトを <code>.minicut</code> ファイルとして保存します。</td></tr>
-    <tr><td><code>project.load(path)</code><br><code>project_load(path)</code></td><td><code>boolean</code></td><td>指定パスからプロジェクトを読み込みます。</td></tr>
-    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>プロジェクト名を取得します。</td></tr>
-    <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>プロジェクト名を設定します。</td></tr>
-    <tr><td><code>project.import_video(path)</code></td><td><code>string</code></td><td>動画ファイルをアセットプールへインポートします。</td></tr>
-    <tr><td><code>project.import_audio(path)</code></td><td><code>string</code></td><td>音声ファイルをアセットプールへインポートします。</td></tr>
-    <tr><td><code>project.import_image(path)</code></td><td><code>string</code></td><td>静止画像ファイルをアセットプールへインポートします。</td></tr>
-    <tr><td><code>assets.create_text(text, [opts])</code></td><td><code>string</code></td><td>日本語や各言語のテキストアセットを生成します。</td></tr>
-</tbody>
-</table>
-
-<h3>3.2. ネットワーク通信ライブラリ (<code>net</code>)</h3>
-<table>
-<thead>
-    <tr><th style="width: 35%;">関数</th><th style="width: 25%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
-<tbody>
-    <tr><td><code>net.get(url)</code></td><td><code>object</code></td><td>HTTP GET リクエスト。<code>{{status, body, ok, error}}</code> を返します。</td></tr>
-    <tr><td><code>net.post(url, body)</code></td><td><code>object</code></td><td>HTTP POST リクエスト（文字列または JSON）。</td></tr>
-    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>ファイルを直接ローカルディスクへダウンロードします。</td></tr>
-    <tr><td><code>net.upload(url, path)</code></td><td><code>object</code></td><td>ローカルファイルをサーバへアップロードします。</td></tr>
-    <tr><td><code>net.request(options)</code></td><td><code>object</code></td><td>カスタム HTTP リクエスト。</td></tr>
-</tbody>
-</table>
-
-<h3>3.3. タイムライン & トラック管理 (<code>timeline</code>)</h3>
-<table>
-<thead>
-    <tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
-<tbody>
-    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>現在の再生ヘッド位置（秒）を取得します。</td></tr>
-    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>再生ヘッドを指定時刻へ移動します。</td></tr>
-    <tr><td><code>timeline.get_duration()</code></td><td><code>number</code></td><td>タイムラインの総再生時間を取得します。</td></tr>
-    <tr><td><code>timeline.get_track_count()</code></td><td><code>number</code></td><td>トラックの総数を取得します。</td></tr>
-    <tr><td><code>timeline.add_track(type, [name])</code></td><td><code>number</code></td><td>新規トラックを追加し、トラック番号を返します。</td></tr>
-    <tr><td><code>timeline.place_video(trk, id, start, dur)</code></td><td><code>string</code></td><td>動画クリップを配置し、クリップIDを返します。</td></tr>
-    <tr><td><code>timeline.place_audio(trk, id, start, dur)</code></td><td><code>string</code></td><td>音声クリップを配置し、クリップIDを返します。</td></tr>
-    <tr><td><code>timeline.place_image(trk, id, start, dur)</code></td><td><code>string</code></td><td>画像クリップを配置し、クリップIDを返します。</td></tr>
-    <tr><td><code>timeline.place_text_clip(trk, text, start, dur)</code></td><td><code>string</code></td><td>テキストクリップを生成して配置します。</td></tr>
-    <tr><td><code>timeline.delete_clip(clip_id)</code></td><td><code>boolean</code></td><td>クリップとキーフレームを削除します。</td></tr>
-    <tr><td><code>timeline.split_clip(clip_id, [t])</code></td><td><code>boolean</code></td><td>指定時刻でクリップを分割します。</td></tr>
-    <tr><td><code>timeline.select_clips(ids_array)</code></td><td><code>void</code></td><td>配列で指定した複数クリップを一括選択します。</td></tr>
-    <tr><td><code>timeline.get_selected_clips()</code></td><td><code>Array&lt;string&gt;</code></td><td>選択中のクリップID配列を取得します。</td></tr>
-    <tr><td><code>timeline.clear_selection()</code></td><td><code>void</code></td><td>クリップ選択を全解除します。</td></tr>
-    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>トラックを1つ上に移動します。</td></tr>
-    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>トラックを1つ下に移動します。</td></tr>
-    <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>トラック名を変更します。</td></tr>
-    <tr><td><code>timeline.get_track_name(idx)</code></td><td><code>string</code></td><td>トラック名を取得します。</td></tr>
-    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>キーフレームアニメーションを追加します。</td></tr>
-    <tr><td><code>timeline.remove_keyframe(id, prop, t)</code></td><td><code>void</code></td><td>指定時刻のキーフレームを削除します。</td></tr>
-    <tr><td><code>timeline.evaluate_keyframe(id, prop, t, [def])</code></td><td><code>number</code></td><td>補間計算されたパラメータ値を取得します。</td></tr>
-</tbody>
-</table>
-
-<h3>3.4. クリップ変形 & 属性操作 (<code>clip</code>)</h3>
-<table>
-<thead>
-    <tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
-<tbody>
-    <tr><td><code>clip.get_position(clip_id)</code></td><td><code>{{x, y}}</code></td><td>中心座標オブジェクト <code>{{x: 0, y: 0}}</code> を返します。</td></tr>
-    <tr><td><code>clip.set_position(clip_id, x, y)</code></td><td><code>void</code></td><td>クリップの中心座標を設定します。</td></tr>
-    <tr><td><code>clip.get_scale(clip_id)</code></td><td><code>number</code></td><td>スケール倍率（1.0 = 100%）を取得します。</td></tr>
-    <tr><td><code>clip.set_scale(clip_id, s)</code></td><td><code>void</code></td><td>スケール倍率を設定します。</td></tr>
-    <tr><td><code>clip.get_rotation(clip_id)</code></td><td><code>number</code></td><td>回転角度（度数法）を取得します。</td></tr>
-    <tr><td><code>clip.set_rotation(clip_id, r)</code></td><td><code>void</code></td><td>回転角度を設定します。</td></tr>
-    <tr><td><code>clip.get_opacity(clip_id)</code></td><td><code>number</code></td><td>不透明度 [0.0, 1.0] を取得します。</td></tr>
-    <tr><td><code>clip.set_opacity(clip_id, o)</code></td><td><code>void</code></td><td>不透明度を設定します。</td></tr>
-    <tr><td><code>clip.get_volume(clip_id)</code></td><td><code>number</code></td><td>音量倍率 [0.0, 2.0] を取得します。</td></tr>
-    <tr><td><code>clip.set_volume(clip_id, v)</code></td><td><code>void</code></td><td>音量倍率を設定します。</td></tr>
-    <tr><td><code>clip.get_time(clip_id)</code></td><td><code>{{start_time, duration, offset}}</code></td><td>タイミング情報を取得します。</td></tr>
-    <tr><td><code>clip.set_time(clip_id, start, dur, [off])</code></td><td><code>void</code></td><td>タイミングとオフセットを設定します。</td></tr>
-    <tr><td><code>clip.get_info(clip_id)</code></td><td><code>object</code></td><td>詳細プロパティオブジェクトを取得します。</td></tr>
-</tbody>
-</table>
-
-<h3>3.5. GUI UI要素 (<code>gui</code>)</h3>
-<table>
-<thead>
-    <tr><th style="width: 38%;">関数</th><th style="width: 22%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
-<tbody>
-    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>テキストを表示します。</td></tr>
-    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>RGBA色付きテキストを表示します。</td></tr>
-    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>ボタンを表示し、クリック時にコールバックを実行します。</td></tr>
-    <tr><td><code>gui.slider_float(label, val, min, max, [cb])</code></td><td><code>number</code></td><td>浮動小数点スライダーを表示します。</td></tr>
-    <tr><td><code>gui.slider_int(label, val, min, max, [cb])</code></td><td><code>number</code></td><td>整数スライダーを表示します。</td></tr>
-    <tr><td><code>gui.input_text(label, text, [cb])</code></td><td><code>string</code></td><td>1行テキスト入力欄を表示します。</td></tr>
-    <tr><td><code>gui.checkbox(label, state, [cb])</code></td><td><code>boolean</code></td><td>チェックボックスを表示します。</td></tr>
-    <tr><td><code>gui.same_line()</code></td><td><code>void</code></td><td>次のウィジェットを同一行に配置します。</td></tr>
-    <tr><td><code>gui.separator()</code></td><td><code>void</code></td><td>水平区切り線を描画します。</td></tr>
-    <tr><td><code>gui.file_dialog(options)</code></td><td><code>void</code></td><td>ファイルダイアログを開きます。</td></tr>
-</tbody>
-</table>
-
-<h3>3.6. エンジンユーティリティ (<code>minicut</code> / <code>console</code>)</h3>
-<table>
-<thead>
-    <tr><th style="width: 35%;">関数</th><th style="width: 25%;">戻り値</th><th style="width: 40%;">説明</th></tr>
-</thead>
-<tbody>
-    <tr><td><code>minicut.push_undo()</code></td><td><code>void</code></td><td>Undo用スナップショットを記録します。</td></tr>
-    <tr><td><code>minicut.set_status(msg, [dur])</code></td><td><code>void</code></td><td>トースト通知メッセージを表示します。</td></tr>
-    <tr><td><code>minicut.log(...)</code><br><code>console.log(...)</code></td><td><code>void</code></td><td>ターミナルにデバッグログを出力します。</td></tr>
-</tbody>
-</table>
+<h2>3. コアモジュール API</h2>
+<p>JavaScript から利用可能な主要モジュールは <code>project</code>, <code>timeline</code>, <code>clip</code>, <code>gui</code>, <code>net</code>, <code>minicut</code> です。</p>
 
 <div class="footer">
     minicut v1.2.0 • 軽量マルチトラック動画編集エディタ • ドキュメント自動生成
+</div>
+</body>
+</html>"""
+
+def generate_js_ko_html():
+    return f"""<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>minicut JavaScript 스크립팅 & 플러그인 API 참조 매뉴얼</title>
+<style>{CSS_TEMPLATE}</style>
+</head>
+<body>
+<div class="cover">
+    <h1>minicut 비디오 편집기</h1>
+    <div class="subtitle">임베디드 JavaScript & 플러그인 API 참조 매뉴얼</div>
+    <div>
+        <span class="badge">Duktape 2.7.0 엔진</span>
+        <span class="badge">완전한 UTF-8 / 다국어 지원</span>
+        <span class="badge">도킹 가능 도구 패널</span>
+        <span class="badge">도구 선반 도크</span>
+        <span class="badge">네트워크 라이브러리 (libcurl)</span>
+    </div>
+</div>
+
+<h2>1. 소개 및 JavaScript 아키텍처</h2>
+<p>
+    <strong>minicut</strong>은 고성능 <strong>JavaScript</strong> 임베디드 엔진(Duktape 2.7.0)을 내장하고 있어 완벽한 UTF-8 및 다국어 유니코드 문자열 처리를 지원합니다.
+    Lua API와 동일한 기능을 완벽하게 제공하여 다국어 플러그인 도구를 손쉽게 개발할 수 있습니다.
+</p>
+
+<h3>스크립트 디렉터리 경로</h3>
+<table>
+<thead><tr><th style="width: 32%;">경로</th><th style="width: 28%;">실행 시점</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>~/.config/minicut/autorun/</code></td><td>시작 시 자동 실행</td><td><code>.js</code> 파일은 시작 시 로드되어 도크에 아이콘이 생성됩니다.</td></tr>
+    <tr><td><code>~/.config/minicut/scripts/</code></td><td>메뉴 클릭 시</td><td><code>.js</code> 파일은 상단 '스크립트' 메뉴에 등록됩니다.</td></tr>
+    <tr><td><code>~/.config/minicut/icons/</code></td><td>아이콘 이미지</td><td>스크립트명과 일치하는 PNG 아이콘 파일입니다.</td></tr>
+</tbody>
+</table>
+
+<h2>2. JavaScript 플러그인 구조</h2>
+<pre>var targetTrack = 0;
+var clipDuration = 4.0;
+var mediaPath = "test_sample.png";
+
+function placeMedia() {{
+    minicut.push_undo();
+    var playhead = timeline.get_playhead();
+    var cid = timeline.place_clip(mediaPath, targetTrack, playhead, clipDuration);
+    if (cid && cid.length > 0) {{
+        clip.set_scale(cid, 1.25);
+        timeline.add_keyframe(cid, "opacity", 0.0, 0.0);
+        timeline.add_keyframe(cid, "opacity", 1.0, 1.0);
+        minicut.set_status("클립 배치 완료: " + cid);
+    }}
+}}
+
+function browseFile() {{
+    gui.file_dialog("파일 선택 (JS)", function(selected) {{
+        if (selected && selected.length > 0) {{
+            mediaPath = selected;
+            minicut.set_status("선택됨: " + selected);
+        }}
+    }});
+}}
+
+plugin.init_panel = function() {{
+    gui.text_colored(0.24, 0.68, 0.91, 1.0, "미디어 배치 도구 (JS)");
+    gui.separator();
+    targetTrack = gui.slider_int("트랙 번호", targetTrack, 0, 4);
+    clipDuration = gui.slider_float("길이(초)", clipDuration, 0.5, 30.0);
+    gui.button("파일 찾아보기...", browseFile);
+    gui.button("타임라인에 배치", placeMedia);
+}};</pre>
+
+<h2>3. 코어 모듈 API</h2>
+<p>JavaScript 환경에서는 <code>project</code>, <code>timeline</code>, <code>clip</code>, <code>gui</code>, <code>net</code>, <code>minicut</code> 모듈을 동일하게 사용할 수 있습니다.</p>
+
+<div class="footer">
+    minicut v1.2.0 • 가벼운 리눅스 멀티트랙 비디오 편집기 • 자동 생성 문서
+</div>
+</body>
+</html>"""
+
+def generate_js_uk_html():
+    return f"""<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>minicut Довідник з JavaScript та Plugin API</title>
+<style>{CSS_TEMPLATE}</style>
+</head>
+<body>
+<div class="cover">
+    <h1>Відеоредактор minicut</h1>
+    <div class="subtitle">Вбудований рушій JavaScript & Довідник з Plugin API</div>
+    <div>
+        <span class="badge">Рушій Duktape 2.7.0</span>
+        <span class="badge">Повна підтримка UTF-8</span>
+        <span class="badge">Панелі інструментів</span>
+        <span class="badge">Док інструментів</span>
+        <span class="badge">Мережева бібліотека (libcurl)</span>
+    </div>
+</div>
+
+<h2>1. Вступ та JavaScript архітектура</h2>
+<p>
+    <strong>minicut</strong> містить вбудований рушій <strong>JavaScript</strong> (Duktape 2.7.0) із повноцінною підтримкою кодування UTF-8.
+    Скрипти JavaScript мають повну функціональну еквівалентність із Lua API для розробки потужних локалізованих інструментів.
+</p>
+
+<h3>Каталоги розташування скриптів</h3>
+<table>
+<thead><tr><th style="width: 32%;">Розташування</th><th style="width: 28%;">Роль</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>~/.config/minicut/autorun/</code></td><td>Автозапуск при старті</td><td>Скрипти <code>.js</code> виконуються під час запуску та додають кнопку на панель Доку.</td></tr>
+    <tr><td><code>~/.config/minicut/scripts/</code></td><td>Запуск з меню</td><td>Скрипти <code>.js</code> відображаються в меню <strong>Скрипти</strong>.</td></tr>
+    <tr><td><code>~/.config/minicut/icons/</code></td><td>Іконки Доку</td><td>PNG файли іконок, що відповідають іменам скриптів.</td></tr>
+</tbody>
+</table>
+
+<h2>2. Архітектура JavaScript плагіна</h2>
+<pre>var targetTrack = 0;
+var clipDuration = 4.0;
+var mediaPath = "test_sample.png";
+
+function placeMedia() {{
+    minicut.push_undo();
+    var playhead = timeline.get_playhead();
+    var cid = timeline.place_clip(mediaPath, targetTrack, playhead, clipDuration);
+    if (cid && cid.length > 0) {{
+        clip.set_scale(cid, 1.25);
+        timeline.add_keyframe(cid, "opacity", 0.0, 0.0);
+        timeline.add_keyframe(cid, "opacity", 1.0, 1.0);
+        minicut.set_status("Кліп розміщено: " + cid);
+    }}
+}}
+
+function browseFile() {{
+    gui.file_dialog("Оберіть файл (JS)", function(selected) {{
+        if (selected && selected.length > 0) {{
+            mediaPath = selected;
+            minicut.set_status("Обрано: " + selected);
+        }}
+    }});
+}}
+
+plugin.init_panel = function() {{
+    gui.text_colored(0.24, 0.68, 0.91, 1.0, "Інструмент розміщення медіа (JS)");
+    gui.separator();
+    targetTrack = gui.slider_int("Номер доріжки", targetTrack, 0, 4);
+    clipDuration = gui.slider_float("Тривалість (с)", clipDuration, 0.5, 30.0);
+    gui.button("Огляд файлів...", browseFile);
+    gui.button("Розмістити на таймлайні", placeMedia);
+}};</pre>
+
+<h2>3. Модулі API</h2>
+<p>У JavaScript доступні всі основні модулі: <code>project</code>, <code>timeline</code>, <code>clip</code>, <code>gui</code>, <code>net</code>, <code>minicut</code>.</p>
+
+<div class="footer">
+    minicut v1.2.0 • Легкий мультитрековий відеоредактор для Linux • Автоматична документація
+</div>
+</body>
+</html>"""
+
+def generate_js_ar_html():
+    return f"""<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>minicut دليل مرجعي للبرمجة بلغة JavaScript وواجهة Plugin API</title>
+<style>{CSS_TEMPLATE}</style>
+</head>
+<body class="rtl">
+<div class="cover">
+    <h1>محرر الفيديو minicut</h1>
+    <div class="subtitle">دليل مرجعي لبيئة البرمجة JavaScript والإضافات البرمجية</div>
+    <div>
+        <span class="badge">محرك Duktape 2.7.0</span>
+        <span class="badge">دعم كامل لترميز UTF-8</span>
+        <span class="badge">لوحات أدوات قابلة للتثبيت</span>
+        <span class="badge">منصة الأدوات (Dock)</span>
+        <span class="badge">مكتبة الشبكة (libcurl)</span>
+    </div>
+</div>
+
+<h2>1. المقدمة والبنية البرمجية لـ JavaScript</h2>
+<p>
+    يحتوي برنامج <strong>minicut</strong> على محرك برمجيات مدمج بلغة <strong>JavaScript</strong> (Duktape 2.7.0) مع دعم كامل وأصلي لترميز النصوص متعددة اللغات (UTF-8).
+    توفر واجهة JavaScript توافقاً تاماً مع كافة دوال وميزات محرك minicut.
+</p>
+
+<h3>مسارات مجلدات السكربتات</h3>
+<table>
+<thead><tr><th style="width: 32%;">المسار</th><th style="width: 28%;">الدور</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>~/.config/minicut/autorun/</code></td><td>التشغيل التلقائي</td><td>يتم تشغيل ملفات <code>.js</code> عند بدء التطبيق وتظهر أيقوناتها في منصة الأدوات (Dock).</td></tr>
+    <tr><td><code>~/.config/minicut/scripts/</code></td><td>التشغيل عند الطلب</td><td>تظهر ملفات <code>.js</code> في قائمة <strong>البرمجيات (Scripts)</strong>.</td></tr>
+    <tr><td><code>~/.config/minicut/icons/</code></td><td>أيقونات الأدوات</td><td>ملفات أيقونات PNG مطابقة لاسم السكربت.</td></tr>
+</tbody>
+</table>
+
+<h2>2. بنية سكربت JavaScript</h2>
+<pre>var targetTrack = 0;
+var clipDuration = 4.0;
+var mediaPath = "test_sample.png";
+
+function placeMedia() {{
+    minicut.push_undo();
+    var playhead = timeline.get_playhead();
+    var cid = timeline.place_clip(mediaPath, targetTrack, playhead, clipDuration);
+    if (cid && cid.length > 0) {{
+        clip.set_scale(cid, 1.25);
+        timeline.add_keyframe(cid, "opacity", 0.0, 0.0);
+        timeline.add_keyframe(cid, "opacity", 1.0, 1.0);
+        minicut.set_status("تم إدراج المقطع: " + cid);
+    }}
+}}
+
+function browseFile() {{
+    gui.file_dialog("اختر ملفاً (JS)", function(selected) {{
+        if (selected && selected.length > 0) {{
+            mediaPath = selected;
+            minicut.set_status("تم اختيار: " + selected);
+        }}
+    }});
+}}
+
+plugin.init_panel = function() {{
+    gui.text_colored(0.24, 0.68, 0.91, 1.0, "أداة إدراج الوسائط (JS)");
+    gui.separator();
+    targetTrack = gui.slider_int("رقم المسار", targetTrack, 0, 4);
+    clipDuration = gui.slider_float("المدة (ث)", clipDuration, 0.5, 30.0);
+    gui.button("تصفح الملفات...", browseFile);
+    gui.button("إدراج في المخطط الزمني", placeMedia);
+}};</pre>
+
+<h2>3. الوحدات البرمجية المتوفرة</h2>
+<p>توفر بيئة JavaScript كافة الوحدات البرمجية: <code>project</code> و<code>timeline</code> و<code>clip</code> و<code>gui</code> و<code>net</code> و<code>minicut</code>.</p>
+
+<div class="footer">
+    minicut v1.2.0 • محرر فيديو خفيف ومتعدد المسارات لنظام لينكس • تم إنشاء الدليل تلقائياً
 </div>
 </body>
 </html>"""
@@ -1003,8 +1507,15 @@ def main():
     targets = [
         ("minicut_lua_api.html", "minicut_lua_api.pdf", generate_lua_en_html()),
         ("minicut_lua_api_ja.html", "minicut_lua_api_ja.pdf", generate_lua_ja_html()),
+        ("minicut_lua_api_ko.html", "minicut_lua_api_ko.pdf", generate_lua_ko_html()),
+        ("minicut_lua_api_uk.html", "minicut_lua_api_uk.pdf", generate_lua_uk_html()),
+        ("minicut_lua_api_ar.html", "minicut_lua_api_ar.pdf", generate_lua_ar_html()),
+
         ("minicut_js_api.html", "minicut_js_api.pdf", generate_js_en_html()),
         ("minicut_js_api_ja.html", "minicut_js_api_ja.pdf", generate_js_ja_html()),
+        ("minicut_js_api_ko.html", "minicut_js_api_ko.pdf", generate_js_ko_html()),
+        ("minicut_js_api_uk.html", "minicut_js_api_uk.pdf", generate_js_uk_html()),
+        ("minicut_js_api_ar.html", "minicut_js_api_ar.pdf", generate_js_ar_html()),
     ]
 
     for html_name, pdf_name, content in targets:
@@ -1021,7 +1532,6 @@ def main():
             print(f"Failed to generate PDF for {pdf_name}")
             sys.exit(1)
 
-    # Copy to user config directory and git project repository
     dest_dirs = [
         os.path.expanduser("~/.config/minicut/docs"),
         "/home/kaiju/Projects/minicut/docs"
@@ -1035,7 +1545,7 @@ def main():
             shutil.copy2(src_pdf, dst_pdf)
             print(f"Synced {pdf_name} -> {dst_pdf}")
 
-    print("\nAll 4 API reference manuals successfully generated and deployed!")
+    print(f"\nAll {len(targets)} API reference manuals successfully generated and deployed!")
 
 if __name__ == "__main__":
     main()

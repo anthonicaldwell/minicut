@@ -40,6 +40,8 @@ bool App::init(int argc, char* argv[]) {
     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
+    SDL_SetHint(SDL_HINT_IME_SHOW_UI, "1");
+
     m_window = SDL_CreateWindow(
         "Minicut - New Project",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
@@ -113,9 +115,10 @@ bool App::init(int argc, char* argv[]) {
         "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"
     };
     std::vector<std::string> cjk_candidates = {
-        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"
+        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"
     };
     std::vector<std::string> arabic_candidates = {
         "/usr/share/fonts/truetype/noto/NotoSansArabicUI-Regular.ttf",
@@ -707,6 +710,14 @@ void App::process_events() {
 
         if (event.type == SDL_QUIT) {
             m_running = false;
+        } else if (event.type == SDL_TEXTEDITING) {
+            m_ime_composition = event.edit.text;
+            m_ime_cursor = event.edit.start;
+            m_ime_selection_len = event.edit.length;
+            m_text_preview_dirty = true;
+        } else if (event.type == SDL_TEXTINPUT) {
+            m_ime_composition.clear();
+            m_text_preview_dirty = true;
         } else if (event.type == SDL_WINDOWEVENT) {
             if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
                 m_window_width = event.window.data1;
@@ -1005,27 +1016,30 @@ void App::render_menu_bar() {
             ImGui::MenuItem("minicut v" MINICUT_VERSION, nullptr, false, false);
             ImGui::Separator();
 
-            bool is_ja = (LocaleManager::instance().current_locale() == "ja" || LocaleManager::instance().current_locale() == "jp");
+            std::string cur_loc = LocaleManager::instance().current_locale();
+            if (cur_loc == "jp") cur_loc = "ja";
 
-            if (ImGui::MenuItem(_TR("menu_help_lua_api"))) {
+            auto open_api_doc = [&](const std::string& api_prefix) {
                 const char* home = std::getenv("HOME");
                 std::vector<std::string> candidates;
-                if (is_ja) {
-                    candidates.push_back("docs/minicut_lua_api_ja.pdf");
-                    candidates.push_back("../docs/minicut_lua_api_ja.pdf");
+                if (!cur_loc.empty() && cur_loc != "en") {
+                    std::string loc_pdf = api_prefix + "_" + cur_loc + ".pdf";
+                    candidates.push_back("docs/" + loc_pdf);
+                    candidates.push_back("../docs/" + loc_pdf);
                     if (home) {
-                        candidates.push_back(std::string(home) + "/.config/minicut/docs/minicut_lua_api_ja.pdf");
-                        candidates.push_back(std::string(home) + "/.local/share/minicut/docs/minicut_lua_api_ja.pdf");
+                        candidates.push_back(std::string(home) + "/.config/minicut/docs/" + loc_pdf);
+                        candidates.push_back(std::string(home) + "/.local/share/minicut/docs/" + loc_pdf);
                     }
-                    candidates.push_back("/home/kaiju/.local/bin/docs/minicut_lua_api_ja.pdf");
+                    candidates.push_back("/home/kaiju/.local/bin/docs/" + loc_pdf);
                 }
-                candidates.push_back("docs/minicut_lua_api.pdf");
-                candidates.push_back("../docs/minicut_lua_api.pdf");
+                std::string base_pdf = api_prefix + ".pdf";
+                candidates.push_back("docs/" + base_pdf);
+                candidates.push_back("../docs/" + base_pdf);
                 if (home) {
-                    candidates.push_back(std::string(home) + "/.config/minicut/docs/minicut_lua_api.pdf");
-                    candidates.push_back(std::string(home) + "/.local/share/minicut/docs/minicut_lua_api.pdf");
+                    candidates.push_back(std::string(home) + "/.config/minicut/docs/" + base_pdf);
+                    candidates.push_back(std::string(home) + "/.local/share/minicut/docs/" + base_pdf);
                 }
-                candidates.push_back("/home/kaiju/.local/bin/docs/minicut_lua_api.pdf");
+                candidates.push_back("/home/kaiju/.local/bin/docs/" + base_pdf);
 
                 for (const auto& p : candidates) {
                     if (!p.empty() && fs::exists(p)) {
@@ -1034,35 +1048,14 @@ void App::render_menu_bar() {
                         break;
                     }
                 }
+            };
+
+            if (ImGui::MenuItem(_TR("menu_help_lua_api"))) {
+                open_api_doc("minicut_lua_api");
             }
 
             if (ImGui::MenuItem(_TR("menu_help_js_api"))) {
-                const char* home = std::getenv("HOME");
-                std::vector<std::string> candidates;
-                if (is_ja) {
-                    candidates.push_back("docs/minicut_js_api_ja.pdf");
-                    candidates.push_back("../docs/minicut_js_api_ja.pdf");
-                    if (home) {
-                        candidates.push_back(std::string(home) + "/.config/minicut/docs/minicut_js_api_ja.pdf");
-                        candidates.push_back(std::string(home) + "/.local/share/minicut/docs/minicut_js_api_ja.pdf");
-                    }
-                    candidates.push_back("/home/kaiju/.local/bin/docs/minicut_js_api_ja.pdf");
-                }
-                candidates.push_back("docs/minicut_js_api.pdf");
-                candidates.push_back("../docs/minicut_js_api.pdf");
-                if (home) {
-                    candidates.push_back(std::string(home) + "/.config/minicut/docs/minicut_js_api.pdf");
-                    candidates.push_back(std::string(home) + "/.local/share/minicut/docs/minicut_js_api.pdf");
-                }
-                candidates.push_back("/home/kaiju/.local/bin/docs/minicut_js_api.pdf");
-
-                for (const auto& p : candidates) {
-                    if (!p.empty() && fs::exists(p)) {
-                        std::string cmd = "xdg-open \"" + p + "\" >/dev/null 2>&1 &";
-                        std::system(cmd.c_str());
-                        break;
-                    }
-                }
+                open_api_doc("minicut_js_api");
             }
 
             ImGui::Separator();
@@ -1629,11 +1622,26 @@ void App::cleanup() {
 void App::open_text_dialog() {
     m_show_text_dialog = true;
     m_text_preview_dirty = true;
+    std::string loc = LocaleManager::instance().current_locale();
     if (LocaleManager::instance().is_rtl()) {
         m_text_config.justification = 2; // Right align for Arabic
         m_text_config.font_path = TextGenerator::get_arabic_font_path();
         if (m_text_input_buf[0] == '\0' || strcmp(m_text_input_buf, "Title Text") == 0) {
             strncpy(m_text_input_buf, "عنوان نصي", sizeof(m_text_input_buf) - 1);
+        }
+    } else if (loc == "ja" || loc == "jp") {
+        m_text_config.font_path = TextGenerator::get_cjk_font_path();
+        if (m_text_input_buf[0] == '\0' || strcmp(m_text_input_buf, "Title Text") == 0) {
+            strncpy(m_text_input_buf, "タイトルテキスト", sizeof(m_text_input_buf) - 1);
+        }
+    } else if (loc == "ko") {
+        m_text_config.font_path = TextGenerator::get_cjk_font_path();
+        if (m_text_input_buf[0] == '\0' || strcmp(m_text_input_buf, "Title Text") == 0) {
+            strncpy(m_text_input_buf, "제목 텍스트", sizeof(m_text_input_buf) - 1);
+        }
+    } else if (loc == "uk") {
+        if (m_text_input_buf[0] == '\0' || strcmp(m_text_input_buf, "Title Text") == 0) {
+            strncpy(m_text_input_buf, "Заголовок тексту", sizeof(m_text_input_buf) - 1);
         }
     }
 }
@@ -1641,7 +1649,11 @@ void App::open_text_dialog() {
 void App::update_text_preview() {
     if (!m_text_preview_dirty) return;
     m_text_preview_dirty = false;
-    m_text_config.text = m_text_input_buf;
+    std::string current_text = m_text_input_buf;
+    if (!m_ime_composition.empty()) {
+        current_text += m_ime_composition;
+    }
+    m_text_config.text = current_text;
 
     std::vector<uint8_t> rgba;
     int tw = 0, th = 0;
@@ -1752,9 +1764,52 @@ void App::render_text_dialog() {
             ImGui::SameLine();
             ImGui::TextDisabled("(RTL Arabic mode active)");
         }
+        if (!m_ime_composition.empty()) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.24f, 0.68f, 0.91f, 1.0f), "[%s]", m_ime_composition.c_str());
+        }
+
         if (ImGui::InputTextMultiline("##text_input_content", m_text_input_buf, sizeof(m_text_input_buf), ImVec2(-1, 80))) {
             m_text_preview_dirty = true;
         }
+
+        ImVec2 input_min = ImGui::GetItemRectMin();
+        ImVec2 input_max = ImGui::GetItemRectMax();
+
+        // Update SDL IME input rectangle to position OS candidate popup directly below text entry
+        if (ImGui::IsItemActive()) {
+            SDL_Rect r;
+            r.x = static_cast<int>(input_min.x);
+            r.y = static_cast<int>(input_max.y);
+            r.w = static_cast<int>(input_max.x - input_min.x);
+            r.h = 24;
+            SDL_SetTextInputRect(&r);
+        }
+
+        // Draw active composition text right inside the text entry box if composing
+        if (!m_ime_composition.empty()) {
+            ImDrawList* draw_list = ImGui::GetWindowDrawList();
+            ImGuiStyle& style = ImGui::GetStyle();
+
+            // Calculate position right after current text in the input box
+            ImVec2 text_sz = ImGui::CalcTextSize(m_text_input_buf);
+            float start_x = input_min.x + style.FramePadding.x + text_sz.x;
+            float start_y = input_min.y + style.FramePadding.y;
+
+            // Ensure within box bounds
+            if (start_x < input_max.x - 10.0f) {
+                ImVec2 comp_sz = ImGui::CalcTextSize(m_ime_composition.c_str());
+                ImVec2 draw_pos = ImVec2(start_x + 2.0f, start_y);
+                draw_list->AddText(draw_pos, IM_COL32(80, 190, 255, 255), m_ime_composition.c_str());
+
+                // Draw standard IME composition underline
+                float line_y = draw_pos.y + comp_sz.y + 1.0f;
+                draw_list->AddLine(ImVec2(draw_pos.x, line_y),
+                                   ImVec2(draw_pos.x + comp_sz.x, line_y),
+                                   IM_COL32(60, 160, 240, 255), 2.0f);
+            }
+        }
+
         if (m_last_rendered_text != m_text_input_buf) {
             m_last_rendered_text = m_text_input_buf;
             m_text_preview_dirty = true;
@@ -1789,6 +1844,10 @@ void App::render_text_dialog() {
 
         // Buttons
         if (ImGui::Button(_TR("text_add_to_assets"), ImVec2(160, 32))) {
+            if (!m_ime_composition.empty()) {
+                strncat(m_text_input_buf, m_ime_composition.c_str(), sizeof(m_text_input_buf) - strlen(m_text_input_buf) - 1);
+                m_ime_composition.clear();
+            }
             m_text_config.text = m_text_input_buf;
             std::string id = TextGenerator::create_text_asset(m_project, m_text_config);
             if (!id.empty()) {
@@ -1800,6 +1859,10 @@ void App::render_text_dialog() {
         }
         ImGui::SameLine();
         if (ImGui::Button(_TR("text_add_to_timeline"), ImVec2(180, 32))) {
+            if (!m_ime_composition.empty()) {
+                strncat(m_text_input_buf, m_ime_composition.c_str(), sizeof(m_text_input_buf) - strlen(m_text_input_buf) - 1);
+                m_ime_composition.clear();
+            }
             m_text_config.text = m_text_input_buf;
             std::string id = TextGenerator::create_text_asset(m_project, m_text_config);
             if (!id.empty()) {

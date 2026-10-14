@@ -162,4 +162,7 @@ private:
     int m_text_preview_w = 0;
     int m_text_preview_h = 0;
     bool m_text_preview_dirty = true;
+    std::string m_ime_composition;
+    int m_ime_cursor = 0;
+    int m_ime_selection_len = 0;
 };

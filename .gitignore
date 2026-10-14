@@ -1,0 +1,7 @@
+build/
+minicut
+agy
+*.tar.gz
+*.zip
+*.log
+backup_minicut/

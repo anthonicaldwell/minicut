@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+<meta charset="UTF-8">
+<title>minicut Довідник з LuaJIT та Plugin API</title>
+<style>
+@page {
+    size: letter portrait;
+    margin: 0.8in;
+    @bottom-right {
+        content: counter(page);
+    }
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans CJK JP", "Noto Sans CJK KR", "NanumGothic", "Noto Sans Arabic", "Noto Naskh Arabic", "Droid Sans Fallback", "DejaVu Sans", Arial, sans-serif;
+    color: #232629;
+    background: #ffffff;
+    line-height: 1.55;
+    font-size: 10pt;
+    margin: 0;
+    padding: 0;
+}
+.cover {
+    text-align: center;
+    padding: 40px 0 25px 0;
+    border-bottom: 3px solid #1a73e8;
+    margin-bottom: 25px;
+}
+.cover h1 {
+    font-size: 24pt;
+    color: #1a73e8;
+    margin: 0 0 10px 0;
+    font-weight: 700;
+}
+.cover .subtitle {
+    font-size: 13pt;
+    color: #5f6368;
+    margin: 0 0 18px 0;
+}
+.cover .badge {
+    display: inline-block;
+    background: #e8f0fe;
+    color: #1a73e8;
+    font-weight: bold;
+    padding: 5px 12px;
+    border-radius: 14px;
+    font-size: 9pt;
+    margin: 4px;
+}
+h2 {
+    color: #0d47a1;
+    font-size: 13.5pt;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 5px;
+    margin-top: 28px;
+    page-break-after: avoid;
+}
+h3 {
+    color: #1565c0;
+    font-size: 11pt;
+    margin-top: 18px;
+    margin-bottom: 6px;
+    page-break-after: avoid;
+}
+p {
+    margin: 8px 0;
+}
+ul, ol {
+    margin: 6px 0 12px 24px;
+    padding: 0;
+}
+li {
+    margin-bottom: 4px;
+}
+code {
+    background-color: #f1f3f4;
+    color: #c5221f;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-family: "DejaVu Sans Mono", Consolas, "Liberation Mono", Courier, monospace;
+    font-size: 9pt;
+}
+pre {
+    background-color: #f8f9fa;
+    border: 1px solid #dadce0;
+    border-left: 4px solid #1a73e8;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-family: "DejaVu Sans Mono", Consolas, "Liberation Mono", Courier, monospace;
+    font-size: 8.5pt;
+    line-height: 1.45;
+    overflow-x: auto;
+    page-break-inside: avoid;
+    margin: 10px 0;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 8.8pt;
+    page-break-inside: avoid;
+}
+th {
+    background-color: #1a73e8;
+    color: #ffffff;
+    font-weight: 600;
+    text-align: left;
+    padding: 7px 9px;
+    border: 1px solid #1a73e8;
+}
+td {
+    padding: 6px 9px;
+    border: 1px solid #dadce0;
+    vertical-align: top;
+}
+tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+.rtl {
+    direction: rtl;
+    text-align: right;
+}
+.rtl th {
+    text-align: right;
+}
+.rtl pre, .rtl code {
+    direction: ltr;
+    text-align: left;
+    display: inline-block;
+}
+.rtl pre {
+    display: block;
+}
+.footer {
+    text-align: center;
+    color: #70757a;
+    font-size: 8.5pt;
+    margin-top: 35px;
+    border-top: 1px solid #e0e0e0;
+    padding-top: 12px;
+}
+</style>
+</head>
+<body>
+<div class="cover">
+    <h1>Відеоредактор minicut</h1>
+    <div class="subtitle">Вбудований рушій LuaJIT & Довідник з Plugin API</div>
+    <div>
+        <span class="badge">Середовище LuaJIT 5.1</span>
+        <span class="badge">Панелі інструментів</span>
+        <span class="badge">Док інструментів</span>
+        <span class="badge">Мережева бібліотека (libcurl)</span>
+        <span class="badge">Генерація тексту FreeType</span>
+    </div>
+</div>
+
+<h2>1. Вступ та архітектура</h2>
+<p>
+    <strong>minicut</strong> має повністю вбудований, високопродуктивний рушій <strong>LuaJIT</strong>.
+    Він забезпечує автоматизацію редагування таймлайну, розміщення медіа, анімацію ключових кадрів та створення власних панелей інструментів.
+</p>
+
+<h3>Каталоги розташування скриптів</h3>
+<table>
+<thead>
+    <tr><th style="width: 32%;">Розташування</th><th style="width: 28%;">Запуск / Роль</th><th style="width: 40%;">Опис</th></tr>
+</thead>
+<tbody>
+    <tr>
+        <td><code>~/.config/minicut/autorun/</code></td>
+        <td>Автозапуск при старті</td>
+        <td>Скрипти завантажуються під час запуску та додають кнопку з іконкою на панель Доку під головним меню.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/scripts/</code></td>
+        <td>Вибір у меню</td>
+        <td>Скрипти з'являються в меню <strong>Скрипти</strong> головного меню і запускаються за запитом користувача.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/icons/</code></td>
+        <td>Файли іконок Доку</td>
+        <td>PNG іконки, що відповідають іменам скриптів (наприклад: <code>keyframe_animator.png</code>).</td>
+    </tr>
+</tbody>
+</table>
+
+<h2>2. Архітектура плагіна</h2>
+<pre>-- ============================================================================
+-- Приклад скрипта: my_tool.lua
+-- ============================================================================
+
+local target_track = 0
+local clip_scale = 1.0
+
+function execute_action()
+    minicut.push_undo()
+    local clip_id = timeline.place_clip("test_sample.png", target_track, timeline.get_playhead(), 4.0)
+    if clip_id and clip_id ~= "" then
+        clip.set_scale(clip_id, clip_scale)
+        timeline.add_keyframe(clip_id, "opacity", 0.0, 0.0)
+        timeline.add_keyframe(clip_id, "opacity", 1.0, 1.0)
+        minicut.set_status("Кліп успішно розміщено: " .. clip_id)
+    end
+end
+
+function choose_file()
+    gui.file_dialog("Оберіть файл", function(selected)
+        if selected and selected ~= "" then
+            minicut.set_status("Обрано: " .. selected)
+        end
+    end)
+end
+
+function plugin:init_panel()
+    gui.text("Інструмент розміщення медіа")
+    gui.separator()
+    target_track = gui.slider_int("Номер доріжки", target_track, 0, 4)
+    clip_scale = gui.slider_float("Масштаб", clip_scale, 0.1, 4.0)
+    gui.button("Огляд файлів...", choose_file)
+    gui.button("Розмістити на курсорі", execute_action)
+end</pre>
+
+<h2>3. Опис основних модулів</h2>
+
+<h3>3.1. Керування проєктом (<code>project</code> / Глобальні)</h3>
+<table>
+<thead><tr><th style="width: 35%;">Функція</th><th style="width: 25%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>project_save([path])</code></td><td><code>boolean, string</code></td><td>Зберігає стан проєкту у файл <code>.minicut</code>.</td></tr>
+    <tr><td><code>project_load(path)</code></td><td><code>boolean, string</code></td><td>Завантажує проєкт за вказаним шляхом.</td></tr>
+    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>Повертає поточну назву проєкту.</td></tr>
+    <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>Встановлює назву проєкту.</td></tr>
+</tbody>
+</table>
+
+<h3>3.2. Мережева бібліотека (<code>net</code>)</h3>
+<table>
+<thead><tr><th style="width: 35%;">Функція</th><th style="width: 25%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>net.get(url)</code></td><td><code>table</code></td><td>Виконує запит HTTP GET.</td></tr>
+    <tr><td><code>net.post(url, body)</code></td><td><code>table</code></td><td>Надсилає запит HTTP POST.</td></tr>
+    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>Завантажує віддалений файл безпосередньо на диск.</td></tr>
+</tbody>
+</table>
+
+<h3>3.3. Часова шкала та доріжки (<code>timeline</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">Функція</th><th style="width: 22%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>Повертає поточну позицію курсору в секундах.</td></tr>
+    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>Переміщує курсор у позицію <code>t</code> секунд.</td></tr>
+    <tr><td><code>timeline.place_clip(path, trk, t, dur)</code></td><td><code>string</code></td><td>Розміщує відео, аудіо або зображення на доріжці.</td></tr>
+    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>Додає ключовий кадр анімації (opacity, volume тощо).</td></tr>
+    <tr><td><code>timeline.clear_keyframes(id, prop)</code></td><td><code>void</code></td><td>Видаляє всі ключові кадри для властивості.</td></tr>
+    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>Переміщує доріжку вгору в стеку.</td></tr>
+    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>Переміщує доріжку вниз в стеку.</td></tr>
+    <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>Перейменовує доріжку за індексом.</td></tr>
+</tbody>
+</table>
+
+<h3>3.4. Трансформація кліпів (<code>clip</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">Функція</th><th style="width: 22%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>number, number</code></td><td>Отримує координати (x, y) відносно центру.</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>Встановлює координати центру кліпу.</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>Отримує коефіцієнт масштабування (1.0 = 100%).</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>Встановлює коефіцієнт масштабування.</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>Отримує рівень непрозорості [0.0, 1.0].</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>Встановлює непрозорість кліпу.</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>Отримує підсилення гучності [0.0, 2.0].</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>Встановлює підсилення гучності.</td></tr>
+</tbody>
+</table>
+
+<h3>3.5. Графічні елементи керування (<code>gui</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">Функція</th><th style="width: 22%;">Повертає</th><th style="width: 40%;">Опис</th></tr></thead>
+<tbody>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>Виводить текстовий напис.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>Виводить кольоровий текст RGBA.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>Створює кнопку з можливістю виклику функції.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>Створює повзунок для дійсних чисел.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>Створює повзунок для цілих чисел.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>Створює поле введення тексту.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Відкриває діалогове вікно вибору файлів.</td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+    minicut v1.2.0 • Легкий мультитрековий відеоредактор для Linux • Автоматична документація
+</div>
+</body>
+</html>

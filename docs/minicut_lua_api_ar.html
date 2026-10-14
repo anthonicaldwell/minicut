@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<title>minicut دليل مرجعي للبرمجة بلغة LuaJIT وواجهة Plugin API</title>
+<style>
+@page {
+    size: letter portrait;
+    margin: 0.8in;
+    @bottom-right {
+        content: counter(page);
+    }
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans CJK JP", "Noto Sans CJK KR", "NanumGothic", "Noto Sans Arabic", "Noto Naskh Arabic", "Droid Sans Fallback", "DejaVu Sans", Arial, sans-serif;
+    color: #232629;
+    background: #ffffff;
+    line-height: 1.55;
+    font-size: 10pt;
+    margin: 0;
+    padding: 0;
+}
+.cover {
+    text-align: center;
+    padding: 40px 0 25px 0;
+    border-bottom: 3px solid #1a73e8;
+    margin-bottom: 25px;
+}
+.cover h1 {
+    font-size: 24pt;
+    color: #1a73e8;
+    margin: 0 0 10px 0;
+    font-weight: 700;
+}
+.cover .subtitle {
+    font-size: 13pt;
+    color: #5f6368;
+    margin: 0 0 18px 0;
+}
+.cover .badge {
+    display: inline-block;
+    background: #e8f0fe;
+    color: #1a73e8;
+    font-weight: bold;
+    padding: 5px 12px;
+    border-radius: 14px;
+    font-size: 9pt;
+    margin: 4px;
+}
+h2 {
+    color: #0d47a1;
+    font-size: 13.5pt;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 5px;
+    margin-top: 28px;
+    page-break-after: avoid;
+}
+h3 {
+    color: #1565c0;
+    font-size: 11pt;
+    margin-top: 18px;
+    margin-bottom: 6px;
+    page-break-after: avoid;
+}
+p {
+    margin: 8px 0;
+}
+ul, ol {
+    margin: 6px 0 12px 24px;
+    padding: 0;
+}
+li {
+    margin-bottom: 4px;
+}
+code {
+    background-color: #f1f3f4;
+    color: #c5221f;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-family: "DejaVu Sans Mono", Consolas, "Liberation Mono", Courier, monospace;
+    font-size: 9pt;
+}
+pre {
+    background-color: #f8f9fa;
+    border: 1px solid #dadce0;
+    border-left: 4px solid #1a73e8;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-family: "DejaVu Sans Mono", Consolas, "Liberation Mono", Courier, monospace;
+    font-size: 8.5pt;
+    line-height: 1.45;
+    overflow-x: auto;
+    page-break-inside: avoid;
+    margin: 10px 0;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 8.8pt;
+    page-break-inside: avoid;
+}
+th {
+    background-color: #1a73e8;
+    color: #ffffff;
+    font-weight: 600;
+    text-align: left;
+    padding: 7px 9px;
+    border: 1px solid #1a73e8;
+}
+td {
+    padding: 6px 9px;
+    border: 1px solid #dadce0;
+    vertical-align: top;
+}
+tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+.rtl {
+    direction: rtl;
+    text-align: right;
+}
+.rtl th {
+    text-align: right;
+}
+.rtl pre, .rtl code {
+    direction: ltr;
+    text-align: left;
+    display: inline-block;
+}
+.rtl pre {
+    display: block;
+}
+.footer {
+    text-align: center;
+    color: #70757a;
+    font-size: 8.5pt;
+    margin-top: 35px;
+    border-top: 1px solid #e0e0e0;
+    padding-top: 12px;
+}
+</style>
+</head>
+<body class="rtl">
+<div class="cover">
+    <h1>محرر الفيديو minicut</h1>
+    <div class="subtitle">دليل مرجعي لبيئة البرمجة LuaJIT والإضافات البرمجية</div>
+    <div>
+        <span class="badge">محرك LuaJIT 5.1</span>
+        <span class="badge">لوحات أدوات قابلة للتثبيت</span>
+        <span class="badge">منصة الأدوات (Dock)</span>
+        <span class="badge">مكتبة الشبكة (libcurl)</span>
+        <span class="badge">توليد النصوص عبر FreeType</span>
+    </div>
+</div>
+
+<h2>1. المقدمة والبنية البرمجية</h2>
+<p>
+    يحتوي برنامج <strong>minicut</strong> على محرك برمجي مدمج عالي الأداء بلغة <strong>LuaJIT</strong>.
+    يتيح المحرك أتمتة عمليات المخطط الزمني بالكامل، إدراج الوسائط، تحريك الإطارات المفتاحية (Keyframing)، وبناء لوحات تحكم تفاعلية مخصصة.
+</p>
+
+<h3>مسارات مجلدات السكربتات</h3>
+<table>
+<thead>
+    <tr><th style="width: 32%;">المسار</th><th style="width: 28%;">وقت التشغيل / الدور</th><th style="width: 40%;">الوصف</th></tr>
+</thead>
+<tbody>
+    <tr>
+        <td><code>~/.config/minicut/autorun/</code></td>
+        <td>التشغيل التلقائي عند البدء</td>
+        <td>يتم تحميل السكربتات تلقائياً عند بدء التشغيل وتنشئ زراً في منصة الأدوات (Dock) أسفل شريط القوائم.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/scripts/</code></td>
+        <td>النقر في شريط القوائم</td>
+        <td>تظهر السكربتات في قائمة <strong>البرمجيات (Scripts)</strong> ويتم تشغيلها عند اختيارها من قبل المستخدم.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/icons/</code></td>
+        <td>أيقونات منصة الأدوات</td>
+        <td>ملفات أيقونات PNG مطابقة لاسم السكربت (مثال: <code>keyframe_animator.png</code>).</td>
+    </tr>
+</tbody>
+</table>
+
+<h2>2. بنية ملف السكربت البرمجي</h2>
+<pre>-- ============================================================================
+-- سكربت توضيحي: my_tool.lua
+-- ============================================================================
+
+local target_track = 0
+local clip_scale = 1.0
+
+function execute_action()
+    minicut.push_undo()
+    local clip_id = timeline.place_clip("sample.png", target_track, timeline.get_playhead(), 4.0)
+    if clip_id and clip_id ~= "" then
+        clip.set_scale(clip_id, clip_scale)
+        timeline.add_keyframe(clip_id, "opacity", 0.0, 0.0)
+        timeline.add_keyframe(clip_id, "opacity", 1.0, 1.0)
+        minicut.set_status("تم إدراج المقطع: " .. clip_id)
+    end
+end
+
+function choose_file()
+    gui.file_dialog("اختر ملفاً", function(selected)
+        if selected and selected ~= "" then
+            minicut.set_status("تم اختيار: " .. selected)
+        end
+    end)
+end
+
+function plugin:init_panel()
+    gui.text("أداة إدراج الوسائط")
+    gui.separator()
+    target_track = gui.slider_int("رقم المسار", target_track, 0, 4)
+    clip_scale = gui.slider_float("المقياس", clip_scale, 0.1, 4.0)
+    gui.button("تصفح الملفات...", choose_file)
+    gui.button("إدراج عند المؤشر", execute_action)
+end</pre>
+
+<h2>3. مكتبات ووحدات النظام البرمجية</h2>
+
+<h3>3.1. إدارة المشروع (<code>project</code> / عام)</h3>
+<table>
+<thead><tr><th style="width: 35%;">الدالة</th><th style="width: 25%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>project_save([path])</code></td><td><code>boolean, string</code></td><td>حفظ حالة المشروع في ملف <code>.minicut</code>.</td></tr>
+    <tr><td><code>project_load(path)</code></td><td><code>boolean, string</code></td><td>تحميل مشروع من المسار المحدد.</td></tr>
+    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>الحصول على اسم المشروع الحالي.</td></tr>
+    <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>تعيين اسم المشروع.</td></tr>
+</tbody>
+</table>
+
+<h3>3.2. مكتبة الشبكة والإنترنت (<code>net</code>)</h3>
+<table>
+<thead><tr><th style="width: 35%;">الدالة</th><th style="width: 25%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>net.get(url)</code></td><td><code>table</code></td><td>تنفيذ طلب HTTP GET عبر الشبكة.</td></tr>
+    <tr><td><code>net.post(url, body)</code></td><td><code>table</code></td><td>إرسال طلب HTTP POST.</td></tr>
+    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>تنزيل ملف عبر الإنترنت وتخزينه محلياً.</td></tr>
+</tbody>
+</table>
+
+<h3>3.3. المخطط الزمني والمسارات (<code>timeline</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">الدالة</th><th style="width: 22%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>موقع مؤشر التشغيل بالثواني.</td></tr>
+    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>تحريك مؤشر التشغيل إلى الثانية <code>t</code>.</td></tr>
+    <tr><td><code>timeline.place_clip(path, trk, t, dur)</code></td><td><code>string</code></td><td>إدراج مقطع فيديو أو صوت أو صورة في المسار.</td></tr>
+    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>إضافة إطار مفتاحي للحركة (الشفافية، الصوت، إلخ).</td></tr>
+    <tr><td><code>timeline.clear_keyframes(id, prop)</code></td><td><code>void</code></td><td>مسح كافة الإطارات المفتاحية للخاصية.</td></tr>
+    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>تحريك المسار لأعلى.</td></tr>
+    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>تحريك المسار لأسفل.</td></tr>
+    <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>إعادة تسمية المسار.</td></tr>
+</tbody>
+</table>
+
+<h3>3.4. خصائص وتحويلات المقاطع (<code>clip</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">الدالة</th><th style="width: 22%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>number, number</code></td><td>الحصول على إحداثيات (x, y) بالنسبة لمركز الشاشة.</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>تعيين موقع مركز المقطع.</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>الحصول على معامل المقياس (1.0 = 100%).</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>تعيين معامل المقياس.</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>الحصول على درجة الشفافية [0.0, 1.0].</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>تعيين درجة الشفافية.</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>الحصول على مضخم الصوت [0.0, 2.0].</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>تعيين مستوى الصوت.</td></tr>
+</tbody>
+</table>
+
+<h3>3.5. عناصر الواجهة الرسومية (<code>gui</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">الدالة</th><th style="width: 22%;">القيمة المرجعة</th><th style="width: 40%;">الوصف</th></tr></thead>
+<tbody>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>عرض نص في اللوحة.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>عرض نص ملون بتنسيق RGBA.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>إنشاء زر وتنفيذ دالة عند الضغط عليه.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>شريط تمرير للأرقام العشرية.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>شريط تمرير للأرقام الصحيحة.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>حقل إدخال نصي.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>فتح نافذة حوار اختيار الملفات.</td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+    minicut v1.2.0 • محرر فيديو خفيف ومتعدد المسارات لنظام لينكس • تم إنشاء الدليل تلقائياً
+</div>
+</body>
+</html>

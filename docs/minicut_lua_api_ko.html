@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>minicut Lua 스크립팅 & 플러그인 API 참조 매뉴얼</title>
+<style>
+@page {
+    size: letter portrait;
+    margin: 0.8in;
+    @bottom-right {
+        content: counter(page);
+    }
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans CJK JP", "Noto Sans CJK KR", "NanumGothic", "Noto Sans Arabic", "Noto Naskh Arabic", "Droid Sans Fallback", "DejaVu Sans", Arial, sans-serif;
+    color: #232629;
+    background: #ffffff;
+    line-height: 1.55;
+    font-size: 10pt;
+    margin: 0;
+    padding: 0;
+}
+.cover {
+    text-align: center;
+    padding: 40px 0 25px 0;
+    border-bottom: 3px solid #1a73e8;
+    margin-bottom: 25px;
+}
+.cover h1 {
+    font-size: 24pt;
+    color: #1a73e8;
+    margin: 0 0 10px 0;
+    font-weight: 700;
+}
+.cover .subtitle {
+    font-size: 13pt;
+    color: #5f6368;
+    margin: 0 0 18px 0;
+}
+.cover .badge {
+    display: inline-block;
+    background: #e8f0fe;
+    color: #1a73e8;
+    font-weight: bold;
+    padding: 5px 12px;
+    border-radius: 14px;
+    font-size: 9pt;
+    margin: 4px;
+}
+h2 {
+    color: #0d47a1;
+    font-size: 13.5pt;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 5px;
+    margin-top: 28px;
+    page-break-after: avoid;
+}
+h3 {
+    color: #1565c0;
+    font-size: 11pt;
+    margin-top: 18px;
+    margin-bottom: 6px;
+    page-break-after: avoid;
+}
+p {
+    margin: 8px 0;
+}
+ul, ol {
+    margin: 6px 0 12px 24px;
+    padding: 0;
+}
+li {
+    margin-bottom: 4px;
+}
+code {
+    background-color: #f1f3f4;
+    color: #c5221f;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-family: "DejaVu Sans Mono", Consolas, "Liberation Mono", Courier, monospace;
+    font-size: 9pt;
+}
+pre {
+    background-color: #f8f9fa;
+    border: 1px solid #dadce0;
+    border-left: 4px solid #1a73e8;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-family: "DejaVu Sans Mono", Consolas, "Liberation Mono", Courier, monospace;
+    font-size: 8.5pt;
+    line-height: 1.45;
+    overflow-x: auto;
+    page-break-inside: avoid;
+    margin: 10px 0;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 8.8pt;
+    page-break-inside: avoid;
+}
+th {
+    background-color: #1a73e8;
+    color: #ffffff;
+    font-weight: 600;
+    text-align: left;
+    padding: 7px 9px;
+    border: 1px solid #1a73e8;
+}
+td {
+    padding: 6px 9px;
+    border: 1px solid #dadce0;
+    vertical-align: top;
+}
+tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+.rtl {
+    direction: rtl;
+    text-align: right;
+}
+.rtl th {
+    text-align: right;
+}
+.rtl pre, .rtl code {
+    direction: ltr;
+    text-align: left;
+    display: inline-block;
+}
+.rtl pre {
+    display: block;
+}
+.footer {
+    text-align: center;
+    color: #70757a;
+    font-size: 8.5pt;
+    margin-top: 35px;
+    border-top: 1px solid #e0e0e0;
+    padding-top: 12px;
+}
+</style>
+</head>
+<body>
+<div class="cover">
+    <h1>minicut 비디오 편집기</h1>
+    <div class="subtitle">임베디드 LuaJIT & 플러그인 API 참조 매뉴얼</div>
+    <div>
+        <span class="badge">LuaJIT 5.1 런타임</span>
+        <span class="badge">도킹 가능 도구 패널</span>
+        <span class="badge">도구 선반 도크</span>
+        <span class="badge">네트워크 라이브러리 (libcurl)</span>
+        <span class="badge">FreeType 텍스트 생성</span>
+    </div>
+</div>
+
+<h2>1. 소개 및 아키텍처</h2>
+<p>
+    <strong>minicut</strong>은 고성능 <strong>LuaJIT</strong> 스크립팅 엔진을 내장하고 있습니다.
+    타임라인 자동화, 클립 배치, 키프레임 애니메이션, 맞춤형 인터랙티브 도구 패널을 자유롭게 제작할 수 있습니다.
+</p>
+
+<h3>스크립트 디렉터리 경로</h3>
+<table>
+<thead>
+    <tr><th style="width: 32%;">경로</th><th style="width: 28%;">실행 시점 / 역할</th><th style="width: 40%;">설명</th></tr>
+</thead>
+<tbody>
+    <tr>
+        <td><code>~/.config/minicut/autorun/</code></td>
+        <td>시작 시 자동 실행</td>
+        <td>앱 실행 시 자동으로 로드되며 메뉴 표시줄 아래 '도크'에 아이콘 버튼이 생성됩니다.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/scripts/</code></td>
+        <td>메뉴 클릭 시</td>
+        <td>메뉴 표시줄의 <strong>스크립트</strong> 메뉴에 표시되며 클릭 시 실행됩니다.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/icons/</code></td>
+        <td>도크 아이콘 파일</td>
+        <td>스크립트 파일명과 일치하는 PNG 아이콘 이미지입니다.</td>
+    </tr>
+</tbody>
+</table>
+
+<h2>2. 플러그인 스크립트 구조</h2>
+<pre>-- ============================================================================
+-- 스크립트 예제: my_tool.lua
+-- ============================================================================
+
+local target_track = 0
+local clip_scale = 1.0
+
+function execute_action()
+    minicut.push_undo()
+    local clip_id = timeline.place_clip("test_sample.png", target_track, timeline.get_playhead(), 4.0)
+    if clip_id and clip_id ~= "" then
+        clip.set_scale(clip_id, clip_scale)
+        timeline.add_keyframe(clip_id, "opacity", 0.0, 0.0)
+        timeline.add_keyframe(clip_id, "opacity", 1.0, 1.0)
+        minicut.set_status("클립 배치 완료: " .. clip_id)
+    end
+end
+
+function choose_file()
+    gui.file_dialog("파일 선택", function(selected)
+        if selected and selected ~= "" then
+            minicut.set_status("선택된 파일: " .. selected)
+        end
+    end)
+end
+
+function plugin:init_panel()
+    gui.text("미디어 배치 도구")
+    gui.separator()
+    target_track = gui.slider_int("트랙 번호", target_track, 0, 4)
+    clip_scale = gui.slider_float("크기 비율", clip_scale, 0.1, 4.0)
+    gui.button("파일 찾아보기...", choose_file)
+    gui.button("재생헤드 위치에 배치", execute_action)
+end</pre>
+
+<h2>3. 코어 모듈 API</h2>
+
+<h3>3.1. 프로젝트 제어 (<code>project</code> / 전역)</h3>
+<table>
+<thead><tr><th style="width: 35%;">함수</th><th style="width: 25%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>project_save([path])</code></td><td><code>boolean, string</code></td><td>프로젝트를 <code>.minicut</code> 파일로 저장합니다.</td></tr>
+    <tr><td><code>project_load(path)</code></td><td><code>boolean, string</code></td><td>지정된 경로의 프로젝트를 로드합니다.</td></tr>
+    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>현재 프로젝트 이름을 가져옵니다.</td></tr>
+    <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>프로젝트 이름을 설정합니다.</td></tr>
+</tbody>
+</table>
+
+<h3>3.2. 네트워크 라이브러리 (<code>net</code>)</h3>
+<table>
+<thead><tr><th style="width: 35%;">함수</th><th style="width: 25%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>net.get(url)</code></td><td><code>table</code></td><td>HTTP GET 요청을 수행합니다.</td></tr>
+    <tr><td><code>net.post(url, body)</code></td><td><code>table</code></td><td>HTTP POST 요청을 전송합니다.</td></tr>
+    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>원격 파일을 로컬 디스크에 직접 다운로드합니다.</td></tr>
+</tbody>
+</table>
+
+<h3>3.3. 타임라인 및 트랙 (<code>timeline</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">함수</th><th style="width: 22%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>현재 재생헤드 위치(초)를 반환합니다.</td></tr>
+    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>재생헤드를 <code>t</code>초 위치로 이동합니다.</td></tr>
+    <tr><td><code>timeline.place_clip(path, trk, t, dur)</code></td><td><code>string</code></td><td>비디오/오디오/이미지를 트랙에 배치합니다.</td></tr>
+    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>애니메이션 키프레임을 추가합니다.</td></tr>
+    <tr><td><code>timeline.clear_keyframes(id, prop)</code></td><td><code>void</code></td><td>속성의 모든 키프레임을 제거합니다.</td></tr>
+    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>트랙을 위로 이동합니다.</td></tr>
+    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>트랙을 아래로 이동합니다.</td></tr>
+    <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>트랙 이름을 변경합니다.</td></tr>
+</tbody>
+</table>
+
+<h3>3.4. 클립 변형 (<code>clip</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">함수</th><th style="width: 22%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>clip.get_position(id)</code></td><td><code>number, number</code></td><td>캔버스 중심 기준 (x, y) 좌표를 반환합니다.</td></tr>
+    <tr><td><code>clip.set_position(id, x, y)</code></td><td><code>void</code></td><td>중심 좌표를 설정합니다.</td></tr>
+    <tr><td><code>clip.get_scale(id)</code></td><td><code>number</code></td><td>크기 비율(1.0 = 100%)을 반환합니다.</td></tr>
+    <tr><td><code>clip.set_scale(id, s)</code></td><td><code>void</code></td><td>크기 비율을 설정합니다.</td></tr>
+    <tr><td><code>clip.get_opacity(id)</code></td><td><code>number</code></td><td>불투명도 [0.0, 1.0]를 반환합니다.</td></tr>
+    <tr><td><code>clip.set_opacity(id, o)</code></td><td><code>void</code></td><td>불투명도를 설정합니다.</td></tr>
+    <tr><td><code>clip.get_volume(id)</code></td><td><code>number</code></td><td>오디오 볼륨 게인 [0.0, 2.0]을 반환합니다.</td></tr>
+    <tr><td><code>clip.set_volume(id, v)</code></td><td><code>void</code></td><td>오디오 볼륨 게인을 설정합니다.</td></tr>
+</tbody>
+</table>
+
+<h3>3.5. GUI 위젯 (<code>gui</code>)</h3>
+<table>
+<thead><tr><th style="width: 38%;">함수</th><th style="width: 22%;">반환값</th><th style="width: 40%;">설명</th></tr></thead>
+<tbody>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>텍스트 라벨을 렌더링합니다.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>색상 텍스트를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>버튼을 렌더링하고 클릭 시 콜백을 실행합니다.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>실수형 슬라이더를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>정수형 슬라이더를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>텍스트 입력 상자를 렌더링합니다.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>파일 대화상자를 열고 결과를 콜백으로 전달합니다.</td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+    minicut v1.2.0 • 가벼운 리눅스 멀티트랙 비디오 편집기 • 자동 생성 문서
+</div>
+</body>
+</html>

@@ -156,6 +156,13 @@ if [ -d "docs" ]; then
     cp -rf docs/* "$DATA_DIR/docs/"
 fi
 
+# Install README files
+cp -f README*.md "$HOME/.config/minicut/" 2>/dev/null || true
+if [ "$INSTALL_MODE" = "system" ]; then
+    mkdir -p "$DATA_DIR"
+    cp -f README*.md "$DATA_DIR/" 2>/dev/null || true
+fi
+
 # Refresh desktop, MIME, and icon databases
 if command -v update-mime-database > /dev/null 2>&1; then
     update-mime-database "$MIME_BASE_DIR" 2>/dev/null || true

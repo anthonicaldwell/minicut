@@ -3,7 +3,143 @@
 <head>
 <meta charset="UTF-8">
 <title>minicut Lua Scripting & Plugin API Reference Manual</title>
-<style>" + CSS_TEMPLATE + "</style>
+<style>
+@page {
+    size: letter portrait;
+    margin: 0.8in;
+    @bottom-right {
+        content: counter(page);
+    }
+}
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans CJK JP", "Noto Sans CJK KR", "NanumGothic", "Noto Sans Arabic", "Noto Naskh Arabic", "Droid Sans Fallback", "DejaVu Sans", Arial, sans-serif;
+    color: #232629;
+    background: #ffffff;
+    line-height: 1.55;
+    font-size: 10pt;
+    margin: 0;
+    padding: 0;
+}
+.cover {
+    text-align: center;
+    padding: 40px 0 25px 0;
+    border-bottom: 3px solid #1a73e8;
+    margin-bottom: 25px;
+}
+.cover h1 {
+    font-size: 24pt;
+    color: #1a73e8;
+    margin: 0 0 10px 0;
+    font-weight: 700;
+}
+.cover .subtitle {
+    font-size: 13pt;
+    color: #5f6368;
+    margin: 0 0 18px 0;
+}
+.cover .badge {
+    display: inline-block;
+    background: #e8f0fe;
+    color: #1a73e8;
+    font-weight: bold;
+    padding: 5px 12px;
+    border-radius: 14px;
+    font-size: 9pt;
+    margin: 4px;
+}
+h2 {
+    color: #0d47a1;
+    font-size: 13.5pt;
+    border-bottom: 2px solid #e0e0e0;
+    padding-bottom: 5px;
+    margin-top: 28px;
+    page-break-after: avoid;
+}
+h3 {
+    color: #1565c0;
+    font-size: 11pt;
+    margin-top: 18px;
+    margin-bottom: 6px;
+    page-break-after: avoid;
+}
+p {
+    margin: 8px 0;
+}
+ul, ol {
+    margin: 6px 0 12px 24px;
+    padding: 0;
+}
+li {
+    margin-bottom: 4px;
+}
+code {
+    background-color: #f1f3f4;
+    color: #c5221f;
+    padding: 2px 5px;
+    border-radius: 3px;
+    font-family: "DejaVu Sans Mono", Consolas, "Liberation Mono", Courier, monospace;
+    font-size: 9pt;
+}
+pre {
+    background-color: #f8f9fa;
+    border: 1px solid #dadce0;
+    border-left: 4px solid #1a73e8;
+    border-radius: 4px;
+    padding: 10px 14px;
+    font-family: "DejaVu Sans Mono", Consolas, "Liberation Mono", Courier, monospace;
+    font-size: 8.5pt;
+    line-height: 1.45;
+    overflow-x: auto;
+    page-break-inside: avoid;
+    margin: 10px 0;
+}
+table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 12px 0;
+    font-size: 8.8pt;
+    page-break-inside: avoid;
+}
+th {
+    background-color: #1a73e8;
+    color: #ffffff;
+    font-weight: 600;
+    text-align: left;
+    padding: 7px 9px;
+    border: 1px solid #1a73e8;
+}
+td {
+    padding: 6px 9px;
+    border: 1px solid #dadce0;
+    vertical-align: top;
+}
+tr:nth-child(even) {
+    background-color: #f8f9fa;
+}
+.rtl {
+    direction: rtl;
+    text-align: right;
+}
+.rtl th {
+    text-align: right;
+}
+.rtl pre, .rtl code {
+    direction: ltr;
+    text-align: left;
+    display: inline-block;
+}
+.rtl pre {
+    display: block;
+}
+.footer {
+    text-align: center;
+    color: #70757a;
+    font-size: 8.5pt;
+    margin-top: 35px;
+    border-top: 1px solid #e0e0e0;
+    padding-top: 12px;
+}
+</style>
 </head>
 <body>
 <div class="cover">
@@ -20,11 +156,12 @@
 
 <h2>1. Introduction & Architecture</h2>
 <p>
-    <strong>minicut</strong> features a fully embedded, high-performance <strong>LuaJIT</strong> scripting engine. minicut enables automation, timeline editing, clip keyframing, and custom interactive dockable tool panels.
+    <strong>minicut</strong> features a fully embedded, high-performance <strong>LuaJIT</strong> scripting engine.
+    minicut enables complete automation, timeline editing, clip keyframing, and custom interactive dockable tool panels.
 </p>
 
 <h3>Script Directory Locations</h3>
-<p>Scripts and icons are discovered in the user's configuration directory:</p>
+<p>Scripts and icons are discovered in the user configuration directory:</p>
 <table>
 <thead>
     <tr><th style="width: 32%;">Location</th><th style="width: 28%;">Trigger / Role</th><th style="width: 40%;">Description</th></tr>
@@ -43,7 +180,7 @@
     <tr>
         <td><code>~/.config/minicut/icons/</code></td>
         <td>Dock Icon Asset</td>
-        <td>32x32 PNG icon images matching script stems (e.g., <code>quick_placement.png</code> for <code>quick_placement.lua</code>).</td>
+        <td>PNG icon images matching script stems (e.g., <code>keyframe_animator.png</code> for <code>keyframe_animator.lua</code>).</td>
     </tr>
 </tbody>
 </table>
@@ -60,13 +197,11 @@
 local target_track = 0
 local clip_scale = 1.25
 
--- Timeline and clip manipulation logic
 function execute_placement()
     minicut.push_undo()
     local path = "/path/to/media.mp4"
-    local asset_id = project.import_video(path)
-    local clip_id = timeline.place_video(target_track, asset_id, timeline.get_playhead(), 5.0)
-    if clip_id ~= "" then
+    local clip_id = timeline.place_clip(path, target_track, timeline.get_playhead(), 5.0)
+    if clip_id and clip_id ~= "" then
         clip.set_scale(clip_id, clip_scale)
         timeline.add_keyframe(clip_id, "opacity", 0.0, 0.0)
         timeline.add_keyframe(clip_id, "opacity", 1.0, 1.0)
@@ -74,16 +209,13 @@ function execute_placement()
     end
 end
 
--- GUI panel declaration
 function plugin:init_panel()
     gui.text("Media Placement Tool")
     gui.separator()
     target_track = gui.slider_int("Track Lane", target_track, 0, 4)
     clip_scale = gui.slider_float("Initial Scale", clip_scale, 0.1, 5.0)
     
-    if gui.button("Place Clip At Playhead", execute_placement) then
-        -- Optional inline handling
-    end
+    gui.button("Place Clip At Playhead", execute_placement)
 end</pre>
 
 <h2>3. Core Lua Modules</h2>
@@ -98,10 +230,6 @@ end</pre>
     <tr><td><code>project_load(path)</code><br><code>project.load(path)</code></td><td><code>boolean, string</code></td><td>Loads a project from <code>path</code>, refreshing timeline and media.</td></tr>
     <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>Returns the current project name.</td></tr>
     <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>Sets the current project name.</td></tr>
-    <tr><td><code>project.import_video(path)</code></td><td><code>string (asset_id)</code></td><td>Imports video into the project media pool.</td></tr>
-    <tr><td><code>project.import_audio(path)</code></td><td><code>string (asset_id)</code></td><td>Imports audio into the project media pool.</td></tr>
-    <tr><td><code>project.import_image(path, [dur])</code></td><td><code>string (asset_id)</code></td><td>Imports image into the project media pool (default: 5.0s).</td></tr>
-    <tr><td><code>assets.create_text(text, [opts])</code></td><td><code>string (asset_id)</code></td><td>Generates FreeType text asset with font, outline, and alignment.</td></tr>
 </tbody>
 </table>
 
@@ -111,11 +239,10 @@ end</pre>
     <tr><th style="width: 35%;">Function</th><th style="width: 25%;">Returns</th><th style="width: 40%;">Description</th></tr>
 </thead>
 <tbody>
-    <tr><td><code>net.get(url)</code></td><td><code>table</code></td><td>HTTP GET request. Returns <code>{{status, body, ok, headers}}</code>.</td></tr>
+    <tr><td><code>net.get(url)</code></td><td><code>table</code></td><td>HTTP GET request. Returns <code>{status, body, ok, headers}</code>.</td></tr>
     <tr><td><code>net.post(url, body)</code></td><td><code>table</code></td><td>HTTP POST request with string or JSON payload.</td></tr>
     <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>Downloads remote asset directly to local disk.</td></tr>
     <tr><td><code>net.upload(url, path)</code></td><td><code>table</code></td><td>HTTP POST/upload local file binary stream.</td></tr>
-    <tr><td><code>net.request(options)</code></td><td><code>table</code></td><td>Custom HTTP request (url, method, headers, timeout).</td></tr>
 </tbody>
 </table>
 
@@ -129,65 +256,55 @@ end</pre>
     <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>Moves timeline playhead to <code>t</code> seconds.</td></tr>
     <tr><td><code>timeline.get_duration()</code></td><td><code>number</code></td><td>Total duration of the project timeline.</td></tr>
     <tr><td><code>timeline.get_track_count()</code></td><td><code>integer</code></td><td>Total number of video and audio tracks.</td></tr>
-    <tr><td><code>timeline.add_track(type, [name])</code></td><td><code>integer</code></td><td>Adds a track ("video" or "audio") with optional name.</td></tr>
-    <tr><td><code>timeline.place_video(track, id, start, dur)</code></td><td><code>string</code></td><td>Places video clip on track and returns clip ID.</td></tr>
-    <tr><td><code>timeline.place_audio(track, id, start, dur)</code></td><td><code>string</code></td><td>Places audio clip on track and returns clip ID.</td></tr>
-    <tr><td><code>timeline.place_image(track, id, start, dur)</code></td><td><code>string</code></td><td>Places image clip on track and returns clip ID.</td></tr>
-    <tr><td><code>timeline.place_text_clip(track, text, start, dur)</code></td><td><code>string</code></td><td>Generates and places text clip on track.</td></tr>
-    <tr><td><code>timeline.delete_clip(clip_id)</code></td><td><code>boolean</code></td><td>Deletes clip and removes its associated keyframes.</td></tr>
-    <tr><td><code>timeline.split_clip(clip_id, [t])</code></td><td><code>boolean</code></td><td>Splits clip at time <code>t</code> (defaults to playhead).</td></tr>
-    <tr><td><code>timeline.select_clips(ids_table)</code></td><td><code>void</code></td><td>Selects multiple clips simultaneously.</td></tr>
+    <tr><td><code>timeline.place_clip(path, track, t, dur)</code></td><td><code>string</code></td><td>Places video, audio, or image clip on track.</td></tr>
+    <tr><td><code>timeline.place_image(path, track, t, dur)</code></td><td><code>string</code></td><td>Places image clip on track and returns clip ID.</td></tr>
+    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>Adds animation keyframe (opacity, volume, pos_x, etc.).</td></tr>
+    <tr><td><code>timeline.clear_keyframes(id, prop)</code></td><td><code>void</code></td><td>Clears all keyframes for a property on a clip.</td></tr>
+    <tr><td><code>timeline.select_clips(ids)</code></td><td><code>void</code></td><td>Selects multiple clips simultaneously.</td></tr>
     <tr><td><code>timeline.get_selected_clips()</code></td><td><code>table</code></td><td>Returns array of selected clip IDs.</td></tr>
-    <tr><td><code>timeline.clear_selection()</code></td><td><code>void</code></td><td>Clears timeline selection.</td></tr>
     <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>Moves track up in stack order.</td></tr>
     <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>Moves track down in stack order.</td></tr>
     <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>Renames track at index.</td></tr>
     <tr><td><code>timeline.get_track_name(idx)</code></td><td><code>string</code></td><td>Gets track name at index.</td></tr>
-    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>Adds animation keyframe (opacity, volume, pos_x, etc.).</td></tr>
-    <tr><td><code>timeline.remove_keyframe(id, prop, t)</code></td><td><code>void</code></td><td>Removes keyframe near timestamp <code>t</code>.</td></tr>
-    <tr><td><code>timeline.evaluate_keyframe(id, prop, t, [def])</code></td><td><code>number</code></td><td>Returns linearly interpolated parameter value.</td></tr>
 </tbody>
 </table>
 
-<h3>3.4. Clip Transformations (<code>clip</code>)</h3>
+<h3>3.4. Clip Transforms & Attributes (<code>clip</code>)</h3>
 <table>
 <thead>
     <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
 </thead>
 <tbody>
-    <tr><td><code>clip.get_position(clip_id)</code></td><td><code>number, number</code></td><td>Returns (pos_x, pos_y) relative to canvas center.</td></tr>
-    <tr><td><code>clip.set_position(clip_id, x, y)</code></td><td><code>void</code></td><td>Sets center position offset in pixels.</td></tr>
-    <tr><td><code>clip.get_scale(clip_id)</code></td><td><code>number</code></td><td>Returns uniform scale multiplier (1.0 = 100%).</td></tr>
-    <tr><td><code>clip.set_scale(clip_id, s)</code></td><td><code>void</code></td><td>Sets uniform scale multiplier.</td></tr>
-    <tr><td><code>clip.get_rotation(clip_id)</code></td><td><code>number</code></td><td>Returns rotation angle in degrees.</td></tr>
-    <tr><td><code>clip.set_rotation(clip_id, r)</code></td><td><code>void</code></td><td>Sets rotation angle in degrees.</td></tr>
-    <tr><td><code>clip.get_opacity(clip_id)</code></td><td><code>number</code></td><td>Returns opacity multiplier [0.0, 1.0].</td></tr>
-    <tr><td><code>clip.set_opacity(clip_id, o)</code></td><td><code>void</code></td><td>Sets opacity multiplier.</td></tr>
-    <tr><td><code>clip.get_volume(clip_id)</code></td><td><code>number</code></td><td>Returns audio volume multiplier [0.0, 2.0].</td></tr>
-    <tr><td><code>clip.set_volume(clip_id, v)</code></td><td><code>void</code></td><td>Sets audio volume multiplier.</td></tr>
-    <tr><td><code>clip.get_time(clip_id)</code></td><td><code>number, number, number</code></td><td>Returns (start_time, duration, offset).</td></tr>
-    <tr><td><code>clip.set_time(clip_id, start, dur, [off])</code></td><td><code>void</code></td><td>Modifies clip timeline timing and media offset.</td></tr>
-    <tr><td><code>clip.get_info(clip_id)</code></td><td><code>table</code></td><td>Returns comprehensive metadata dictionary.</td></tr>
+    <tr><td><code>clip.get_position(clip_id)</code></td><td><code>number, number</code></td><td>Gets (x, y) coordinates relative to canvas center.</td></tr>
+    <tr><td><code>clip.set_position(clip_id, x, y)</code></td><td><code>void</code></td><td>Sets center position coordinates.</td></tr>
+    <tr><td><code>clip.get_scale(clip_id)</code></td><td><code>number</code></td><td>Gets uniform scale factor (1.0 = 100%).</td></tr>
+    <tr><td><code>clip.set_scale(clip_id, s)</code></td><td><code>void</code></td><td>Sets scale factor.</td></tr>
+    <tr><td><code>clip.get_opacity(clip_id)</code></td><td><code>number</code></td><td>Gets opacity [0.0, 1.0].</td></tr>
+    <tr><td><code>clip.set_opacity(clip_id, o)</code></td><td><code>void</code></td><td>Sets opacity.</td></tr>
+    <tr><td><code>clip.get_volume(clip_id)</code></td><td><code>number</code></td><td>Gets audio volume gain multiplier [0.0, 2.0].</td></tr>
+    <tr><td><code>clip.set_volume(clip_id, v)</code></td><td><code>void</code></td><td>Sets audio volume gain multiplier.</td></tr>
+    <tr><td><code>clip.get_time(clip_id)</code></td><td><code>number, number, number</code></td><td>Gets (start_time, duration, offset).</td></tr>
 </tbody>
 </table>
 
-<h3>3.5. GUI & UI Elements (<code>gui</code>)</h3>
+<h3>3.5. GUI Controls (<code>gui</code>)</h3>
 <table>
 <thead>
     <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
 </thead>
 <tbody>
-    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>Displays a standard text string.</td></tr>
-    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>Displays colored text with RGBA float components.</td></tr>
-    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>Renders push button, returns true if clicked.</td></tr>
-    <tr><td><code>gui.slider_float(label, val, min, max, [cb])</code></td><td><code>number</code></td><td>Renders horizontal float slider.</td></tr>
-    <tr><td><code>gui.slider_int(label, val, min, max, [cb])</code></td><td><code>integer</code></td><td>Renders integer slider.</td></tr>
-    <tr><td><code>gui.drag_float(label, val, [spd, min, max, cb])</code></td><td><code>number</code></td><td>Renders click-and-drag float value editor.</td></tr>
-    <tr><td><code>gui.input_text(label, text, [cb])</code></td><td><code>string</code></td><td>Single-line text entry input box.</td></tr>
-    <tr><td><code>gui.checkbox(label, state, [cb])</code></td><td><code>boolean</code></td><td>Toggle checkbox.</td></tr>
-    <tr><td><code>gui.same_line()</code></td><td><code>void</code></td><td>Positions next item on the same line horizontally.</td></tr>
-    <tr><td><code>gui.separator()</code></td><td><code>void</code></td><td>Draws horizontal divider rule.</td></tr>
-    <tr><td><code>gui.file_dialog(options)</code></td><td><code>void</code></td><td>Opens file dialog matching user settings (native or built-in).</td></tr>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>Renders text label.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>Renders colored RGBA text.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>Renders push button and executes callback on click.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max)</code></td><td><code>number</code></td><td>Renders float slider widget.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max)</code></td><td><code>integer</code></td><td>Renders integer slider widget.</td></tr>
+    <tr><td><code>gui.drag_float(label, val, [speed, min, max])</code></td><td><code>number</code></td><td>Renders drag float box.</td></tr>
+    <tr><td><code>gui.input_text(label, text)</code></td><td><code>string</code></td><td>Renders single-line text input field.</td></tr>
+    <tr><td><code>gui.checkbox(label, state)</code></td><td><code>boolean</code></td><td>Renders toggle checkbox.</td></tr>
+    <tr><td><code>gui.same_line()</code></td><td><code>void</code></td><td>Aligns next widget on the same horizontal line.</td></tr>
+    <tr><td><code>gui.separator()</code></td><td><code>void</code></td><td>Draws horizontal separator line.</td></tr>
+    <tr><td><code>gui.file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Opens file dialog matching user settings (Native/Built-in).</td></tr>
+    <tr><td><code>gui.native_file_dialog(title, cb, [filter])</code></td><td><code>void</code></td><td>Forces native Zenity/KDialog system file dialog.</td></tr>
 </tbody>
 </table>
 
@@ -197,14 +314,14 @@ end</pre>
     <tr><th style="width: 35%;">Function</th><th style="width: 25%;">Returns</th><th style="width: 40%;">Description</th></tr>
 </thead>
 <tbody>
-    <tr><td><code>minicut.push_undo()</code></td><td><code>void</code></td><td>Pushes current project state onto undo history stack.</td></tr>
-    <tr><td><code>minicut.set_status(msg, [dur])</code></td><td><code>void</code></td><td>Displays temporary status toast notification.</td></tr>
-    <tr><td><code>minicut.log(msg)</code></td><td><code>void</code></td><td>Outputs debug line to standard console output.</td></tr>
+    <tr><td><code>minicut.push_undo()</code></td><td><code>void</code></td><td>Records snapshot for Undo history.</td></tr>
+    <tr><td><code>minicut.set_status(msg, [dur])</code></td><td><code>void</code></td><td>Displays temporary toast status message.</td></tr>
+    <tr><td><code>minicut.log(msg)</code></td><td><code>void</code></td><td>Outputs debug log message to console.</td></tr>
 </tbody>
 </table>
 
 <div class="footer">
-    minicut v1.2.0 • Lightweight Multi-Track Video Editor • Documentation generated automatically
+    minicut v1.2.0 • Lightweight Linux Multi-track Video Editor • Generated Documentation
 </div>
 </body>
 </html>

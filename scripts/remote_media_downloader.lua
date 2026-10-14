@@ -1,6 +1,6 @@
 -- ==============================================================================
 -- minicut Script: Remote Media Downloader
--- Demonstrates net.download(), net.get(), and timeline placement
+-- Demonstrates net.download(), net.get(), and timeline placement with file dialog
 -- ==============================================================================
 
 local remote_url = "https://picsum.photos/1280/720"
@@ -30,12 +30,24 @@ function download_and_insert()
     end
 end
 
+function choose_save_destination()
+    gui.file_dialog("Save Destination File", function(selected)
+        if selected and selected ~= "" then
+            local_filename = selected
+            minicut.set_status("Set download target: " .. selected)
+        end
+    end, "Image Files (*.jpg *.png *.webp)|*.jpg;*.png;*.webp|All Files (*.*)|*.*")
+end
+
 function plugin:init_panel()
     gui.text("Remote Media Downloader")
     gui.separator()
     
     remote_url = gui.input_text("Remote Media URL", remote_url)
     local_filename = gui.input_text("Save Destination", local_filename)
+    gui.same_line()
+    gui.button("Browse...##dl_browse", choose_save_destination)
+
     target_track = gui.slider_int("Track Lane", target_track, 0, 4)
     insert_duration = gui.slider_float("Duration (s)", insert_duration, 1.0, 30.0)
     
