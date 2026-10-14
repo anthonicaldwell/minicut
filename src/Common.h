@@ -10,6 +10,8 @@
 #include <chrono>
 #include <GL/glew.h>
 
+#define MINICUT_VERSION "1.2.0"
+
 // Forward declarations
 struct VideoAsset;
 struct AudioAsset;

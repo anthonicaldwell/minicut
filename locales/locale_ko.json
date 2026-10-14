@@ -90,10 +90,12 @@
     "text_add_to_timeline": "타임라인에 추가",
     "menu_scripts": "스크립트",
     "scripts_no_scripts": "스크립트가 없습니다",
-    "scripts_autorun_menu": "자동 실행 스크립트",
+    "scripts_autorun_menu": "자동 실행 스크립트 (도크)",
     "scripts_reload": "모든 스크립트 다시 로드",
     "scripts_directories": "디렉터리",
-    "menu_help_lua_api": "Lua API 참조 매뉴얼 (PDF)..."
+    "menu_help_lua_api": "Lua API 참조 매뉴얼 (PDF)...",
+    "menu_help_js_api": "JavaScript API 참조 매뉴얼 (PDF)...",
+    "dock_title": "도크"
   }
 }
 

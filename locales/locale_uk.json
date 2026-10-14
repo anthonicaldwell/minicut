@@ -90,10 +90,12 @@
     "text_add_to_timeline": "Додати на таймлайн",
     "menu_scripts": "Скрипти",
     "scripts_no_scripts": "Скрипти відсутні",
-    "scripts_autorun_menu": "Скрипти автозапуску",
+    "scripts_autorun_menu": "Скрипти автозапуску (Док)",
     "scripts_reload": "Перезавантажити всі скрипти",
     "scripts_directories": "Каталоги",
-    "menu_help_lua_api": "Довідник Lua API (PDF)..."
+    "menu_help_lua_api": "Довідник Lua API (PDF)...",
+    "menu_help_js_api": "Довідник JavaScript API (PDF)...",
+    "dock_title": "ДОК"
   }
 }
 

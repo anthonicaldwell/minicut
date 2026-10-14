@@ -53,6 +53,9 @@ public:
     std::string create_text_asset(const std::string& text, const TextConfig& config, const std::string& name = "");
     void add_text_to_timeline(const std::string& asset_id, double insert_time);
 
+    bool is_any_dialog_open() const;
+    void update_window_title();
+
 private:
     void apply_kde_plasma_theme();
     void process_events();
@@ -154,6 +157,7 @@ private:
     bool m_show_text_dialog = false;
     TextConfig m_text_config;
     char m_text_input_buf[1024] = "Title Text";
+    std::string m_last_rendered_text;
     GLuint m_text_preview_texture = 0;
     int m_text_preview_w = 0;
     int m_text_preview_h = 0;

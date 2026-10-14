@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>minicut JavaScript Scripting & Plugin API Reference Manual</title>
+<style>" + CSS_TEMPLATE + "</style>
+</head>
+<body>
+<div class="cover">
+    <h1>minicut Video Editor</h1>
+    <div class="subtitle">Embedded JavaScript & Plugin API Reference Manual</div>
+    <div>
+        <span class="badge">Duktape 2.7.0 Engine</span>
+        <span class="badge">Full UTF-8 / Multi-lingual</span>
+        <span class="badge">Dockable Tool Panels</span>
+        <span class="badge">Tool Shelf Dock</span>
+        <span class="badge">Network Library (libcurl)</span>
+    </div>
+</div>
+
+<h2>1. Introduction & JavaScript Architecture</h2>
+<p>
+    <strong>minicut</strong> embeds a complete <strong>JavaScript</strong> engine (Duktape 2.7.0) with native UTF-8 and Unicode string support. JavaScript plugins provide full parity with the minicut scripting API, making it easy to create internationalized tools in Japanese, Arabic, and other languages.
+</p>
+
+<h3>Script Directory Locations</h3>
+<table>
+<thead>
+    <tr><th style="width: 32%;">Location</th><th style="width: 28%;">Trigger / Role</th><th style="width: 40%;">Description</th></tr>
+</thead>
+<tbody>
+    <tr>
+        <td><code>~/.config/minicut/autorun/</code></td>
+        <td>Startup / Auto-register</td>
+        <td><code>.js</code> scripts execute on startup and add an icon button on the horizontal Tool Shelf Dock below the menu bar.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/scripts/</code></td>
+        <td>Menu Click / On Demand</td>
+        <td><code>.js</code> scripts appear in the top-level <strong>Scripts</strong> menu on the main menu bar.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/icons/</code></td>
+        <td>Dock Icon Asset</td>
+        <td>32x32 PNG icon images matching script stems (e.g., <code>text_animator.png</code> for <code>text_animator.js</code>).</td>
+    </tr>
+</tbody>
+</table>
+
+<h2>2. JavaScript Plugin Architecture</h2>
+<pre>// ============================================================================
+// Example JavaScript Plugin: custom_animator.js
+// ============================================================================
+
+var targetTrack = 0;
+var textContent = "日本語テキスト字幕";
+
+function applyAnimation() {
+    minicut.push_undo();
+    var clipId = timeline.place_text_clip(targetTrack, textContent, timeline.get_playhead(), 5.0);
+    if (clipId) {
+        clip.set_position(clipId, 0.0, 150.0);
+        clip.set_scale(clipId, 1.2);
+        timeline.add_keyframe(clipId, "opacity", 0.0, 0.0);
+        timeline.add_keyframe(clipId, "opacity", 0.5, 1.0);
+        minicut.set_status("Placed text clip: " + textContent);
+    }
+}
+
+plugin.init_panel = function() {
+    gui.text("JavaScript Text Animator");
+    gui.separator();
+    targetTrack = gui.slider_int("Track Lane", targetTrack, 0, 4);
+    textContent = gui.input_text("Caption Text", textContent);
+    
+    if (gui.button("Place Animated Text", applyAnimation)) {
+        // inline logic
+    }
+};</pre>
+
+<h2>3. Core JavaScript Modules</h2>
+
+<h3>3.1. Project & File Automation (<code>project</code> / Global)</h3>
+<table>
+<thead>
+    <tr><th style="width: 35%;">Function</th><th style="width: 25%;">Returns</th><th style="width: 40%;">Description</th></tr>
+</thead>
+<tbody>
+    <tr><td><code>project.save([path])</code><br><code>project_save([path])</code></td><td><code>boolean</code></td><td>Saves current project state to <code>.minicut</code> file.</td></tr>
+    <tr><td><code>project.load(path)</code><br><code>project_load(path)</code></td><td><code>boolean</code></td><td>Loads a project from <code>path</code>.</td></tr>
+    <tr><td><code>project.get_name()</code></td><td><code>string</code></td><td>Returns the current project name.</td></tr>
+    <tr><td><code>project.set_name(name)</code></td><td><code>void</code></td><td>Sets current project name.</td></tr>
+    <tr><td><code>project.import_video(path)</code></td><td><code>string</code></td><td>Imports video into the project media asset pool.</td></tr>
+    <tr><td><code>project.import_audio(path)</code></td><td><code>string</code></td><td>Imports audio into the project media asset pool.</td></tr>
+    <tr><td><code>project.import_image(path)</code></td><td><code>string</code></td><td>Imports static image into media asset pool.</td></tr>
+    <tr><td><code>assets.create_text(text, [opts])</code></td><td><code>string</code></td><td>Creates text asset with font, outline, and alignment.</td></tr>
+</tbody>
+</table>
+
+<h3>3.2. Network & Internet Library (<code>net</code>)</h3>
+<table>
+<thead>
+    <tr><th style="width: 35%;">Function</th><th style="width: 25%;">Returns</th><th style="width: 40%;">Description</th></tr>
+</thead>
+<tbody>
+    <tr><td><code>net.get(url)</code></td><td><code>object</code></td><td>HTTP GET request. Returns <code>{{status, body, ok, error}}</code>.</td></tr>
+    <tr><td><code>net.post(url, body)</code></td><td><code>object</code></td><td>HTTP POST request with string or JSON data.</td></tr>
+    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>Downloads remote asset directly to file.</td></tr>
+    <tr><td><code>net.upload(url, path)</code></td><td><code>object</code></td><td>Uploads file binary stream to remote URL.</td></tr>
+    <tr><td><code>net.request(options)</code></td><td><code>object</code></td><td>Custom HTTP request with method, body, timeout.</td></tr>
+</tbody>
+</table>
+
+<h3>3.3. Timeline & Track Management (<code>timeline</code>)</h3>
+<table>
+<thead>
+    <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
+</thead>
+<tbody>
+    <tr><td><code>timeline.get_playhead()</code></td><td><code>number</code></td><td>Current playhead position in seconds.</td></tr>
+    <tr><td><code>timeline.set_playhead(t)</code></td><td><code>void</code></td><td>Moves playhead to <code>t</code> seconds.</td></tr>
+    <tr><td><code>timeline.get_duration()</code></td><td><code>number</code></td><td>Total duration of timeline in seconds.</td></tr>
+    <tr><td><code>timeline.get_track_count()</code></td><td><code>number</code></td><td>Total count of tracks.</td></tr>
+    <tr><td><code>timeline.add_track(type, [name])</code></td><td><code>number</code></td><td>Adds a track ("video" or "audio") and returns index.</td></tr>
+    <tr><td><code>timeline.place_video(trk, id, start, dur)</code></td><td><code>string</code></td><td>Places video clip and returns clip ID.</td></tr>
+    <tr><td><code>timeline.place_audio(trk, id, start, dur)</code></td><td><code>string</code></td><td>Places audio clip and returns clip ID.</td></tr>
+    <tr><td><code>timeline.place_image(trk, id, start, dur)</code></td><td><code>string</code></td><td>Places image clip and returns clip ID.</td></tr>
+    <tr><td><code>timeline.place_text_clip(trk, text, start, dur)</code></td><td><code>string</code></td><td>Generates and places text clip on track.</td></tr>
+    <tr><td><code>timeline.delete_clip(clip_id)</code></td><td><code>boolean</code></td><td>Deletes clip and keyframes.</td></tr>
+    <tr><td><code>timeline.split_clip(clip_id, [t])</code></td><td><code>boolean</code></td><td>Splits clip at time <code>t</code> (or playhead).</td></tr>
+    <tr><td><code>timeline.select_clips(ids_array)</code></td><td><code>void</code></td><td>Selects multiple clips by ID array.</td></tr>
+    <tr><td><code>timeline.get_selected_clips()</code></td><td><code>Array&lt;string&gt;</code></td><td>Returns array of selected clip IDs.</td></tr>
+    <tr><td><code>timeline.clear_selection()</code></td><td><code>void</code></td><td>Clears clip selection.</td></tr>
+    <tr><td><code>timeline.move_track_up(idx)</code></td><td><code>void</code></td><td>Moves track up in stack order.</td></tr>
+    <tr><td><code>timeline.move_track_down(idx)</code></td><td><code>void</code></td><td>Moves track down in stack order.</td></tr>
+    <tr><td><code>timeline.set_track_name(idx, name)</code></td><td><code>void</code></td><td>Renames track at index.</td></tr>
+    <tr><td><code>timeline.get_track_name(idx)</code></td><td><code>string</code></td><td>Gets track name at index.</td></tr>
+    <tr><td><code>timeline.add_keyframe(id, prop, t, val)</code></td><td><code>void</code></td><td>Adds keyframe for property at time <code>t</code>.</td></tr>
+    <tr><td><code>timeline.remove_keyframe(id, prop, t)</code></td><td><code>void</code></td><td>Removes keyframe near timestamp <code>t</code>.</td></tr>
+    <tr><td><code>timeline.evaluate_keyframe(id, prop, t, [def])</code></td><td><code>number</code></td><td>Calculates interpolated value at time <code>t</code>.</td></tr>
+</tbody>
+</table>
+
+<h3>3.4. Clip Transformations (<code>clip</code>)</h3>
+<table>
+<thead>
+    <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
+</thead>
+<tbody>
+    <tr><td><code>clip.get_position(clip_id)</code></td><td><code>{{x, y}}</code></td><td>Returns center offset object <code>{{x: 0, y: 0}}</code>.</td></tr>
+    <tr><td><code>clip.set_position(clip_id, x, y)</code></td><td><code>void</code></td><td>Sets center position offset in pixels.</td></tr>
+    <tr><td><code>clip.get_scale(clip_id)</code></td><td><code>number</code></td><td>Returns scale multiplier (1.0 = 100%).</td></tr>
+    <tr><td><code>clip.set_scale(clip_id, s)</code></td><td><code>void</code></td><td>Sets uniform scale multiplier.</td></tr>
+    <tr><td><code>clip.get_rotation(clip_id)</code></td><td><code>number</code></td><td>Returns rotation in degrees.</td></tr>
+    <tr><td><code>clip.set_rotation(clip_id, r)</code></td><td><code>void</code></td><td>Sets rotation in degrees.</td></tr>
+    <tr><td><code>clip.get_opacity(clip_id)</code></td><td><code>number</code></td><td>Returns opacity multiplier [0.0, 1.0].</td></tr>
+    <tr><td><code>clip.set_opacity(clip_id, o)</code></td><td><code>void</code></td><td>Sets opacity multiplier.</td></tr>
+    <tr><td><code>clip.get_volume(clip_id)</code></td><td><code>number</code></td><td>Returns volume multiplier [0.0, 2.0].</td></tr>
+    <tr><td><code>clip.set_volume(clip_id, v)</code></td><td><code>void</code></td><td>Sets volume multiplier.</td></tr>
+    <tr><td><code>clip.get_time(clip_id)</code></td><td><code>{{start_time, duration, offset}}</code></td><td>Returns timing object.</td></tr>
+    <tr><td><code>clip.set_time(clip_id, start, dur, [off])</code></td><td><code>void</code></td><td>Updates clip timing and media offset.</td></tr>
+    <tr><td><code>clip.get_info(clip_id)</code></td><td><code>object</code></td><td>Returns comprehensive metadata dictionary.</td></tr>
+</tbody>
+</table>
+
+<h3>3.5. GUI UI Elements (<code>gui</code>)</h3>
+<table>
+<thead>
+    <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
+</thead>
+<tbody>
+    <tr><td><code>gui.text(text)</code></td><td><code>void</code></td><td>Displays text string.</td></tr>
+    <tr><td><code>gui.text_colored(r, g, b, a, text)</code></td><td><code>void</code></td><td>Displays RGBA colored text.</td></tr>
+    <tr><td><code>gui.button(label, [callback])</code></td><td><code>boolean</code></td><td>Renders push button and calls callback if clicked.</td></tr>
+    <tr><td><code>gui.slider_float(label, val, min, max, [cb])</code></td><td><code>number</code></td><td>Renders float slider.</td></tr>
+    <tr><td><code>gui.slider_int(label, val, min, max, [cb])</code></td><td><code>number</code></td><td>Renders integer slider.</td></tr>
+    <tr><td><code>gui.input_text(label, text, [cb])</code></td><td><code>string</code></td><td>Single-line text entry box.</td></tr>
+    <tr><td><code>gui.checkbox(label, state, [cb])</code></td><td><code>boolean</code></td><td>Toggle checkbox.</td></tr>
+    <tr><td><code>gui.same_line()</code></td><td><code>void</code></td><td>Places next widget horizontally on same line.</td></tr>
+    <tr><td><code>gui.separator()</code></td><td><code>void</code></td><td>Draws horizontal divider.</td></tr>
+    <tr><td><code>gui.file_dialog(options)</code></td><td><code>void</code></td><td>Opens file dialog matching user settings.</td></tr>
+</tbody>
+</table>
+
+<h3>3.6. Engine Utilities (<code>minicut</code> / <code>console</code>)</h3>
+<table>
+<thead>
+    <tr><th style="width: 35%;">Function</th><th style="width: 25%;">Returns</th><th style="width: 40%;">Description</th></tr>
+</thead>
+<tbody>
+    <tr><td><code>minicut.push_undo()</code></td><td><code>void</code></td><td>Pushes undo state.</td></tr>
+    <tr><td><code>minicut.set_status(msg, [dur])</code></td><td><code>void</code></td><td>Shows toast notification.</td></tr>
+    <tr><td><code>minicut.log(...)</code><br><code>console.log(...)</code></td><td><code>void</code></td><td>Outputs debug log to terminal.</td></tr>
+</tbody>
+</table>
+
+<div class="footer">
+    minicut v1.2.0 • Lightweight Multi-Track Video Editor • Documentation generated automatically
+</div>
+</body>
+</html>

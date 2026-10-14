@@ -2,6 +2,7 @@
 #include "LocaleManager.h"
 #include "TempManager.h"
 #include <imgui.h>
+#include <imgui_internal.h>
 #include <backends/imgui_impl_sdl2.h>
 #include <backends/imgui_impl_opengl3.h>
 #include <nlohmann/json.hpp>
@@ -40,7 +41,7 @@ bool App::init(int argc, char* argv[]) {
     SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
     m_window = SDL_CreateWindow(
-        "minicut - Multi-Track Video Editor",
+        "Minicut - New Project",
         SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
         m_window_width, m_window_height,
         SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_ALLOW_HIGHDPI
@@ -112,9 +113,9 @@ bool App::init(int argc, char* argv[]) {
         "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"
     };
     std::vector<std::string> cjk_candidates = {
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
-        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf"
+        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc"
     };
     std::vector<std::string> arabic_candidates = {
         "/usr/share/fonts/truetype/noto/NotoSansArabicUI-Regular.ttf",
@@ -224,6 +225,7 @@ bool App::init(int argc, char* argv[]) {
         }
     );
     m_script_engine.set_app(this);
+    update_window_title();
 
     return true;
 }
@@ -292,6 +294,7 @@ void App::set_playhead_time(double t) {
 }
 
 void App::on_project_modified() {
+    update_window_title();
     m_audio_engine.update_project_snapshot(m_project);
     m_media_decoder.request_frame(m_playhead_time, m_project);
 }
@@ -319,6 +322,7 @@ void App::undo() {
         m_redo_stack.push_back(m_project);
         m_project = m_undo_stack.back();
         m_undo_stack.pop_back();
+        update_window_title();
         m_audio_engine.update_project_snapshot(m_project);
         m_media_decoder.request_frame(m_playhead_time, m_project);
     }
@@ -329,6 +333,7 @@ void App::redo() {
         m_undo_stack.push_back(m_project);
         m_project = m_redo_stack.back();
         m_redo_stack.pop_back();
+        update_window_title();
         m_audio_engine.update_project_snapshot(m_project);
         m_media_decoder.request_frame(m_playhead_time, m_project);
     }
@@ -337,7 +342,7 @@ void App::redo() {
 void App::new_project() {
     push_undo_state();
     m_project = Project();
-    m_project.name = "Untitled Project";
+    m_project.name = "";
     m_playhead_time = 0.0;
     m_selected_clip_id.clear();
 
@@ -350,6 +355,7 @@ void App::new_project() {
     m_project.tracks.push_back(a1);
     m_project.tracks.push_back(a2);
 
+    update_window_title();
     m_audio_engine.update_project_snapshot(m_project);
     m_media_decoder.request_frame(m_playhead_time, m_project);
 }
@@ -371,6 +377,7 @@ void App::open_project(const std::string& path) {
         m_project = p;
         m_playhead_time = 0.0;
         m_selected_clip_id.clear();
+        update_window_title();
         m_audio_engine.update_project_snapshot(m_project);
         m_audio_engine.ensure_project_assets_loaded(m_project);
         m_media_decoder.request_frame(m_playhead_time, m_project);
@@ -384,6 +391,7 @@ void App::save_project(const std::string& path) {
         return;
     }
     ProjectSerializer::save_to_file(m_project, target_path);
+    update_window_title();
 }
 
 void App::add_asset_to_timeline(const std::string& asset_id, bool is_video, double insert_time) {
@@ -550,8 +558,8 @@ void App::import_video_browser() {
         NativeFileDialog::open_file(
             "Import Video Clip",
             "",
-            "Supported Video Files (*.mp4, *.mkv, *.mov, *.avi, *.webm)",
-            "*.mp4 *.mkv *.mov *.avi *.webm",
+            "Supported Video Files (*.mp4, *.mkv, *.mov, *.avi, *.webm, *.ogv, *.ogm)",
+            "*.mp4 *.mkv *.mov *.avi *.webm *.ogv *.ogm",
             on_chosen
         );
         return;
@@ -560,7 +568,7 @@ void App::import_video_browser() {
     m_file_browser.open(
         "Import Video Clip",
         FileBrowserMode::OpenFile,
-        { { "Supported Video Files (*.mp4, *.mkv, *.mov, *.avi, *.webm)", { ".mp4", ".mkv", ".mov", ".avi", ".webm" } },
+        { { "Supported Video Files (*.mp4, *.mkv, *.mov, *.avi, *.webm, *.ogv, *.ogm)", { ".mp4", ".mkv", ".mov", ".avi", ".webm", ".ogv", ".ogm" } },
           { "All Files (*.*)", { ".*" } } },
         "",
         "",
@@ -703,6 +711,36 @@ void App::process_events() {
             if (event.window.event == SDL_WINDOWEVENT_RESIZED) {
                 m_window_width = event.window.data1;
                 m_window_height = event.window.data2;
+            }
+        } else if (event.type == SDL_DROPFILE) {
+            char* dropped_file = event.drop.file;
+            if (dropped_file) {
+                std::string path = dropped_file;
+                SDL_free(dropped_file);
+                if (fs::exists(path)) {
+                    std::string ext = fs::path(path).extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    if (ext == ".minicut") {
+                        open_project(path);
+                    } else if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".webp") {
+                        push_undo_state();
+                        m_clip_manager.start_async_import_image(path, 5.0, [this]() {
+                            m_audio_engine.update_project_snapshot(m_project);
+                        });
+                    } else if (ext == ".mp3" || ext == ".wav" || ext == ".aac" || ext == ".ogg" || ext == ".flac" || ext == ".m4a" || ext == ".opus") {
+                        push_undo_state();
+                        m_clip_manager.start_async_import_audio(path, [this]() {
+                            m_audio_engine.update_project_snapshot(m_project);
+                            m_audio_engine.ensure_project_assets_loaded(m_project);
+                        });
+                    } else if (ext == ".mp4" || ext == ".mkv" || ext == ".mov" || ext == ".avi" || ext == ".webm" || ext == ".flv" || ext == ".wmv" || ext == ".m4v" || ext == ".ts" || ext == ".ogv" || ext == ".ogm") {
+                        push_undo_state();
+                        m_clip_manager.start_async_import_video(path, [this]() {
+                            m_audio_engine.update_project_snapshot(m_project);
+                            m_audio_engine.ensure_project_assets_loaded(m_project);
+                        });
+                    }
+                }
             }
         }
     }
@@ -964,15 +1002,31 @@ void App::render_menu_bar() {
         }
 
         if (ImGui::BeginMenu(_TR("menu_help"))) {
+            ImGui::MenuItem("minicut v" MINICUT_VERSION, nullptr, false, false);
+            ImGui::Separator();
+
+            bool is_ja = (LocaleManager::instance().current_locale() == "ja" || LocaleManager::instance().current_locale() == "jp");
+
             if (ImGui::MenuItem(_TR("menu_help_lua_api"))) {
                 const char* home = std::getenv("HOME");
-                std::vector<std::string> candidates = {
-                    "docs/minicut_lua_api.pdf",
-                    "../docs/minicut_lua_api.pdf",
-                    home ? (std::string(home) + "/.config/minicut/docs/minicut_lua_api.pdf") : "",
-                    home ? (std::string(home) + "/.local/share/minicut/docs/minicut_lua_api.pdf") : "",
-                    "/home/kaiju/.local/bin/docs/minicut_lua_api.pdf"
-                };
+                std::vector<std::string> candidates;
+                if (is_ja) {
+                    candidates.push_back("docs/minicut_lua_api_ja.pdf");
+                    candidates.push_back("../docs/minicut_lua_api_ja.pdf");
+                    if (home) {
+                        candidates.push_back(std::string(home) + "/.config/minicut/docs/minicut_lua_api_ja.pdf");
+                        candidates.push_back(std::string(home) + "/.local/share/minicut/docs/minicut_lua_api_ja.pdf");
+                    }
+                    candidates.push_back("/home/kaiju/.local/bin/docs/minicut_lua_api_ja.pdf");
+                }
+                candidates.push_back("docs/minicut_lua_api.pdf");
+                candidates.push_back("../docs/minicut_lua_api.pdf");
+                if (home) {
+                    candidates.push_back(std::string(home) + "/.config/minicut/docs/minicut_lua_api.pdf");
+                    candidates.push_back(std::string(home) + "/.local/share/minicut/docs/minicut_lua_api.pdf");
+                }
+                candidates.push_back("/home/kaiju/.local/bin/docs/minicut_lua_api.pdf");
+
                 for (const auto& p : candidates) {
                     if (!p.empty() && fs::exists(p)) {
                         std::string cmd = "xdg-open \"" + p + "\" >/dev/null 2>&1 &";
@@ -981,6 +1035,37 @@ void App::render_menu_bar() {
                     }
                 }
             }
+
+            if (ImGui::MenuItem(_TR("menu_help_js_api"))) {
+                const char* home = std::getenv("HOME");
+                std::vector<std::string> candidates;
+                if (is_ja) {
+                    candidates.push_back("docs/minicut_js_api_ja.pdf");
+                    candidates.push_back("../docs/minicut_js_api_ja.pdf");
+                    if (home) {
+                        candidates.push_back(std::string(home) + "/.config/minicut/docs/minicut_js_api_ja.pdf");
+                        candidates.push_back(std::string(home) + "/.local/share/minicut/docs/minicut_js_api_ja.pdf");
+                    }
+                    candidates.push_back("/home/kaiju/.local/bin/docs/minicut_js_api_ja.pdf");
+                }
+                candidates.push_back("docs/minicut_js_api.pdf");
+                candidates.push_back("../docs/minicut_js_api.pdf");
+                if (home) {
+                    candidates.push_back(std::string(home) + "/.config/minicut/docs/minicut_js_api.pdf");
+                    candidates.push_back(std::string(home) + "/.local/share/minicut/docs/minicut_js_api.pdf");
+                }
+                candidates.push_back("/home/kaiju/.local/bin/docs/minicut_js_api.pdf");
+
+                for (const auto& p : candidates) {
+                    if (!p.empty() && fs::exists(p)) {
+                        std::string cmd = "xdg-open \"" + p + "\" >/dev/null 2>&1 &";
+                        std::system(cmd.c_str());
+                        break;
+                    }
+                }
+            }
+
+            ImGui::Separator();
             if (ImGui::MenuItem(_TR("help_about"))) { m_show_about = true; }
             ImGui::EndMenu();
         }
@@ -1208,8 +1293,8 @@ void App::render_about_dialog() {
     }
 
     if (ImGui::BeginPopupModal("About minicut", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
-        ImGui::Text("minicut - Modern C++17 Multi-Track Video Editor");
-        ImGui::TextDisabled("Built for Linux / Kubuntu 26.04.1 LTS with KDE Plasma");
+        ImGui::Text("minicut v%s - Modern C++17 Multi-Track Video Editor", MINICUT_VERSION);
+        ImGui::TextDisabled("Built for Linux with KDE Plasma / Modern Desktop Environments");
         ImGui::Separator();
         ImGui::BulletText("OpenGL 3.3 Core Profile + Dear ImGui");
         ImGui::BulletText("FFmpeg (avformat, avcodec, swscale, swresample)");
@@ -1218,12 +1303,40 @@ void App::render_about_dialog() {
         ImGui::BulletText("Full Transform Keyframing (Position, Rotation, Scale, Opacity)");
         ImGui::BulletText("Non-blocking Asynchronous Export Pipeline (.mp4)");
         ImGui::BulletText("Full Interactive Graphical FileBrowser");
+        ImGui::BulletText("Embedded Lua 5.1 / LuaJIT & JavaScript (Duktape) Engines");
+        ImGui::BulletText("FreeType Text Generation with Full CJK & Arabic Shaping Support");
         ImGui::Separator();
         if (ImGui::Button("OK", ImVec2(100, 26))) {
             ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
     }
+}
+
+bool App::is_any_dialog_open() const {
+    if (m_show_about || m_show_text_dialog || m_file_browser.is_open() ||
+        m_export_manager.is_dialog_open() || m_export_manager.is_exporting() ||
+        m_timeline.is_rename_modal_open() || m_clip_manager.is_importing()) {
+        return true;
+    }
+    if (ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
+        return true;
+    }
+    ImGuiContext* g = ImGui::GetCurrentContext();
+    if (g && (g->OpenPopupStack.Size > 0 || g->NavWindowingTarget != nullptr)) {
+        return true;
+    }
+    return false;
+}
+
+void App::update_window_title() {
+    if (!m_window) return;
+    std::string proj_title = m_project.name;
+    if (proj_title.empty() || proj_title == "Untitled Project") {
+        proj_title = "New Project";
+    }
+    std::string full_title = "Minicut - " + proj_title;
+    SDL_SetWindowTitle(m_window, full_title.c_str());
 }
 
 void App::load_settings() {
@@ -1300,8 +1413,7 @@ void App::cleanup_temp_files() {
 
 void App::render_splitters() {
     // Suppress splitters if any modal, popup, file browser, or dialog is currently open
-    if (m_show_about || m_show_text_dialog || m_file_browser.is_open() || m_clip_manager.is_importing() ||
-        ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId | ImGuiPopupFlags_AnyPopupLevel)) {
+    if (is_any_dialog_open()) {
         m_dragging_split_h = false;
         m_dragging_split_top_v = false;
         m_dragging_split_bottom_v = false;
@@ -1641,6 +1753,10 @@ void App::render_text_dialog() {
             ImGui::TextDisabled("(RTL Arabic mode active)");
         }
         if (ImGui::InputTextMultiline("##text_input_content", m_text_input_buf, sizeof(m_text_input_buf), ImVec2(-1, 80))) {
+            m_text_preview_dirty = true;
+        }
+        if (m_last_rendered_text != m_text_input_buf) {
+            m_last_rendered_text = m_text_input_buf;
             m_text_preview_dirty = true;
         }
 

@@ -17,6 +17,8 @@ pkg_check_modules(LIBPNG REQUIRED libpng16)
 # Find FFmpeg components (Checking system standard paths and third_party fallback)
 set(FFMPEG_SEARCH_INCLUDE
     /usr/include/x86_64-linux-gnu
+    /usr/include/aarch64-linux-gnu
+    /usr/include/arm-linux-gnueabihf
     /usr/include
     /usr/local/include
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg/usr/include/x86_64-linux-gnu
@@ -24,6 +26,9 @@ set(FFMPEG_SEARCH_INCLUDE
 
 set(FFMPEG_SEARCH_LIB
     /usr/lib/x86_64-linux-gnu
+    /usr/lib/aarch64-linux-gnu
+    /usr/lib/arm-linux-gnueabihf
+    /usr/lib64
     /usr/lib
     /usr/local/lib
     ${CMAKE_CURRENT_SOURCE_DIR}/third_party/ffmpeg/usr/lib/x86_64-linux-gnu
@@ -85,11 +90,14 @@ set(LUAJIT_LIB "${CMAKE_CURRENT_SOURCE_DIR}/third_party/luajit/lib/libluajit-5.1
 
 # libcurl setup
 set(CURL_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/curl/include")
-find_library(CURL_LIB NAMES curl PATHS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/curl/lib" /usr/lib/x86_64-linux-gnu /usr/lib)
+find_library(CURL_LIB NAMES curl PATHS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/curl/lib" /usr/lib/x86_64-linux-gnu /usr/lib/aarch64-linux-gnu /usr/lib64 /usr/lib /usr/local/lib)
 if(NOT CURL_LIB)
     message(FATAL_ERROR "libcurl library not found")
 endif()
 message(STATUS "Found libcurl: ${CURL_LIB}")
+
+# Duktape setup
+set(DUKTAPE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/duktape")
 
 # Dear ImGui sources
 set(IMGUI_SOURCES
@@ -119,6 +127,7 @@ set(MINICUT_SOURCES
     src/ScriptEngine.cpp
     src/ArabicShaper.cpp
     src/TextGenerator.cpp
+    ${DUKTAPE_DIR}/duktape.c
     ${IMGUI_SOURCES}
 )
 
@@ -134,6 +143,7 @@ target_include_directories(minicut PRIVATE
     ${OPENGL_INCLUDE_DIR}
     ${AVCODEC_INCLUDE_DIR}
     ${LUAJIT_INCLUDE_DIR}
+    ${DUKTAPE_DIR}
     ${CURL_INCLUDE_DIR}
     ${FREETYPE_INCLUDE_DIRS}
     ${LIBPNG_INCLUDE_DIRS}
@@ -168,8 +178,8 @@ target_link_libraries(minicut PRIVATE
 )
 
 set_target_properties(minicut PROPERTIES
-    BUILD_RPATH "/usr/lib/x86_64-linux-gnu"
-    INSTALL_RPATH "/usr/lib/x86_64-linux-gnu"
+    BUILD_RPATH "/usr/lib/x86_64-linux-gnu;/usr/lib64;/usr/lib"
+    INSTALL_RPATH "$ORIGIN/../lib;/usr/lib/x86_64-linux-gnu;/usr/lib64;/usr/lib"
     INSTALL_RPATH_USE_LINK_PATH TRUE
 )
 
@@ -190,6 +200,7 @@ add_executable(test_minicut
     src/ScriptEngine.cpp
     src/ArabicShaper.cpp
     src/TextGenerator.cpp
+    ${DUKTAPE_DIR}/duktape.c
     ${IMGUI_SOURCES}
 )
 
@@ -203,6 +214,7 @@ target_include_directories(test_minicut PRIVATE
     ${OPENGL_INCLUDE_DIR}
     ${AVCODEC_INCLUDE_DIR}
     ${LUAJIT_INCLUDE_DIR}
+    ${DUKTAPE_DIR}
     ${CURL_INCLUDE_DIR}
     ${FREETYPE_INCLUDE_DIRS}
     ${LIBPNG_INCLUDE_DIRS}
@@ -237,7 +249,7 @@ target_link_libraries(test_minicut PRIVATE
 )
 
 set_target_properties(test_minicut PROPERTIES
-    BUILD_RPATH "/usr/lib/x86_64-linux-gnu"
-    INSTALL_RPATH "/usr/lib/x86_64-linux-gnu"
+    BUILD_RPATH "/usr/lib/x86_64-linux-gnu;/usr/lib64;/usr/lib"
+    INSTALL_RPATH "$ORIGIN/../lib;/usr/lib/x86_64-linux-gnu;/usr/lib64;/usr/lib"
     INSTALL_RPATH_USE_LINK_PATH TRUE
 )

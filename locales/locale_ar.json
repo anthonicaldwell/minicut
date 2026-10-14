@@ -90,10 +90,12 @@
     "text_add_to_timeline": "إضافة إلى المخطط الزمني",
     "menu_scripts": "البرمجيات (Scripts)",
     "scripts_no_scripts": "لا توجد سكربتات في المجلد",
-    "scripts_autorun_menu": "سكربتات التشغيل التلقائي",
+    "scripts_autorun_menu": "سكربتات التشغيل التلقائي (منصة)",
     "scripts_reload": "إعادة تحميل كافة السكربتات",
     "scripts_directories": "المسارات والمجلدات",
-    "menu_help_lua_api": "دليل واجهة برمجة Lua (PDF)..."
+    "menu_help_lua_api": "دليل واجهة برمجة Lua (PDF)...",
+    "menu_help_js_api": "دليل واجهة برمجة JavaScript (PDF)...",
+    "dock_title": "منصة"
   }
 }
 

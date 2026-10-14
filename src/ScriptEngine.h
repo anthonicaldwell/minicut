@@ -2,6 +2,7 @@
 
 #include "Common.h"
 #include <lua.hpp>
+#include "duktape.h"
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -15,14 +16,15 @@ class App;
 
 struct ScriptItem {
     std::string id;            // Unique identifier, e.g. "quick_placement"
-    std::string filename;      // e.g. "quick_placement.lua"
+    std::string filename;      // e.g. "quick_placement.lua" or "quick_placement.js"
     std::string path;          // Absolute path
     std::string title;         // Human-friendly title, e.g. "Quick Placement"
     std::string description;   // Tooltip info
     bool is_autorun = false;   // Lives in ~/.config/minicut/autorun/
-    bool is_loaded = false;    // Has file been executed into Lua?
+    bool is_loaded = false;    // Has file been executed?
     bool is_panel_open = false; // Plugin tool panel currently open
-    GLuint icon_texture = 0;   // Texture for shelf dock icon
+    bool is_javascript = false; // True if .js file
+    GLuint icon_texture = 0;   // Texture for dock icon
 };
 
 class ScriptEngine {
@@ -50,6 +52,9 @@ public:
     bool execute_script(ScriptItem& item);
     bool run_file(const std::string& file_path);
     bool run_string(const std::string& lua_code);
+    bool run_js_file(const std::string& file_path);
+    bool run_js_string(const std::string& js_code);
+    duk_context* get_js_context() const { return m_ctx; }
 
     // Frame update & UI Rendering
     void update(double delta_time);
@@ -192,7 +197,101 @@ private:
     static int lua_net_upload(lua_State* L);
     static int lua_net_request(lua_State* L);
 
+    // Static JS C-API Dispatchers
+    // GUI
+    static duk_ret_t js_gui_text(duk_context* ctx);
+    static duk_ret_t js_gui_text_colored(duk_context* ctx);
+    static duk_ret_t js_gui_text_disabled(duk_context* ctx);
+    static duk_ret_t js_gui_button(duk_context* ctx);
+    static duk_ret_t js_gui_small_button(duk_context* ctx);
+    static duk_ret_t js_gui_slider_float(duk_context* ctx);
+    static duk_ret_t js_gui_slider_int(duk_context* ctx);
+    static duk_ret_t js_gui_drag_float(duk_context* ctx);
+    static duk_ret_t js_gui_drag_int(duk_context* ctx);
+    static duk_ret_t js_gui_input_text(duk_context* ctx);
+    static duk_ret_t js_gui_checkbox(duk_context* ctx);
+    static duk_ret_t js_gui_same_line(duk_context* ctx);
+    static duk_ret_t js_gui_separator(duk_context* ctx);
+    static duk_ret_t js_gui_spacing(duk_context* ctx);
+    static duk_ret_t js_gui_tooltip(duk_context* ctx);
+    static duk_ret_t js_gui_set_next_item_width(duk_context* ctx);
+    static duk_ret_t js_gui_file_dialog(duk_context* ctx);
+    static duk_ret_t js_gui_native_file_dialog(duk_context* ctx);
+    static duk_ret_t js_gui_builtin_file_dialog(duk_context* ctx);
+
+    // Timeline
+    static duk_ret_t js_timeline_get_playhead(duk_context* ctx);
+    static duk_ret_t js_timeline_set_playhead(duk_context* ctx);
+    static duk_ret_t js_timeline_get_duration(duk_context* ctx);
+    static duk_ret_t js_timeline_get_track_count(duk_context* ctx);
+    static duk_ret_t js_timeline_add_track(duk_context* ctx);
+    static duk_ret_t js_timeline_place_video(duk_context* ctx);
+    static duk_ret_t js_timeline_place_audio(duk_context* ctx);
+    static duk_ret_t js_timeline_place_image(duk_context* ctx);
+    static duk_ret_t js_timeline_place_text_clip(duk_context* ctx);
+    static duk_ret_t js_timeline_get_selected_clip(duk_context* ctx);
+    static duk_ret_t js_timeline_get_selected_clips(duk_context* ctx);
+    static duk_ret_t js_timeline_select_clip(duk_context* ctx);
+    static duk_ret_t js_timeline_select_clips(duk_context* ctx);
+    static duk_ret_t js_timeline_clear_selection(duk_context* ctx);
+    static duk_ret_t js_timeline_select_all(duk_context* ctx);
+    static duk_ret_t js_timeline_delete_clip(duk_context* ctx);
+    static duk_ret_t js_timeline_split_clip(duk_context* ctx);
+    static duk_ret_t js_timeline_move_track_up(duk_context* ctx);
+    static duk_ret_t js_timeline_move_track_down(duk_context* ctx);
+    static duk_ret_t js_timeline_move_track(duk_context* ctx);
+    static duk_ret_t js_timeline_swap_tracks(duk_context* ctx);
+    static duk_ret_t js_timeline_set_track_name(duk_context* ctx);
+    static duk_ret_t js_timeline_get_track_name(duk_context* ctx);
+    static duk_ret_t js_timeline_add_keyframe(duk_context* ctx);
+    static duk_ret_t js_timeline_remove_keyframe(duk_context* ctx);
+    static duk_ret_t js_timeline_clear_keyframes(duk_context* ctx);
+    static duk_ret_t js_timeline_get_keyframes(duk_context* ctx);
+    static duk_ret_t js_timeline_evaluate_keyframe(duk_context* ctx);
+
+    // Clip
+    static duk_ret_t js_clip_get_position(duk_context* ctx);
+    static duk_ret_t js_clip_set_position(duk_context* ctx);
+    static duk_ret_t js_clip_get_scale(duk_context* ctx);
+    static duk_ret_t js_clip_set_scale(duk_context* ctx);
+    static duk_ret_t js_clip_get_rotation(duk_context* ctx);
+    static duk_ret_t js_clip_set_rotation(duk_context* ctx);
+    static duk_ret_t js_clip_get_opacity(duk_context* ctx);
+    static duk_ret_t js_clip_set_opacity(duk_context* ctx);
+    static duk_ret_t js_clip_get_volume(duk_context* ctx);
+    static duk_ret_t js_clip_set_volume(duk_context* ctx);
+    static duk_ret_t js_clip_get_time(duk_context* ctx);
+    static duk_ret_t js_clip_set_time(duk_context* ctx);
+    static duk_ret_t js_clip_get_info(duk_context* ctx);
+
+    // Project & Assets
+    static duk_ret_t js_project_save(duk_context* ctx);
+    static duk_ret_t js_project_load(duk_context* ctx);
+    static duk_ret_t js_project_import_video(duk_context* ctx);
+    static duk_ret_t js_project_import_audio(duk_context* ctx);
+    static duk_ret_t js_project_import_image(duk_context* ctx);
+    static duk_ret_t js_project_get_name(duk_context* ctx);
+    static duk_ret_t js_project_set_name(duk_context* ctx);
+    static duk_ret_t js_assets_create_text(duk_context* ctx);
+
+    // Minicut & Utilities
+    static duk_ret_t js_minicut_log(duk_context* ctx);
+    static duk_ret_t js_minicut_set_status(duk_context* ctx);
+    static duk_ret_t js_minicut_push_undo(duk_context* ctx);
+
+    // Net
+    static duk_ret_t js_net_get(duk_context* ctx);
+    static duk_ret_t js_net_post(duk_context* ctx);
+    static duk_ret_t js_net_download(duk_context* ctx);
+    static duk_ret_t js_net_upload(duk_context* ctx);
+    static duk_ret_t js_net_request(duk_context* ctx);
+
+    void register_js_api();
+    bool execute_js_script(ScriptItem& item);
+    void call_js_panel_render(ScriptItem& item);
+
     lua_State* m_L = nullptr;
+    duk_context* m_ctx = nullptr;
 
     Project* m_project = nullptr;
     Timeline* m_timeline = nullptr;

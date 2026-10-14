@@ -32,6 +32,7 @@ public:
     bool is_error() const { return m_is_error.load(); }
 
     void open_export_dialog() { m_show_dialog = true; }
+    bool is_dialog_open() const { return m_show_dialog; }
     void render_ui(const std::function<void(const ExportConfig& cfg)>& on_start_export = nullptr);
 
     void set_browse_callback(const std::function<void()>& cb) { m_on_browse = cb; }

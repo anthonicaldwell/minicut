@@ -90,10 +90,12 @@
     "text_add_to_timeline": "タイムラインに追加",
     "menu_scripts": "スクリプト",
     "scripts_no_scripts": "スクリプトが見つかりません",
-    "scripts_autorun_menu": "自動実行スクリプト",
+    "scripts_autorun_menu": "自動実行スクリプト (ドック)",
     "scripts_reload": "すべてのスクリプトを再読込",
     "scripts_directories": "ディレクトリ",
-    "menu_help_lua_api": "Lua APIリファレンスマニュアル (PDF)..."
+    "menu_help_lua_api": "Lua APIリファレンスマニュアル (PDF)...",
+    "menu_help_js_api": "JavaScript APIリファレンスマニュアル (PDF)...",
+    "dock_title": "ドック"
   }
 }
 

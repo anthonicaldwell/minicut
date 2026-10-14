@@ -85,6 +85,14 @@ bool ScriptEngine::init(Project* project,
     luaL_openlibs(m_L);
     register_lua_api();
 
+    // Initialize JavaScript (Duktape) state
+    m_ctx = duk_create_heap_default();
+    if (m_ctx) {
+        register_js_api();
+    } else {
+        std::cerr << "[ScriptEngine] Failed to create Duktape JS context!" << std::endl;
+    }
+
     // Scan directories & load autorun scripts
     reload_scripts();
 
@@ -96,6 +104,10 @@ void ScriptEngine::shutdown() {
     if (m_L) {
         lua_close(m_L);
         m_L = nullptr;
+    }
+    if (m_ctx) {
+        duk_destroy_heap(m_ctx);
+        m_ctx = nullptr;
     }
     curl_global_cleanup();
 }
@@ -142,7 +154,8 @@ void ScriptEngine::scan_directories() {
     // 1. Autorun scripts in ~/.config/minicut/autorun/
     if (fs::exists(m_autorun_dir, ec)) {
         for (const auto& entry : fs::directory_iterator(m_autorun_dir, ec)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".lua") {
+            std::string ext = entry.path().extension().string();
+            if (entry.is_regular_file() && (ext == ".lua" || ext == ".js")) {
                 ScriptItem item;
                 item.id = entry.path().stem().string();
                 item.filename = entry.path().filename().string();
@@ -152,6 +165,7 @@ void ScriptEngine::scan_directories() {
                 item.is_autorun = true;
                 item.is_loaded = false;
                 item.is_panel_open = false;
+                item.is_javascript = (ext == ".js");
                 item.icon_texture = 0;
                 m_autorun_scripts.push_back(item);
             }
@@ -165,7 +179,8 @@ void ScriptEngine::scan_directories() {
     // 2. Menu scripts in ~/.config/minicut/scripts/
     if (fs::exists(m_scripts_dir, ec)) {
         for (const auto& entry : fs::directory_iterator(m_scripts_dir, ec)) {
-            if (entry.is_regular_file() && entry.path().extension() == ".lua") {
+            std::string ext = entry.path().extension().string();
+            if (entry.is_regular_file() && (ext == ".lua" || ext == ".js")) {
                 ScriptItem item;
                 item.id = entry.path().stem().string();
                 item.filename = entry.path().filename().string();
@@ -175,6 +190,7 @@ void ScriptEngine::scan_directories() {
                 item.is_autorun = false;
                 item.is_loaded = false;
                 item.is_panel_open = false;
+                item.is_javascript = (ext == ".js");
                 item.icon_texture = 0;
                 m_menu_scripts.push_back(item);
             }
@@ -217,6 +233,9 @@ void ScriptEngine::reload_scripts() {
 }
 
 bool ScriptEngine::execute_script(ScriptItem& item) {
+    if (item.is_javascript) {
+        return execute_js_script(item);
+    }
     if (!m_L) return false;
 
     // Setup Lua environment: create table plugins if not exists
@@ -327,9 +346,9 @@ void ScriptEngine::render_shelf_dock(float menu_h) {
     ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.13f, 0.14f, 0.16f, 1.0f));
 
     if (ImGui::Begin("##ToolShelfDock", nullptr, flags)) {
-        // Shelf Header Label
+        // Dock Header Label
         ImGui::AlignTextToFramePadding();
-        ImGui::TextColored(ImVec4(0.24f, 0.68f, 0.91f, 1.0f), "SHELF");
+        ImGui::TextColored(ImVec4(0.24f, 0.68f, 0.91f, 1.0f), "%s", _TR("dock_title"));
         ImGui::SameLine();
         ImGui::TextDisabled("|");
         ImGui::SameLine();
@@ -446,9 +465,27 @@ void ScriptEngine::render_scripts_menu() {
     }
 
     if (ImGui::BeginMenu(_TR("scripts_directories"))) {
-        ImGui::TextDisabled("Scripts: %s", m_scripts_dir.c_str());
-        ImGui::TextDisabled("Autorun: %s", m_autorun_dir.c_str());
-        ImGui::TextDisabled("Icons:   %s", m_icons_dir.c_str());
+        std::string s_label = "Scripts: " + m_scripts_dir;
+        std::string a_label = "Autorun: " + m_autorun_dir;
+        std::string i_label = "Icons:   " + m_icons_dir;
+        if (ImGui::MenuItem(s_label.c_str())) {
+            std::error_code ec;
+            std::filesystem::create_directories(m_scripts_dir, ec);
+            std::string cmd = "xdg-open \"" + m_scripts_dir + "\" >/dev/null 2>&1 &";
+            std::system(cmd.c_str());
+        }
+        if (ImGui::MenuItem(a_label.c_str())) {
+            std::error_code ec;
+            std::filesystem::create_directories(m_autorun_dir, ec);
+            std::string cmd = "xdg-open \"" + m_autorun_dir + "\" >/dev/null 2>&1 &";
+            std::system(cmd.c_str());
+        }
+        if (ImGui::MenuItem(i_label.c_str())) {
+            std::error_code ec;
+            std::filesystem::create_directories(m_icons_dir, ec);
+            std::string cmd = "xdg-open \"" + m_icons_dir + "\" >/dev/null 2>&1 &";
+            std::system(cmd.c_str());
+        }
         ImGui::EndMenu();
     }
 }
@@ -483,6 +520,10 @@ void ScriptEngine::render_script_panels(float total_w, float total_h, float top_
 }
 
 void ScriptEngine::call_panel_render(ScriptItem& item) {
+    if (item.is_javascript) {
+        call_js_panel_render(item);
+        return;
+    }
     if (!m_L) return;
 
     m_current_render_script_id = item.id;
@@ -2624,4 +2665,1471 @@ int ScriptEngine::lua_timeline_place_text_clip(lua_State* L) {
     lua_pushstring(L, clp.id.c_str());
     return 1;
 }
+
+// ============================================================================
+// JavaScript (Duktape) Scripting Engine Implementation
+// ============================================================================
+
+static bool read_file_to_string(const std::string& path, std::string& out_content) {
+    std::ifstream file(path);
+    if (!file.is_open()) return false;
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    out_content = buffer.str();
+    return true;
+}
+
+bool ScriptEngine::run_js_file(const std::string& file_path) {
+    if (!m_ctx) return false;
+    std::string code;
+    if (!read_file_to_string(file_path, code)) {
+        std::cerr << "[ScriptEngine] Failed to open JS file: " << file_path << std::endl;
+        set_status("Failed to open JS file: " + file_path);
+        return false;
+    }
+    if (duk_peval_string(m_ctx, code.c_str()) != 0) {
+        const char* err = duk_safe_to_string(m_ctx, -1);
+        std::cerr << "[ScriptEngine] Error running JS file " << file_path << ": " << (err ? err : "unknown") << std::endl;
+        set_status(std::string("JS error: ") + (err ? err : "unknown"));
+        duk_pop(m_ctx);
+        return false;
+    }
+    duk_pop(m_ctx);
+    return true;
+}
+
+bool ScriptEngine::run_js_string(const std::string& js_code) {
+    if (!m_ctx) return false;
+    if (duk_peval_string(m_ctx, js_code.c_str()) != 0) {
+        const char* err = duk_safe_to_string(m_ctx, -1);
+        std::cerr << "[ScriptEngine] Error running JS string: " << (err ? err : "unknown") << std::endl;
+        set_status(std::string("JS error: ") + (err ? err : "unknown"));
+        duk_pop(m_ctx);
+        return false;
+    }
+    duk_pop(m_ctx);
+    return true;
+}
+
+bool ScriptEngine::execute_js_script(ScriptItem& item) {
+    if (!m_ctx) return false;
+
+    // Create plugin object:
+    // plugin = { id: item.id, name: item.filename, title: item.title, path: item.path }
+    duk_push_object(m_ctx);
+    duk_push_string(m_ctx, item.id.c_str()); duk_put_prop_string(m_ctx, -2, "id");
+    duk_push_string(m_ctx, item.filename.c_str()); duk_put_prop_string(m_ctx, -2, "name");
+    duk_push_string(m_ctx, item.title.c_str()); duk_put_prop_string(m_ctx, -2, "title");
+    duk_push_string(m_ctx, item.path.c_str()); duk_put_prop_string(m_ctx, -2, "path");
+
+    // plugins[item.id] = plugin
+    duk_get_global_string(m_ctx, "plugins");
+    if (!duk_is_object(m_ctx, -1)) {
+        duk_pop(m_ctx);
+        duk_push_object(m_ctx);
+        duk_dup(m_ctx, -1);
+        duk_put_global_string(m_ctx, "plugins");
+    }
+    duk_dup(m_ctx, -2);
+    duk_put_prop_string(m_ctx, -2, item.id.c_str());
+    duk_pop(m_ctx); // pop plugins
+
+    duk_put_global_string(m_ctx, "plugin"); // sets global plugin
+
+    std::string code;
+    if (!read_file_to_string(item.path, code)) {
+        std::cerr << "[ScriptEngine] Failed to open JS script: " << item.path << std::endl;
+        set_status("Failed to open JS script: " + item.path);
+        return false;
+    }
+    if (duk_peval_string(m_ctx, code.c_str()) != 0) {
+        const char* err = duk_safe_to_string(m_ctx, -1);
+        std::cerr << "[ScriptEngine] Error executing JS " << item.path << ": " << (err ? err : "unknown") << std::endl;
+        set_status(std::string("JS error: ") + (err ? err : "unknown"));
+        duk_pop(m_ctx);
+        return false;
+    }
+    duk_pop(m_ctx); // pop eval result
+
+    item.is_loaded = true;
+    return true;
+}
+
+void ScriptEngine::call_js_panel_render(ScriptItem& item) {
+    if (!m_ctx) return;
+    m_current_render_script_id = item.id;
+
+    // 1. Look for plugins[item.id]
+    duk_get_global_string(m_ctx, "plugins");
+    if (duk_is_object(m_ctx, -1)) {
+        duk_get_prop_string(m_ctx, -1, item.id.c_str());
+        if (duk_is_object(m_ctx, -1)) {
+            // Set global plugin
+            duk_dup(m_ctx, -1);
+            duk_put_global_string(m_ctx, "plugin");
+
+            duk_get_prop_string(m_ctx, -1, "init_panel");
+            if (duk_is_function(m_ctx, -1)) {
+                duk_dup(m_ctx, -2); // this = plugin
+                if (duk_pcall_method(m_ctx, 0) != 0) {
+                    const char* err = duk_safe_to_string(m_ctx, -1);
+                    ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "JS Error in plugin.init_panel:\n%s", err ? err : "unknown");
+                }
+                duk_pop_n(m_ctx, 3); // pop return value, plugin, plugins
+                return;
+            }
+            duk_pop(m_ctx); // pop init_panel non-function
+        }
+        duk_pop(m_ctx); // pop plugin object or nil
+    }
+    duk_pop(m_ctx); // pop plugins
+
+    // 2. Global init_panel
+    duk_get_global_string(m_ctx, "init_panel");
+    if (duk_is_function(m_ctx, -1)) {
+        if (duk_pcall(m_ctx, 0) != 0) {
+            const char* err = duk_safe_to_string(m_ctx, -1);
+            ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "JS Error in init_panel:\n%s", err ? err : "unknown");
+        }
+        duk_pop(m_ctx);
+        return;
+    }
+    duk_pop(m_ctx);
+
+    // 3. Global render_panel
+    duk_get_global_string(m_ctx, "render_panel");
+    if (duk_is_function(m_ctx, -1)) {
+        if (duk_pcall(m_ctx, 0) != 0) {
+            const char* err = duk_safe_to_string(m_ctx, -1);
+            ImGui::TextColored(ImVec4(1, 0.3f, 0.3f, 1), "JS Error in render_panel:\n%s", err ? err : "unknown");
+        }
+        duk_pop(m_ctx);
+        return;
+    }
+    duk_pop(m_ctx);
+
+    ImGui::TextDisabled("No plugin.init_panel() defined in script.");
+}
+
+static void push_js_http_response(duk_context* ctx, const HttpResponse& resp) {
+    duk_push_object(ctx);
+    duk_push_int(ctx, static_cast<int>(resp.status_code)); duk_put_prop_string(ctx, -2, "status");
+    duk_push_int(ctx, static_cast<int>(resp.status_code)); duk_put_prop_string(ctx, -2, "status_code");
+    duk_push_string(ctx, resp.body.c_str());               duk_put_prop_string(ctx, -2, "body");
+    duk_push_boolean(ctx, resp.success);                  duk_put_prop_string(ctx, -2, "ok");
+    duk_push_boolean(ctx, resp.success);                  duk_put_prop_string(ctx, -2, "success");
+    if (!resp.error.empty()) {
+        duk_push_string(ctx, resp.error.c_str());         duk_put_prop_string(ctx, -2, "error");
+    }
+}
+
+// ----------------------------------------------------------------------------
+// JS GUI Dispatchers
+// ----------------------------------------------------------------------------
+
+duk_ret_t ScriptEngine::js_gui_text(duk_context* ctx) {
+    const char* str = duk_get_string(ctx, 0);
+    ImGui::Text("%s", str ? str : "");
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_text_colored(duk_context* ctx) {
+    float r = (float)duk_get_number(ctx, 0);
+    float g = (float)duk_get_number(ctx, 1);
+    float b = (float)duk_get_number(ctx, 2);
+    float a = duk_is_number(ctx, 3) ? (float)duk_get_number(ctx, 3) : 1.0f;
+    const char* str = duk_get_string(ctx, 4);
+    ImGui::TextColored(ImVec4(r, g, b, a), "%s", str ? str : "");
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_text_disabled(duk_context* ctx) {
+    const char* str = duk_get_string(ctx, 0);
+    ImGui::TextDisabled("%s", str ? str : "");
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_button(duk_context* ctx) {
+    const char* label = duk_get_string(ctx, 0);
+    bool clicked = ImGui::Button(label ? label : "Button");
+    if (clicked && duk_get_top(ctx) >= 2 && duk_is_function(ctx, 1)) {
+        duk_dup(ctx, 1);
+        if (duk_pcall(ctx, 0) != 0) {
+            std::cerr << "[JS Callback Error] " << duk_safe_to_string(ctx, -1) << std::endl;
+        }
+        duk_pop(ctx);
+    }
+    duk_push_boolean(ctx, clicked);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_gui_small_button(duk_context* ctx) {
+    const char* label = duk_get_string(ctx, 0);
+    bool clicked = ImGui::SmallButton(label ? label : "Button");
+    if (clicked && duk_get_top(ctx) >= 2 && duk_is_function(ctx, 1)) {
+        duk_dup(ctx, 1);
+        if (duk_pcall(ctx, 0) != 0) {
+            std::cerr << "[JS Callback Error] " << duk_safe_to_string(ctx, -1) << std::endl;
+        }
+        duk_pop(ctx);
+    }
+    duk_push_boolean(ctx, clicked);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_gui_slider_float(duk_context* ctx) {
+    const char* label = duk_get_string(ctx, 0);
+    float val = (float)duk_get_number(ctx, 1);
+    float v_min = (float)duk_get_number(ctx, 2);
+    float v_max = (float)duk_get_number(ctx, 3);
+    bool changed = ImGui::SliderFloat(label ? label : "##slider", &val, v_min, v_max);
+    if (changed && duk_get_top(ctx) >= 5 && duk_is_function(ctx, 4)) {
+        duk_dup(ctx, 4);
+        duk_push_number(ctx, val);
+        if (duk_pcall(ctx, 1) != 0) duk_pop(ctx);
+        else duk_pop(ctx);
+    }
+    duk_push_number(ctx, val);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_gui_slider_int(duk_context* ctx) {
+    const char* label = duk_get_string(ctx, 0);
+    int val = (int)duk_get_number(ctx, 1);
+    int v_min = (int)duk_get_number(ctx, 2);
+    int v_max = (int)duk_get_number(ctx, 3);
+    bool changed = ImGui::SliderInt(label ? label : "##slider", &val, v_min, v_max);
+    if (changed && duk_get_top(ctx) >= 5 && duk_is_function(ctx, 4)) {
+        duk_dup(ctx, 4);
+        duk_push_int(ctx, val);
+        if (duk_pcall(ctx, 1) != 0) duk_pop(ctx);
+        else duk_pop(ctx);
+    }
+    duk_push_int(ctx, val);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_gui_drag_float(duk_context* ctx) {
+    const char* label = duk_get_string(ctx, 0);
+    float val = (float)duk_get_number(ctx, 1);
+    float speed = duk_is_number(ctx, 2) ? (float)duk_get_number(ctx, 2) : 1.0f;
+    float v_min = duk_is_number(ctx, 3) ? (float)duk_get_number(ctx, 3) : 0.0f;
+    float v_max = duk_is_number(ctx, 4) ? (float)duk_get_number(ctx, 4) : 0.0f;
+    bool changed = ImGui::DragFloat(label ? label : "##drag", &val, speed, v_min, v_max);
+    if (changed && duk_get_top(ctx) >= 6 && duk_is_function(ctx, 5)) {
+        duk_dup(ctx, 5);
+        duk_push_number(ctx, val);
+        if (duk_pcall(ctx, 1) != 0) duk_pop(ctx);
+        else duk_pop(ctx);
+    }
+    duk_push_number(ctx, val);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_gui_drag_int(duk_context* ctx) {
+    const char* label = duk_get_string(ctx, 0);
+    int val = (int)duk_get_number(ctx, 1);
+    float speed = duk_is_number(ctx, 2) ? (float)duk_get_number(ctx, 2) : 1.0f;
+    int v_min = duk_is_number(ctx, 3) ? (int)duk_get_number(ctx, 3) : 0;
+    int v_max = duk_is_number(ctx, 4) ? (int)duk_get_number(ctx, 4) : 0;
+    bool changed = ImGui::DragInt(label ? label : "##drag", &val, speed, v_min, v_max);
+    if (changed && duk_get_top(ctx) >= 6 && duk_is_function(ctx, 5)) {
+        duk_dup(ctx, 5);
+        duk_push_int(ctx, val);
+        if (duk_pcall(ctx, 1) != 0) duk_pop(ctx);
+        else duk_pop(ctx);
+    }
+    duk_push_int(ctx, val);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_gui_input_text(duk_context* ctx) {
+    const char* label = duk_get_string(ctx, 0);
+    const char* val = duk_get_string(ctx, 1);
+    char buf[512] = {0};
+    if (val) strncpy(buf, val, sizeof(buf) - 1);
+    bool changed = ImGui::InputText(label ? label : "##input", buf, sizeof(buf));
+    if (changed && duk_get_top(ctx) >= 3 && duk_is_function(ctx, 2)) {
+        duk_dup(ctx, 2);
+        duk_push_string(ctx, buf);
+        if (duk_pcall(ctx, 1) != 0) duk_pop(ctx);
+        else duk_pop(ctx);
+    }
+    duk_push_string(ctx, buf);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_gui_checkbox(duk_context* ctx) {
+    const char* label = duk_get_string(ctx, 0);
+    bool val = duk_get_boolean(ctx, 1);
+    bool changed = ImGui::Checkbox(label ? label : "##chk", &val);
+    if (changed && duk_get_top(ctx) >= 3 && duk_is_function(ctx, 2)) {
+        duk_dup(ctx, 2);
+        duk_push_boolean(ctx, val);
+        if (duk_pcall(ctx, 1) != 0) duk_pop(ctx);
+        else duk_pop(ctx);
+    }
+    duk_push_boolean(ctx, val);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_gui_same_line(duk_context* ctx) {
+    (void)ctx;
+    ImGui::SameLine();
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_separator(duk_context* ctx) {
+    (void)ctx;
+    ImGui::Separator();
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_spacing(duk_context* ctx) {
+    (void)ctx;
+    ImGui::Spacing();
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_tooltip(duk_context* ctx) {
+    const char* str = duk_get_string(ctx, 0);
+    if (str && ImGui::IsItemHovered()) ImGui::SetTooltip("%s", str);
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_set_next_item_width(duk_context* ctx) {
+    float w = (float)duk_get_number(ctx, 0);
+    ImGui::SetNextItemWidth(w);
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_file_dialog(duk_context* ctx) {
+    std::string mode = "open";
+    std::string title = "Select File";
+    std::string default_path = "";
+    std::string filter_name = "All Files (*.*)";
+    std::string filter_pat = "*.*";
+    if (duk_is_object(ctx, 0)) {
+        duk_get_prop_string(ctx, 0, "mode"); if (duk_is_string(ctx, -1)) mode = duk_get_string(ctx, -1); duk_pop(ctx);
+        duk_get_prop_string(ctx, 0, "title"); if (duk_is_string(ctx, -1)) title = duk_get_string(ctx, -1); duk_pop(ctx);
+        duk_get_prop_string(ctx, 0, "default_path"); if (duk_is_string(ctx, -1)) default_path = duk_get_string(ctx, -1); duk_pop(ctx);
+        duk_get_prop_string(ctx, 0, "filter_name"); if (duk_is_string(ctx, -1)) filter_name = duk_get_string(ctx, -1); duk_pop(ctx);
+        duk_get_prop_string(ctx, 0, "filter_pattern"); if (duk_is_string(ctx, -1)) filter_pat = duk_get_string(ctx, -1); duk_pop(ctx);
+    } else if (duk_is_string(ctx, 0)) {
+        mode = duk_get_string(ctx, 0);
+        if (duk_is_string(ctx, 1)) title = duk_get_string(ctx, 1);
+        if (duk_is_string(ctx, 2)) default_path = duk_get_string(ctx, 2);
+    }
+
+    if (mode == "save") {
+        NativeFileDialog::save_file(title, default_path, filter_name, filter_pat, [](const std::string& path) {
+            if (s_engine_instance) s_engine_instance->set_status("Selected file: " + path);
+        });
+    } else {
+        NativeFileDialog::open_file(title, default_path, filter_name, filter_pat, [](const std::string& path) {
+            if (s_engine_instance) s_engine_instance->set_status("Selected file: " + path);
+        });
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_gui_native_file_dialog(duk_context* ctx) {
+    return js_gui_file_dialog(ctx);
+}
+
+duk_ret_t ScriptEngine::js_gui_builtin_file_dialog(duk_context* ctx) {
+    return js_gui_file_dialog(ctx);
+}
+
+// ----------------------------------------------------------------------------
+// JS Timeline Dispatchers
+// ----------------------------------------------------------------------------
+
+duk_ret_t ScriptEngine::js_timeline_get_playhead(duk_context* ctx) {
+    duk_push_number(ctx, s_engine_instance ? s_engine_instance->get_playhead_time() : 0.0);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_set_playhead(duk_context* ctx) {
+    double t = duk_get_number(ctx, 0);
+    if (s_engine_instance) s_engine_instance->set_playhead_time(t);
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_get_duration(duk_context* ctx) {
+    duk_push_number(ctx, (s_engine_instance && s_engine_instance->m_project) ? s_engine_instance->m_project->get_total_duration() : 0.0);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_get_track_count(duk_context* ctx) {
+    duk_push_int(ctx, (s_engine_instance && s_engine_instance->m_project) ? (int)s_engine_instance->m_project->tracks.size() : 0);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_add_track(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        duk_push_int(ctx, -1);
+        return 1;
+    }
+    const char* type = duk_is_string(ctx, 0) ? duk_get_string(ctx, 0) : "video";
+    const char* name = duk_is_string(ctx, 1) ? duk_get_string(ctx, 1) : nullptr;
+    Project& proj = *s_engine_instance->m_project;
+    s_engine_instance->push_undo_state();
+
+    Track trk;
+    trk.type = (std::string(type) == "audio") ? "audio" : "video";
+    int count = 1;
+    for (const auto& t : proj.tracks) {
+        if (t.type == trk.type) count++;
+    }
+    trk.id = "track_" + std::string(trk.type == "audio" ? "a" : "v") + std::to_string(count);
+    if (name && name[0] != '\0') {
+        trk.name = name;
+    } else {
+        trk.name = (trk.type == "audio" ? "Audio " : "Video ") + std::to_string(count);
+    }
+    proj.tracks.push_back(trk);
+    s_engine_instance->notify_project_modified();
+    duk_push_int(ctx, static_cast<int>(proj.tracks.size() - 1));
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_place_video(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        duk_push_string(ctx, "");
+        return 1;
+    }
+    int track_idx = duk_is_number(ctx, 0) ? duk_get_int(ctx, 0) : 0;
+    const char* asset_id = duk_is_string(ctx, 1) ? duk_get_string(ctx, 1) : "";
+    double start_time = duk_is_number(ctx, 2) ? duk_get_number(ctx, 2) : 0.0;
+    double duration = duk_is_number(ctx, 3) ? duk_get_number(ctx, 3) : 5.0;
+
+    Project& proj = *s_engine_instance->m_project;
+    if (track_idx < 0 || track_idx >= static_cast<int>(proj.tracks.size())) {
+        track_idx = 0;
+    }
+    s_engine_instance->push_undo_state();
+    std::string ts = std::to_string(std::chrono::system_clock::now().time_since_epoch().count() % 1000000);
+    Clip clp;
+    clp.id = "clip_v_" + ts;
+    clp.asset_id = asset_id;
+    clp.start_time = start_time;
+    clp.duration = duration;
+    clp.offset = 0.0;
+    proj.tracks[track_idx].clips.push_back(clp);
+    s_engine_instance->set_selected_clip_id(clp.id);
+    s_engine_instance->notify_project_modified();
+
+    duk_push_string(ctx, clp.id.c_str());
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_place_audio(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        duk_push_string(ctx, "");
+        return 1;
+    }
+    int track_idx = duk_is_number(ctx, 0) ? duk_get_int(ctx, 0) : 0;
+    const char* asset_id = duk_is_string(ctx, 1) ? duk_get_string(ctx, 1) : "";
+    double start_time = duk_is_number(ctx, 2) ? duk_get_number(ctx, 2) : 0.0;
+    double duration = duk_is_number(ctx, 3) ? duk_get_number(ctx, 3) : 5.0;
+
+    Project& proj = *s_engine_instance->m_project;
+    if (track_idx < 0 || track_idx >= static_cast<int>(proj.tracks.size())) {
+        track_idx = 0;
+    }
+    s_engine_instance->push_undo_state();
+    std::string ts = std::to_string(std::chrono::system_clock::now().time_since_epoch().count() % 1000000);
+    Clip clp;
+    clp.id = "clip_a_" + ts;
+    clp.asset_id = asset_id;
+    clp.start_time = start_time;
+    clp.duration = duration;
+    clp.offset = 0.0;
+    proj.tracks[track_idx].clips.push_back(clp);
+    s_engine_instance->set_selected_clip_id(clp.id);
+    s_engine_instance->notify_project_modified();
+
+    duk_push_string(ctx, clp.id.c_str());
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_place_image(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        duk_push_string(ctx, "");
+        return 1;
+    }
+    int track_idx = duk_is_number(ctx, 0) ? duk_get_int(ctx, 0) : 0;
+    const char* asset_id = duk_is_string(ctx, 1) ? duk_get_string(ctx, 1) : "";
+    double start_time = duk_is_number(ctx, 2) ? duk_get_number(ctx, 2) : 0.0;
+    double duration = duk_is_number(ctx, 3) ? duk_get_number(ctx, 3) : 5.0;
+
+    Project& proj = *s_engine_instance->m_project;
+    if (track_idx < 0 || track_idx >= static_cast<int>(proj.tracks.size())) {
+        track_idx = 0;
+    }
+    s_engine_instance->push_undo_state();
+    std::string ts = std::to_string(std::chrono::system_clock::now().time_since_epoch().count() % 1000000);
+    Clip clp;
+    clp.id = "clip_img_" + ts;
+    clp.asset_id = asset_id;
+    clp.start_time = start_time;
+    clp.duration = duration;
+    clp.offset = 0.0;
+    proj.tracks[track_idx].clips.push_back(clp);
+    s_engine_instance->set_selected_clip_id(clp.id);
+    s_engine_instance->notify_project_modified();
+
+    duk_push_string(ctx, clp.id.c_str());
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_place_text_clip(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        duk_push_string(ctx, "");
+        return 1;
+    }
+    int track_idx = duk_is_number(ctx, 0) ? duk_get_int(ctx, 0) : 0;
+    const char* asset_or_text = duk_is_string(ctx, 1) ? duk_get_string(ctx, 1) : "Text";
+    double start_time = duk_is_number(ctx, 2) ? duk_get_number(ctx, 2) : 0.0;
+    double duration = duk_is_number(ctx, 3) ? duk_get_number(ctx, 3) : 5.0;
+
+    Project& proj = *s_engine_instance->m_project;
+    std::string asset_id;
+    if (proj.find_video_asset(asset_or_text)) {
+        asset_id = asset_or_text;
+    } else {
+        TextConfig cfg;
+        cfg.text = asset_or_text;
+        asset_id = TextGenerator::create_text_asset(proj, cfg);
+    }
+    if (asset_id.empty()) {
+        duk_push_string(ctx, "");
+        return 1;
+    }
+    if (track_idx < 0 || track_idx >= static_cast<int>(proj.tracks.size())) {
+        track_idx = 0;
+    }
+    s_engine_instance->push_undo_state();
+    std::string ts = std::to_string(std::chrono::system_clock::now().time_since_epoch().count() % 1000000);
+    Clip clp;
+    clp.id = "clip_txt_" + ts;
+    clp.asset_id = asset_id;
+    clp.start_time = start_time;
+    clp.duration = duration;
+    clp.offset = 0.0;
+    proj.tracks[track_idx].clips.push_back(clp);
+    s_engine_instance->set_selected_clip_id(clp.id);
+    s_engine_instance->notify_project_modified();
+    duk_push_string(ctx, clp.id.c_str());
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_get_selected_clip(duk_context* ctx) {
+    duk_push_string(ctx, s_engine_instance ? s_engine_instance->get_selected_clip_id().c_str() : "");
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_get_selected_clips(duk_context* ctx) {
+    duk_push_array(ctx);
+    if (s_engine_instance && s_engine_instance->m_timeline) {
+        const auto& ids = s_engine_instance->m_timeline->get_selected_clip_ids();
+        for (duk_uarridx_t i = 0; i < ids.size(); ++i) {
+            duk_push_string(ctx, ids[i].c_str());
+            duk_put_prop_index(ctx, -2, i);
+        }
+    }
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_select_clip(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_timeline) return 0;
+    const char* clip_id = duk_get_string(ctx, 0);
+    if (!clip_id) return 0;
+    bool toggle = duk_is_boolean(ctx, 1) ? duk_get_boolean(ctx, 1) : false;
+    bool add_to_sel = duk_is_boolean(ctx, 2) ? duk_get_boolean(ctx, 2) : false;
+    s_engine_instance->m_timeline->select_clip(clip_id, toggle, add_to_sel);
+    s_engine_instance->set_selected_clip_id(clip_id);
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_select_clips(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_timeline) return 0;
+    if (duk_is_array(ctx, 0)) {
+        s_engine_instance->m_timeline->clear_selection();
+        duk_uarridx_t len = (duk_uarridx_t)duk_get_length(ctx, 0);
+        for (duk_uarridx_t i = 0; i < len; ++i) {
+            duk_get_prop_index(ctx, 0, i);
+            if (duk_is_string(ctx, -1)) {
+                s_engine_instance->m_timeline->select_clip(duk_get_string(ctx, -1), false, true);
+            }
+            duk_pop(ctx);
+        }
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_clear_selection(duk_context* ctx) {
+    (void)ctx;
+    if (s_engine_instance && s_engine_instance->m_timeline) {
+        s_engine_instance->m_timeline->clear_selection();
+        s_engine_instance->set_selected_clip_id("");
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_select_all(duk_context* ctx) {
+    (void)ctx;
+    if (s_engine_instance && s_engine_instance->m_timeline && s_engine_instance->m_project) {
+        s_engine_instance->m_timeline->select_all(*s_engine_instance->m_project);
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_delete_clip(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        duk_push_boolean(ctx, false);
+        return 1;
+    }
+    const char* clip_id = duk_get_string(ctx, 0);
+    if (!clip_id) { duk_push_boolean(ctx, false); return 1; }
+    Project& proj = *s_engine_instance->m_project;
+
+    for (auto& trk : proj.tracks) {
+        for (auto it = trk.clips.begin(); it != trk.clips.end(); ++it) {
+            if (it->id == clip_id) {
+                s_engine_instance->push_undo_state();
+                proj.remove_clip_keyframes(clip_id);
+                trk.clips.erase(it);
+                if (s_engine_instance->get_selected_clip_id() == clip_id) {
+                    s_engine_instance->set_selected_clip_id("");
+                }
+                s_engine_instance->notify_project_modified();
+                duk_push_boolean(ctx, true);
+                return 1;
+            }
+        }
+    }
+    duk_push_boolean(ctx, false);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_split_clip(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_timeline || !s_engine_instance->m_project) {
+        duk_push_boolean(ctx, false);
+        return 1;
+    }
+    const char* clip_id = duk_get_string(ctx, 0);
+    double split_t = duk_is_number(ctx, 1) ? duk_get_number(ctx, 1) : s_engine_instance->get_playhead_time();
+    s_engine_instance->push_undo_state();
+    bool res = s_engine_instance->m_timeline->split_clip_at(*s_engine_instance->m_project, clip_id ? clip_id : "", split_t);
+    if (res) {
+        s_engine_instance->notify_project_modified();
+    }
+    duk_push_boolean(ctx, res);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_move_track_up(duk_context* ctx) {
+    int idx = duk_get_int(ctx, 0);
+    if (s_engine_instance && s_engine_instance->m_timeline && s_engine_instance->m_project) {
+        s_engine_instance->push_undo_state();
+        s_engine_instance->m_timeline->move_track_up(*s_engine_instance->m_project, idx);
+        s_engine_instance->notify_project_modified();
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_move_track_down(duk_context* ctx) {
+    int idx = duk_get_int(ctx, 0);
+    if (s_engine_instance && s_engine_instance->m_timeline && s_engine_instance->m_project) {
+        s_engine_instance->push_undo_state();
+        s_engine_instance->m_timeline->move_track_down(*s_engine_instance->m_project, idx);
+        s_engine_instance->notify_project_modified();
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_move_track(duk_context* ctx) {
+    int from_idx = duk_get_int(ctx, 0);
+    int to_idx = duk_get_int(ctx, 1);
+    if (s_engine_instance && s_engine_instance->m_timeline && s_engine_instance->m_project) {
+        s_engine_instance->push_undo_state();
+        s_engine_instance->m_timeline->reorder_track(*s_engine_instance->m_project, from_idx, to_idx);
+        s_engine_instance->notify_project_modified();
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_swap_tracks(duk_context* ctx) {
+    int idx1 = duk_get_int(ctx, 0);
+    int idx2 = duk_get_int(ctx, 1);
+    if (s_engine_instance && s_engine_instance->m_timeline && s_engine_instance->m_project) {
+        s_engine_instance->push_undo_state();
+        s_engine_instance->m_timeline->swap_tracks(*s_engine_instance->m_project, idx1, idx2);
+        s_engine_instance->notify_project_modified();
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_set_track_name(duk_context* ctx) {
+    int idx = duk_get_int(ctx, 0);
+    const char* name = duk_get_string(ctx, 1);
+    if (s_engine_instance && s_engine_instance->m_timeline && s_engine_instance->m_project && name) {
+        s_engine_instance->push_undo_state();
+        s_engine_instance->m_timeline->set_track_name(*s_engine_instance->m_project, idx, name);
+        s_engine_instance->notify_project_modified();
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_get_track_name(duk_context* ctx) {
+    int idx = duk_get_int(ctx, 0);
+    std::string name = "";
+    if (s_engine_instance && s_engine_instance->m_timeline && s_engine_instance->m_project) {
+        name = s_engine_instance->m_timeline->get_track_name(*s_engine_instance->m_project, idx);
+    }
+    duk_push_string(ctx, name.c_str());
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_add_keyframe(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) return 0;
+    const char* clip_id = duk_get_string(ctx, 0);
+    const char* prop = duk_get_string(ctx, 1);
+    double t = duk_get_number(ctx, 2);
+    double val = duk_get_number(ctx, 3);
+    if (!clip_id || !prop) return 0;
+    s_engine_instance->push_undo_state();
+    s_engine_instance->m_project->set_or_add_keyframe(clip_id, prop, t, val);
+    s_engine_instance->notify_project_modified();
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_remove_keyframe(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) return 0;
+    const char* clip_id = duk_get_string(ctx, 0);
+    const char* prop = duk_get_string(ctx, 1);
+    double t = duk_get_number(ctx, 2);
+    if (!clip_id || !prop) return 0;
+    Project& proj = *s_engine_instance->m_project;
+    for (auto it = proj.keyframes.begin(); it != proj.keyframes.end(); ++it) {
+        if (it->clip_id == clip_id && it->parameter == prop && std::abs(it->time - t) < 0.05) {
+            s_engine_instance->push_undo_state();
+            proj.keyframes.erase(it);
+            s_engine_instance->notify_project_modified();
+            break;
+        }
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_clear_keyframes(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) return 0;
+    const char* clip_id = duk_get_string(ctx, 0);
+    const char* prop = duk_is_string(ctx, 1) ? duk_get_string(ctx, 1) : nullptr;
+    if (!clip_id) return 0;
+    Project& proj = *s_engine_instance->m_project;
+    s_engine_instance->push_undo_state();
+    if (!prop || std::strlen(prop) == 0) {
+        proj.remove_clip_keyframes(clip_id);
+    } else {
+        auto it = std::remove_if(proj.keyframes.begin(), proj.keyframes.end(), [&](const Keyframe& kf) {
+            return kf.clip_id == clip_id && kf.parameter == prop;
+        });
+        proj.keyframes.erase(it, proj.keyframes.end());
+    }
+    s_engine_instance->notify_project_modified();
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_timeline_get_keyframes(duk_context* ctx) {
+    duk_push_array(ctx);
+    if (!s_engine_instance || !s_engine_instance->m_project) return 1;
+    const char* clip_id = duk_get_string(ctx, 0);
+    const char* prop = duk_is_string(ctx, 1) ? duk_get_string(ctx, 1) : nullptr;
+    if (!clip_id) return 1;
+    const Project& proj = *s_engine_instance->m_project;
+    duk_uarridx_t idx = 0;
+    for (const auto& kf : proj.keyframes) {
+        if (kf.clip_id == clip_id) {
+            if (!prop || std::strlen(prop) == 0 || kf.parameter == prop) {
+                duk_push_object(ctx);
+                duk_push_string(ctx, kf.parameter.c_str()); duk_put_prop_string(ctx, -2, "parameter");
+                duk_push_number(ctx, kf.time);              duk_put_prop_string(ctx, -2, "time");
+                duk_push_number(ctx, kf.value);             duk_put_prop_string(ctx, -2, "value");
+                duk_put_prop_index(ctx, -2, idx++);
+            }
+        }
+    }
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_timeline_evaluate_keyframe(duk_context* ctx) {
+    if (!s_engine_instance || !s_engine_instance->m_project) {
+        duk_push_number(ctx, 0.0);
+        return 1;
+    }
+    const char* clip_id = duk_get_string(ctx, 0);
+    const char* prop = duk_get_string(ctx, 1);
+    double t = duk_get_number(ctx, 2);
+    double def_val = duk_is_number(ctx, 3) ? duk_get_number(ctx, 3) : 1.0;
+    double result = def_val;
+    if (clip_id && prop) {
+        result = s_engine_instance->m_project->evaluate_keyframe(clip_id, prop, t, def_val);
+    }
+    duk_push_number(ctx, result);
+    return 1;
+}
+
+// ----------------------------------------------------------------------------
+// JS Clip Dispatchers
+// ----------------------------------------------------------------------------
+
+duk_ret_t ScriptEngine::js_clip_get_position(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    duk_push_object(ctx);
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        const Clip* c = s_engine_instance->m_project->find_clip(id);
+        if (c) {
+            duk_push_number(ctx, c->pos_x); duk_put_prop_string(ctx, -2, "x");
+            duk_push_number(ctx, c->pos_y); duk_put_prop_string(ctx, -2, "y");
+            return 1;
+        }
+    }
+    duk_push_number(ctx, 0.0); duk_put_prop_string(ctx, -2, "x");
+    duk_push_number(ctx, 0.0); duk_put_prop_string(ctx, -2, "y");
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_clip_set_position(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    double x = duk_get_number(ctx, 1);
+    double y = duk_get_number(ctx, 2);
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        Clip* c = s_engine_instance->m_project->find_clip_mut(id);
+        if (c) {
+            s_engine_instance->push_undo_state();
+            c->pos_x = x;
+            c->pos_y = y;
+            s_engine_instance->notify_project_modified();
+        }
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_clip_get_scale(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    double s = 1.0;
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        const Clip* c = s_engine_instance->m_project->find_clip(id);
+        if (c) s = c->scale;
+    }
+    duk_push_number(ctx, s);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_clip_set_scale(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    double s = duk_get_number(ctx, 1);
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        Clip* c = s_engine_instance->m_project->find_clip_mut(id);
+        if (c) {
+            s_engine_instance->push_undo_state();
+            c->scale = std::max(0.01, s);
+            s_engine_instance->notify_project_modified();
+        }
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_clip_get_rotation(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    double rot = 0.0;
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        const Clip* c = s_engine_instance->m_project->find_clip(id);
+        if (c) rot = c->rotation;
+    }
+    duk_push_number(ctx, rot);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_clip_set_rotation(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    double rot = duk_get_number(ctx, 1);
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        Clip* c = s_engine_instance->m_project->find_clip_mut(id);
+        if (c) {
+            s_engine_instance->push_undo_state();
+            c->rotation = rot;
+            s_engine_instance->notify_project_modified();
+        }
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_clip_get_opacity(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    double op = 1.0;
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        const Clip* c = s_engine_instance->m_project->find_clip(id);
+        if (c) op = c->opacity;
+    }
+    duk_push_number(ctx, op);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_clip_set_opacity(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    double op = duk_get_number(ctx, 1);
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        Clip* c = s_engine_instance->m_project->find_clip_mut(id);
+        if (c) {
+            s_engine_instance->push_undo_state();
+            c->opacity = std::clamp(op, 0.0, 1.0);
+            s_engine_instance->notify_project_modified();
+        }
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_clip_get_volume(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    double vol = 1.0;
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        vol = s_engine_instance->m_project->evaluate_keyframe(id, "volume", 0.0, 1.0);
+    }
+    duk_push_number(ctx, vol);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_clip_set_volume(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    double vol = duk_get_number(ctx, 1);
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        s_engine_instance->push_undo_state();
+        s_engine_instance->m_project->set_or_add_keyframe(id, "volume", 0.0, std::clamp(vol, 0.0, 2.0));
+        s_engine_instance->notify_project_modified();
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_clip_get_time(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    duk_push_object(ctx);
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        const Clip* c = s_engine_instance->m_project->find_clip(id);
+        if (c) {
+            duk_push_number(ctx, c->start_time); duk_put_prop_string(ctx, -2, "start_time");
+            duk_push_number(ctx, c->duration);   duk_put_prop_string(ctx, -2, "duration");
+            duk_push_number(ctx, c->offset);     duk_put_prop_string(ctx, -2, "offset");
+            return 1;
+        }
+    }
+    duk_push_number(ctx, 0.0); duk_put_prop_string(ctx, -2, "start_time");
+    duk_push_number(ctx, 0.0); duk_put_prop_string(ctx, -2, "duration");
+    duk_push_number(ctx, 0.0); duk_put_prop_string(ctx, -2, "offset");
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_clip_set_time(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    double start_t = duk_get_number(ctx, 1);
+    double dur = duk_get_number(ctx, 2);
+    double off = duk_is_number(ctx, 3) ? duk_get_number(ctx, 3) : -1.0;
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        Clip* c = s_engine_instance->m_project->find_clip_mut(id);
+        if (c) {
+            s_engine_instance->push_undo_state();
+            c->start_time = std::max(0.0, start_t);
+            c->duration = std::max(0.1, dur);
+            if (off >= 0.0) c->offset = off;
+            s_engine_instance->notify_project_modified();
+        }
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_clip_get_info(duk_context* ctx) {
+    const char* id = duk_get_string(ctx, 0);
+    duk_push_object(ctx);
+    if (s_engine_instance && s_engine_instance->m_project && id) {
+        int t_idx = -1, c_idx = -1;
+        const Clip* c = s_engine_instance->m_project->find_clip(id, &t_idx, &c_idx);
+        if (c) {
+            duk_push_string(ctx, c->id.c_str()); duk_put_prop_string(ctx, -2, "id");
+            duk_push_string(ctx, c->asset_id.c_str()); duk_put_prop_string(ctx, -2, "asset_id");
+            duk_push_int(ctx, t_idx); duk_put_prop_string(ctx, -2, "track_idx");
+            duk_push_number(ctx, c->start_time); duk_put_prop_string(ctx, -2, "start_time");
+            duk_push_number(ctx, c->duration); duk_put_prop_string(ctx, -2, "duration");
+            duk_push_number(ctx, c->offset); duk_put_prop_string(ctx, -2, "offset");
+            duk_push_number(ctx, c->pos_x); duk_put_prop_string(ctx, -2, "pos_x");
+            duk_push_number(ctx, c->pos_y); duk_put_prop_string(ctx, -2, "pos_y");
+            duk_push_number(ctx, c->scale); duk_put_prop_string(ctx, -2, "scale");
+            duk_push_number(ctx, c->rotation); duk_put_prop_string(ctx, -2, "rotation");
+            duk_push_number(ctx, c->opacity); duk_put_prop_string(ctx, -2, "opacity");
+            double vol = s_engine_instance->m_project->evaluate_keyframe(c->id, "volume", 0.0, 1.0);
+            duk_push_number(ctx, vol); duk_put_prop_string(ctx, -2, "volume");
+        }
+    }
+    return 1;
+}
+
+// ----------------------------------------------------------------------------
+// JS Project & Assets Dispatchers
+// ----------------------------------------------------------------------------
+
+duk_ret_t ScriptEngine::js_project_save(duk_context* ctx) {
+    const char* path = duk_is_string(ctx, 0) ? duk_get_string(ctx, 0) : "";
+    bool ok = false;
+    if (s_engine_instance && s_engine_instance->m_on_save_project) {
+        ok = s_engine_instance->m_on_save_project(path ? path : "");
+    }
+    duk_push_boolean(ctx, ok);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_project_load(duk_context* ctx) {
+    const char* path = duk_require_string(ctx, 0);
+    bool ok = false;
+    if (s_engine_instance && s_engine_instance->m_on_load_project) {
+        ok = s_engine_instance->m_on_load_project(path ? path : "");
+    }
+    duk_push_boolean(ctx, ok);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_project_import_video(duk_context* ctx) {
+    const char* path = duk_require_string(ctx, 0);
+    std::string id = "";
+    if (s_engine_instance && s_engine_instance->m_clip_manager && s_engine_instance->m_project && path) {
+        s_engine_instance->push_undo_state();
+        id = s_engine_instance->m_clip_manager->import_video(*s_engine_instance->m_project, path);
+        s_engine_instance->notify_project_modified();
+    }
+    duk_push_string(ctx, id.c_str());
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_project_import_audio(duk_context* ctx) {
+    const char* path = duk_require_string(ctx, 0);
+    std::string id = "";
+    if (s_engine_instance && s_engine_instance->m_clip_manager && s_engine_instance->m_project && path) {
+        s_engine_instance->push_undo_state();
+        id = s_engine_instance->m_clip_manager->import_audio(*s_engine_instance->m_project, path);
+        s_engine_instance->notify_project_modified();
+    }
+    duk_push_string(ctx, id.c_str());
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_project_import_image(duk_context* ctx) {
+    const char* path = duk_require_string(ctx, 0);
+    std::string id = "";
+    if (s_engine_instance && s_engine_instance->m_clip_manager && s_engine_instance->m_project && path) {
+        s_engine_instance->push_undo_state();
+        id = s_engine_instance->m_clip_manager->import_image(*s_engine_instance->m_project, path);
+        s_engine_instance->notify_project_modified();
+    }
+    duk_push_string(ctx, id.c_str());
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_project_get_name(duk_context* ctx) {
+    std::string name = (s_engine_instance && s_engine_instance->m_project) ? s_engine_instance->m_project->name : "";
+    duk_push_string(ctx, name.c_str());
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_project_set_name(duk_context* ctx) {
+    const char* name = duk_require_string(ctx, 0);
+    if (s_engine_instance && s_engine_instance->m_project && name) {
+        s_engine_instance->m_project->name = name;
+        s_engine_instance->notify_project_modified();
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_assets_create_text(duk_context* ctx) {
+    const char* text = duk_require_string(ctx, 0);
+    std::string id = "";
+    if (s_engine_instance && s_engine_instance->m_project && text) {
+        TextConfig cfg;
+        cfg.text = text;
+        if (duk_get_top(ctx) >= 2 && duk_is_object(ctx, 1)) {
+            duk_get_prop_string(ctx, 1, "font_size"); if (duk_is_number(ctx, -1)) cfg.font_size = (float)duk_get_number(ctx, -1); duk_pop(ctx);
+            duk_get_prop_string(ctx, 1, "font_path"); if (duk_is_string(ctx, -1)) cfg.font_path = duk_get_string(ctx, -1); duk_pop(ctx);
+            duk_get_prop_string(ctx, 1, "use_outline"); if (duk_is_boolean(ctx, -1)) cfg.use_outline = duk_get_boolean(ctx, -1); duk_pop(ctx);
+            duk_get_prop_string(ctx, 1, "use_bg"); if (duk_is_boolean(ctx, -1)) cfg.use_bg = duk_get_boolean(ctx, -1); duk_pop(ctx);
+            duk_get_prop_string(ctx, 1, "justification"); if (duk_is_number(ctx, -1)) cfg.justification = duk_get_int(ctx, -1); duk_pop(ctx);
+        }
+        id = TextGenerator::create_text_asset(*s_engine_instance->m_project, cfg);
+    }
+    duk_push_string(ctx, id.c_str());
+    return 1;
+}
+
+// ----------------------------------------------------------------------------
+// JS Minicut & Utilities Dispatchers
+// ----------------------------------------------------------------------------
+
+duk_ret_t ScriptEngine::js_minicut_log(duk_context* ctx) {
+    duk_idx_t n = duk_get_top(ctx);
+    for (duk_idx_t i = 0; i < n; ++i) {
+        if (i > 0) std::cout << " ";
+        std::cout << duk_safe_to_string(ctx, i);
+    }
+    std::cout << std::endl;
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_minicut_set_status(duk_context* ctx) {
+    const char* msg = duk_require_string(ctx, 0);
+    double dur = duk_is_number(ctx, 1) ? duk_get_number(ctx, 1) : 4.0;
+    if (s_engine_instance && msg) {
+        s_engine_instance->set_status(msg, dur);
+    }
+    return 0;
+}
+
+duk_ret_t ScriptEngine::js_minicut_push_undo(duk_context* ctx) {
+    (void)ctx;
+    if (s_engine_instance) {
+        s_engine_instance->push_undo_state();
+    }
+    return 0;
+}
+
+// ----------------------------------------------------------------------------
+// JS Net Dispatchers
+// ----------------------------------------------------------------------------
+
+duk_ret_t ScriptEngine::js_net_get(duk_context* ctx) {
+    const char* url = duk_require_string(ctx, 0);
+    if (!url) {
+        duk_push_null(ctx);
+        return 1;
+    }
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        duk_push_null(ctx);
+        return 1;
+    }
+    HttpResponse resp;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "minicut-editor/1.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_string_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curl_header_write_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &resp.headers);
+    CURLcode res = curl_easy_perform(curl);
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp.status_code);
+        resp.success = true;
+    } else {
+        resp.error = curl_easy_strerror(res);
+    }
+    curl_easy_cleanup(curl);
+    push_js_http_response(ctx, resp);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_net_post(duk_context* ctx) {
+    const char* url = duk_require_string(ctx, 0);
+    const char* body = duk_is_string(ctx, 1) ? duk_get_string(ctx, 1) : "";
+    if (!url) {
+        duk_push_null(ctx);
+        return 1;
+    }
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        duk_push_null(ctx);
+        return 1;
+    }
+    HttpResponse resp;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 15L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "minicut-editor/1.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_string_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curl_header_write_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &resp.headers);
+    CURLcode res = curl_easy_perform(curl);
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp.status_code);
+        resp.success = true;
+    } else {
+        resp.error = curl_easy_strerror(res);
+    }
+    curl_easy_cleanup(curl);
+    push_js_http_response(ctx, resp);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_net_download(duk_context* ctx) {
+    const char* url = duk_require_string(ctx, 0);
+    const char* dest = duk_require_string(ctx, 1);
+    if (!url || !dest) {
+        duk_push_boolean(ctx, false);
+        return 1;
+    }
+    FILE* fp = fopen(dest, "wb");
+    if (!fp) {
+        duk_push_boolean(ctx, false);
+        return 1;
+    }
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        fclose(fp);
+        duk_push_boolean(ctx, false);
+        return 1;
+    }
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "minicut-editor/1.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_file_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, fp);
+    CURLcode res = curl_easy_perform(curl);
+    curl_easy_cleanup(curl);
+    fclose(fp);
+    duk_push_boolean(ctx, res == CURLE_OK);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_net_upload(duk_context* ctx) {
+    const char* url = duk_require_string(ctx, 0);
+    const char* file_path = duk_require_string(ctx, 1);
+    if (!url || !file_path) {
+        duk_push_null(ctx);
+        return 1;
+    }
+    std::ifstream ifs(file_path, std::ios::binary);
+    if (!ifs.is_open()) {
+        duk_push_null(ctx);
+        return 1;
+    }
+    std::string content((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    ifs.close();
+
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        duk_push_null(ctx);
+        return 1;
+    }
+    HttpResponse resp;
+    curl_easy_setopt(curl, CURLOPT_URL, url);
+    curl_easy_setopt(curl, CURLOPT_POST, 1L);
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDS, content.c_str());
+    curl_easy_setopt(curl, CURLOPT_POSTFIELDSIZE, static_cast<long>(content.size()));
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, 60L);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "minicut-editor/1.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_string_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curl_header_write_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &resp.headers);
+    CURLcode res = curl_easy_perform(curl);
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp.status_code);
+        resp.success = true;
+    } else {
+        resp.error = curl_easy_strerror(res);
+    }
+    curl_easy_cleanup(curl);
+    push_js_http_response(ctx, resp);
+    return 1;
+}
+
+duk_ret_t ScriptEngine::js_net_request(duk_context* ctx) {
+    if (!duk_is_object(ctx, 0)) {
+        duk_push_null(ctx);
+        return 1;
+    }
+    std::string url, method = "GET", body;
+    long timeout = 15;
+    duk_get_prop_string(ctx, 0, "url"); if (duk_is_string(ctx, -1)) url = duk_get_string(ctx, -1); duk_pop(ctx);
+    duk_get_prop_string(ctx, 0, "method"); if (duk_is_string(ctx, -1)) method = duk_get_string(ctx, -1); duk_pop(ctx);
+    duk_get_prop_string(ctx, 0, "body"); if (duk_is_string(ctx, -1)) body = duk_get_string(ctx, -1); duk_pop(ctx);
+    duk_get_prop_string(ctx, 0, "timeout"); if (duk_is_number(ctx, -1)) timeout = duk_get_int(ctx, -1); duk_pop(ctx);
+
+    if (url.empty()) {
+        duk_push_null(ctx);
+        return 1;
+    }
+    CURL* curl = curl_easy_init();
+    if (!curl) {
+        duk_push_null(ctx);
+        return 1;
+    }
+    HttpResponse resp;
+    curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
+    if (method == "POST") {
+        curl_easy_setopt(curl, CURLOPT_POST, 1L);
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
+    } else if (method == "PUT") {
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "PUT");
+        curl_easy_setopt(curl, CURLOPT_POSTFIELDS, body.c_str());
+    } else if (method == "DELETE") {
+        curl_easy_setopt(curl, CURLOPT_CUSTOMREQUEST, "DELETE");
+    }
+    curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+    curl_easy_setopt(curl, CURLOPT_TIMEOUT, timeout);
+    curl_easy_setopt(curl, CURLOPT_USERAGENT, "minicut-editor/1.0");
+    curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, curl_string_write_cb);
+    curl_easy_setopt(curl, CURLOPT_WRITEDATA, &resp.body);
+    curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, curl_header_write_cb);
+    curl_easy_setopt(curl, CURLOPT_HEADERDATA, &resp.headers);
+    CURLcode res = curl_easy_perform(curl);
+    if (res == CURLE_OK) {
+        curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &resp.status_code);
+        resp.success = true;
+    } else {
+        resp.error = curl_easy_strerror(res);
+    }
+    curl_easy_cleanup(curl);
+    push_js_http_response(ctx, resp);
+    return 1;
+}
+
+// ----------------------------------------------------------------------------
+// JS API Registration
+// ----------------------------------------------------------------------------
+
+void ScriptEngine::register_js_api() {
+    if (!m_ctx) return;
+
+    auto reg_fn = [&](const char* name, duk_c_function fn, duk_idx_t nargs) {
+        duk_push_c_function(m_ctx, fn, nargs);
+        duk_put_prop_string(m_ctx, -2, name);
+    };
+
+    // 1. gui
+    duk_push_object(m_ctx);
+    reg_fn("text", js_gui_text, 1);
+    reg_fn("text_colored", js_gui_text_colored, 5);
+    reg_fn("text_disabled", js_gui_text_disabled, 1);
+    reg_fn("button", js_gui_button, 2);
+    reg_fn("small_button", js_gui_small_button, 2);
+    reg_fn("slider_float", js_gui_slider_float, 5);
+    reg_fn("slider_int", js_gui_slider_int, 5);
+    reg_fn("drag_float", js_gui_drag_float, 6);
+    reg_fn("drag_int", js_gui_drag_int, 6);
+    reg_fn("input_text", js_gui_input_text, 3);
+    reg_fn("checkbox", js_gui_checkbox, 3);
+    reg_fn("same_line", js_gui_same_line, 0);
+    reg_fn("separator", js_gui_separator, 0);
+    reg_fn("spacing", js_gui_spacing, 0);
+    reg_fn("tooltip", js_gui_tooltip, 1);
+    reg_fn("set_next_item_width", js_gui_set_next_item_width, 1);
+    reg_fn("file_dialog", js_gui_file_dialog, 1);
+    reg_fn("native_file_dialog", js_gui_native_file_dialog, 1);
+    reg_fn("builtin_file_dialog", js_gui_builtin_file_dialog, 1);
+    duk_put_global_string(m_ctx, "gui");
+
+    // 2. timeline
+    duk_push_object(m_ctx);
+    reg_fn("get_playhead", js_timeline_get_playhead, 0);
+    reg_fn("set_playhead", js_timeline_set_playhead, 1);
+    reg_fn("get_duration", js_timeline_get_duration, 0);
+    reg_fn("get_track_count", js_timeline_get_track_count, 0);
+    reg_fn("add_track", js_timeline_add_track, 2);
+    reg_fn("place_video", js_timeline_place_video, 4);
+    reg_fn("place_audio", js_timeline_place_audio, 4);
+    reg_fn("place_image", js_timeline_place_image, 4);
+    reg_fn("place_text_clip", js_timeline_place_text_clip, 4);
+    reg_fn("get_selected_clip", js_timeline_get_selected_clip, 0);
+    reg_fn("get_selected_clips", js_timeline_get_selected_clips, 0);
+    reg_fn("select_clip", js_timeline_select_clip, 3);
+    reg_fn("select_clips", js_timeline_select_clips, 1);
+    reg_fn("clear_selection", js_timeline_clear_selection, 0);
+    reg_fn("select_all", js_timeline_select_all, 0);
+    reg_fn("delete_clip", js_timeline_delete_clip, 1);
+    reg_fn("split_clip", js_timeline_split_clip, 2);
+    reg_fn("move_track_up", js_timeline_move_track_up, 1);
+    reg_fn("move_track_down", js_timeline_move_track_down, 1);
+    reg_fn("move_track", js_timeline_move_track, 2);
+    reg_fn("swap_tracks", js_timeline_swap_tracks, 2);
+    reg_fn("set_track_name", js_timeline_set_track_name, 2);
+    reg_fn("get_track_name", js_timeline_get_track_name, 1);
+    reg_fn("add_keyframe", js_timeline_add_keyframe, 4);
+    reg_fn("remove_keyframe", js_timeline_remove_keyframe, 3);
+    reg_fn("clear_keyframes", js_timeline_clear_keyframes, 2);
+    reg_fn("get_keyframes", js_timeline_get_keyframes, 2);
+    reg_fn("evaluate_keyframe", js_timeline_evaluate_keyframe, 4);
+    duk_put_global_string(m_ctx, "timeline");
+
+    // 3. clip
+    duk_push_object(m_ctx);
+    reg_fn("get_position", js_clip_get_position, 1);
+    reg_fn("set_position", js_clip_set_position, 3);
+    reg_fn("get_scale", js_clip_get_scale, 1);
+    reg_fn("set_scale", js_clip_set_scale, 3);
+    reg_fn("get_rotation", js_clip_get_rotation, 1);
+    reg_fn("set_rotation", js_clip_set_rotation, 2);
+    reg_fn("get_opacity", js_clip_get_opacity, 1);
+    reg_fn("set_opacity", js_clip_set_opacity, 2);
+    reg_fn("get_volume", js_clip_get_volume, 1);
+    reg_fn("set_volume", js_clip_set_volume, 2);
+    reg_fn("get_time", js_clip_get_time, 1);
+    reg_fn("set_time", js_clip_set_time, 4);
+    reg_fn("get_info", js_clip_get_info, 1);
+    duk_put_global_string(m_ctx, "clip");
+
+    // 4. project
+    duk_push_object(m_ctx);
+    reg_fn("save", js_project_save, 1);
+    reg_fn("load", js_project_load, 1);
+    reg_fn("import_video", js_project_import_video, 1);
+    reg_fn("import_audio", js_project_import_audio, 1);
+    reg_fn("import_image", js_project_import_image, 1);
+    reg_fn("create_text_asset", js_assets_create_text, 2);
+    reg_fn("get_name", js_project_get_name, 0);
+    reg_fn("set_name", js_project_set_name, 1);
+    duk_put_global_string(m_ctx, "project");
+
+    duk_push_c_function(m_ctx, js_project_save, 1);
+    duk_put_global_string(m_ctx, "project_save");
+    duk_push_c_function(m_ctx, js_project_load, 1);
+    duk_put_global_string(m_ctx, "project_load");
+
+    // 5. assets
+    duk_push_object(m_ctx);
+    reg_fn("create_text", js_assets_create_text, 2);
+    duk_put_global_string(m_ctx, "assets");
+
+    // 6. minicut
+    duk_push_object(m_ctx);
+    reg_fn("log", js_minicut_log, DUK_VARARGS);
+    reg_fn("set_status", js_minicut_set_status, 2);
+    reg_fn("push_undo", js_minicut_push_undo, 0);
+    duk_put_global_string(m_ctx, "minicut");
+
+    duk_push_object(m_ctx);
+    reg_fn("log", js_minicut_log, DUK_VARARGS);
+    duk_put_global_string(m_ctx, "console");
+    duk_push_c_function(m_ctx, js_minicut_log, DUK_VARARGS);
+    duk_put_global_string(m_ctx, "print");
+
+    // 7. net
+    duk_push_object(m_ctx);
+    reg_fn("get", js_net_get, 1);
+    reg_fn("post", js_net_post, 2);
+    reg_fn("download", js_net_download, 2);
+    reg_fn("upload", js_net_upload, 2);
+    reg_fn("request", js_net_request, 1);
+    duk_put_global_string(m_ctx, "net");
+
+    // 8. default plugin object
+    duk_push_object(m_ctx);
+    duk_push_string(m_ctx, "default"); duk_put_prop_string(m_ctx, -2, "id");
+    duk_push_string(m_ctx, "Default Plugin"); duk_put_prop_string(m_ctx, -2, "title");
+    duk_put_global_string(m_ctx, "plugin");
+}
+
 

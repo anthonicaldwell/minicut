@@ -57,6 +57,10 @@ public:
     void render();
     std::string find_system_thumbnail(const std::string& full_path) const;
 
+    static bool is_video_file(const std::string& path);
+    static bool is_audio_file(const std::string& path);
+    static bool is_image_file(const std::string& path);
+
 private:
     void refresh_directory();
     void refresh_mounted_devices();

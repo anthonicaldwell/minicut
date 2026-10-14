@@ -68,6 +68,8 @@ public:
     float get_track_header_width() const { return m_track_header_w; }
     void set_track_header_width(float w) { m_track_header_w = std::clamp(w, 80.0f, 400.0f); }
 
+    bool is_rename_modal_open() const { return m_open_rename_modal; }
+
 private:
     float m_track_header_w = 145.0f;
     bool m_dragging_track_header = false;

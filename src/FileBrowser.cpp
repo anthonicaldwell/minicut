@@ -279,22 +279,12 @@ void FileBrowser::refresh_directory() {
                 item.size_str = format_file_size(item.size);
                 item.extension = entry.path().extension().string();
 
+                item.is_video = is_video_file(item.extension);
+                item.is_image = is_image_file(item.extension);
+                item.is_audio = is_audio_file(item.extension);
                 std::string ext_lower = item.extension;
                 std::transform(ext_lower.begin(), ext_lower.end(), ext_lower.begin(), ::tolower);
-
-                if (ext_lower == ".mp4" || ext_lower == ".mkv" || ext_lower == ".mov" ||
-                    ext_lower == ".avi" || ext_lower == ".webm" || ext_lower == ".flv" ||
-                    ext_lower == ".wmv" || ext_lower == ".m4v" || ext_lower == ".ts") {
-                    item.is_video = true;
-                } else if (ext_lower == ".png" || ext_lower == ".jpg" || ext_lower == ".jpeg" ||
-                           ext_lower == ".bmp" || ext_lower == ".webp" || ext_lower == ".tiff" ||
-                           ext_lower == ".tif" || ext_lower == ".gif") {
-                    item.is_image = true;
-                } else if (ext_lower == ".mp3" || ext_lower == ".wav" || ext_lower == ".aac" ||
-                           ext_lower == ".flac" || ext_lower == ".ogg" || ext_lower == ".m4a" ||
-                           ext_lower == ".opus") {
-                    item.is_audio = true;
-                } else if (ext_lower == ".minicut") {
+                if (ext_lower == ".minicut") {
                     item.is_project = true;
                 }
             } else {
@@ -536,7 +526,7 @@ void FileBrowser::render() {
             if (fs::exists(sel_path) && !fs::is_directory(sel_path)) {
                 std::string ext = sel_path.extension().string();
                 std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                bool is_v = (ext == ".mp4" || ext == ".mkv" || ext == ".mov" || ext == ".avi" || ext == ".webm");
+                bool is_v = (ext == ".mp4" || ext == ".mkv" || ext == ".mov" || ext == ".avi" || ext == ".webm" || ext == ".flv" || ext == ".wmv" || ext == ".m4v" || ext == ".ts" || ext == ".ogv" || ext == ".ogm");
                 bool is_i = (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".webp");
                 if (is_v || is_i) {
                     GLuint sel_tex = get_or_load_thumbnail(sel_path.string(), is_v, is_i);
@@ -597,3 +587,32 @@ void FileBrowser::render() {
         ImGui::EndPopup();
     }
 }
+
+bool FileBrowser::is_video_file(const std::string& path) {
+    std::string ext = std::filesystem::path(path).extension().string();
+    if (ext.empty() && !path.empty() && path[0] == '.') ext = path;
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    return (ext == ".mp4" || ext == ".mkv" || ext == ".mov" ||
+            ext == ".avi" || ext == ".webm" || ext == ".flv" ||
+            ext == ".wmv" || ext == ".m4v" || ext == ".ts" ||
+            ext == ".ogv" || ext == ".ogm");
+}
+
+bool FileBrowser::is_audio_file(const std::string& path) {
+    std::string ext = std::filesystem::path(path).extension().string();
+    if (ext.empty() && !path.empty() && path[0] == '.') ext = path;
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    return (ext == ".mp3" || ext == ".wav" || ext == ".aac" ||
+            ext == ".flac" || ext == ".ogg" || ext == ".m4a" ||
+            ext == ".opus");
+}
+
+bool FileBrowser::is_image_file(const std::string& path) {
+    std::string ext = std::filesystem::path(path).extension().string();
+    if (ext.empty() && !path.empty() && path[0] == '.') ext = path;
+    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+    return (ext == ".png" || ext == ".jpg" || ext == ".jpeg" ||
+            ext == ".bmp" || ext == ".webp" || ext == ".tiff" ||
+            ext == ".tif" || ext == ".gif");
+}
+

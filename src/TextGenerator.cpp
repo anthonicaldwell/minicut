@@ -17,7 +17,8 @@ namespace fs = std::filesystem;
 std::vector<std::pair<std::string, std::string>> TextGenerator::get_available_fonts() {
     std::vector<std::pair<std::string, std::string>> fonts;
     static const std::vector<std::pair<std::string, std::string>> candidates = {
-        { "Space Grotesk", "/usr/share/fonts/truetype/space-grotesk/SpaceGrotesk-Regular.ttf" },
+        { "Noto Sans CJK (Japanese / Asian)", "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc" },
+        { "Droid Sans Fallback (Japanese / Asian)", "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf" },
         { "Noto Sans", "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf" },
         { "Noto Sans Bold", "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf" },
         { "Noto Naskh Arabic", "/usr/share/fonts/truetype/noto/NotoNaskhArabic-Regular.ttf" },
@@ -25,6 +26,7 @@ std::vector<std::pair<std::string, std::string>> TextGenerator::get_available_fo
         { "DejaVu Sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf" },
         { "DejaVu Sans Bold", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" },
         { "Liberation Sans", "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf" },
+        { "Space Grotesk", "/usr/share/fonts/truetype/space-grotesk/SpaceGrotesk-Regular.ttf" },
         { "IBM Plex Sans", "/usr/share/fonts/truetype/ibm-plex/IBMPlexSans-Regular.ttf" },
     };
 
@@ -58,6 +60,19 @@ std::string TextGenerator::get_arabic_font_path() {
     return get_default_font_path();
 }
 
+std::string TextGenerator::get_cjk_font_path() {
+    static const std::vector<std::string> candidates = {
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc"
+    };
+    for (const auto& p : candidates) {
+        if (fs::exists(p)) return p;
+    }
+    return "";
+}
+
 static void blend_pixel(uint8_t* dst, uint8_t src_r, uint8_t src_g, uint8_t src_b, uint8_t src_a) {
     if (src_a == 0) return;
     float sa = src_a / 255.0f;
@@ -87,23 +102,40 @@ bool TextGenerator::render_to_rgba(const TextConfig& config,
         font_path = get_default_font_path();
     }
 
-    FT_Face face;
+    FT_Face face = nullptr;
     if (FT_New_Face(ft, font_path.c_str(), 0, &face)) {
         FT_Done_FreeType(ft);
         return false;
     }
 
-    // Secondary Arabic font face for fallback
-    FT_Face arabic_face = nullptr;
-    std::string ar_font = get_arabic_font_path();
-    if (fs::exists(ar_font) && ar_font != font_path) {
-        FT_New_Face(ft, ar_font.c_str(), 0, &arabic_face);
-    }
-
     int pixel_size = static_cast<int>(std::max(10.0f, config.font_size));
     FT_Set_Pixel_Sizes(face, 0, pixel_size);
-    if (arabic_face) {
-        FT_Set_Pixel_Sizes(arabic_face, 0, pixel_size);
+
+    // CJK Fallback font face (Japanese, Korean, Chinese)
+    FT_Face cjk_face = nullptr;
+    std::string cjk_font = get_cjk_font_path();
+    if (!cjk_font.empty() && cjk_font != font_path && fs::exists(cjk_font)) {
+        if (FT_New_Face(ft, cjk_font.c_str(), 0, &cjk_face) == 0) {
+            FT_Set_Pixel_Sizes(cjk_face, 0, pixel_size);
+        }
+    }
+
+    // Arabic Fallback font face
+    FT_Face arabic_face = nullptr;
+    std::string ar_font = get_arabic_font_path();
+    if (!ar_font.empty() && ar_font != font_path && fs::exists(ar_font)) {
+        if (FT_New_Face(ft, ar_font.c_str(), 0, &arabic_face) == 0) {
+            FT_Set_Pixel_Sizes(arabic_face, 0, pixel_size);
+        }
+    }
+
+    // General Western / Cyrillic Fallback font face
+    FT_Face fallback_face = nullptr;
+    std::string fb_font = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf";
+    if (fs::exists(fb_font) && fb_font != font_path) {
+        if (FT_New_Face(ft, fb_font.c_str(), 0, &fallback_face) == 0) {
+            FT_Set_Pixel_Sizes(fallback_face, 0, pixel_size);
+        }
     }
 
     // Split text into lines
@@ -125,12 +157,13 @@ bool TextGenerator::render_to_rgba(const TextConfig& config,
     }
 
     struct GlyphInfo {
-        char32_t cp;
-        FT_Face target_face;
-        int x, y;
-        int width, height;
-        int bearing_x, bearing_y;
-        int advance_x;
+        char32_t cp = 0;
+        FT_Face target_face = nullptr;
+        FT_UInt g_idx = 0;
+        int x = 0, y = 0;
+        int width = 0, height = 0;
+        int bearing_x = 0, bearing_y = 0;
+        int advance_x = 0;
     };
 
     struct LineInfo {
@@ -150,6 +183,13 @@ bool TextGenerator::render_to_rgba(const TextConfig& config,
         for (char32_t cp : line_cps) {
             FT_Face target = face;
             FT_UInt g_idx = FT_Get_Char_Index(face, cp);
+            if (g_idx == 0 && cjk_face) {
+                FT_UInt cjk_idx = FT_Get_Char_Index(cjk_face, cp);
+                if (cjk_idx != 0) {
+                    target = cjk_face;
+                    g_idx = cjk_idx;
+                }
+            }
             if (g_idx == 0 && arabic_face) {
                 FT_UInt ar_idx = FT_Get_Char_Index(arabic_face, cp);
                 if (ar_idx != 0) {
@@ -157,8 +197,15 @@ bool TextGenerator::render_to_rgba(const TextConfig& config,
                     g_idx = ar_idx;
                 }
             }
+            if (g_idx == 0 && fallback_face) {
+                FT_UInt fb_idx = FT_Get_Char_Index(fallback_face, cp);
+                if (fb_idx != 0) {
+                    target = fallback_face;
+                    g_idx = fb_idx;
+                }
+            }
 
-            if (FT_Load_Glyph(target, g_idx, FT_LOAD_DEFAULT)) {
+            if (g_idx == 0 || FT_Load_Glyph(target, g_idx, FT_LOAD_DEFAULT)) {
                 cur_x += pixel_size / 2;
                 continue;
             }
@@ -166,6 +213,7 @@ bool TextGenerator::render_to_rgba(const TextConfig& config,
             GlyphInfo gi;
             gi.cp = cp;
             gi.target_face = target;
+            gi.g_idx = g_idx;
             gi.width = target->glyph->metrics.width >> 6;
             gi.height = target->glyph->metrics.height >> 6;
             gi.bearing_x = target->glyph->metrics.horiBearingX >> 6;
@@ -249,8 +297,7 @@ bool TextGenerator::render_to_rgba(const TextConfig& config,
             int baseline = base_y + static_cast<int>(l_idx * line_height);
 
             for (const auto& gi : li.glyphs) {
-                FT_UInt g_idx = FT_Get_Char_Index(gi.target_face, gi.cp);
-                if (FT_Load_Glyph(gi.target_face, g_idx, FT_LOAD_DEFAULT)) continue;
+                if (FT_Load_Glyph(gi.target_face, gi.g_idx, FT_LOAD_DEFAULT)) continue;
 
                 FT_Glyph glyph;
                 if (FT_Get_Glyph(gi.target_face->glyph, &glyph)) continue;
@@ -294,8 +341,7 @@ bool TextGenerator::render_to_rgba(const TextConfig& config,
         int baseline = base_y + static_cast<int>(l_idx * line_height);
 
         for (const auto& gi : li.glyphs) {
-            FT_UInt g_idx = FT_Get_Char_Index(gi.target_face, gi.cp);
-            if (FT_Load_Glyph(gi.target_face, g_idx, FT_LOAD_RENDER)) continue;
+            if (FT_Load_Glyph(gi.target_face, gi.g_idx, FT_LOAD_RENDER)) continue;
 
             FT_Bitmap& bitmap = gi.target_face->glyph->bitmap;
             int gx = line_start_x + gi.x + gi.target_face->glyph->bitmap_left;
@@ -318,7 +364,9 @@ bool TextGenerator::render_to_rgba(const TextConfig& config,
     }
 
     FT_Done_Face(face);
+    if (cjk_face) FT_Done_Face(cjk_face);
     if (arabic_face) FT_Done_Face(arabic_face);
+    if (fallback_face) FT_Done_Face(fallback_face);
     FT_Done_FreeType(ft);
 
     return true;

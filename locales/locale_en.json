@@ -90,10 +90,12 @@
     "text_add_to_timeline": "Add to Timeline",
     "menu_scripts": "Scripts",
     "scripts_no_scripts": "No scripts found",
-    "scripts_autorun_menu": "Autorun Scripts (Shelf)",
+    "scripts_autorun_menu": "Autorun Scripts (Dock)",
     "scripts_reload": "Reload All Scripts",
     "scripts_directories": "Directories",
-    "menu_help_lua_api": "Lua API Reference (PDF)..."
+    "menu_help_lua_api": "Lua API Reference (PDF)...",
+    "menu_help_js_api": "JavaScript API Reference (PDF)...",
+    "dock_title": "DOCK"
   }
 }
 

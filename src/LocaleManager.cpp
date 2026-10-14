@@ -220,9 +220,11 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"text_entry_label", "Text Entry"}, {"text_preview", "Preview"},
         {"text_add_to_assets", "Add to Assets"}, {"text_add_to_timeline", "Add to Timeline"},
         {"menu_scripts", "Scripts"}, {"scripts_no_scripts", "No scripts found"},
-        {"scripts_autorun_menu", "Autorun Scripts (Shelf)"}, {"scripts_reload", "Reload All Scripts"},
+        {"scripts_autorun_menu", "Autorun Scripts (Dock)"}, {"scripts_reload", "Reload All Scripts"},
         {"scripts_directories", "Directories"},
-        {"menu_help_lua_api", "Lua API Reference (PDF)..."}
+        {"menu_help_lua_api", "Lua API Reference (PDF)..."},
+        {"menu_help_js_api", "JavaScript API Reference (PDF)..."},
+        {"dock_title", "DOCK"}
     };
 
     // Japanese
@@ -271,9 +273,11 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"text_entry_label", "テキスト入力"}, {"text_preview", "プレビュー"},
         {"text_add_to_assets", "アセットに追加"}, {"text_add_to_timeline", "タイムラインに追加"},
         {"menu_scripts", "スクリプト"}, {"scripts_no_scripts", "スクリプトが見つかりません"},
-        {"scripts_autorun_menu", "自動実行スクリプト"}, {"scripts_reload", "すべてのスクリプトを再読込"},
+        {"scripts_autorun_menu", "自動実行スクリプト (ドック)"}, {"scripts_reload", "すべてのスクリプトを再読込"},
         {"scripts_directories", "ディレクトリ"},
-        {"menu_help_lua_api", "Lua APIリファレンスマニュアル (PDF)..."}
+        {"menu_help_lua_api", "Lua APIリファレンスマニュアル (PDF)..."},
+        {"menu_help_js_api", "JavaScript APIリファレンスマニュアル (PDF)..."},
+        {"dock_title", "ドック"}
     };
     m_embedded["jp"] = m_embedded["ja"];
 
@@ -323,9 +327,11 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"text_entry_label", "텍스트 입력"}, {"text_preview", "미리보기"},
         {"text_add_to_assets", "에셋에 추가"}, {"text_add_to_timeline", "타임라인에 추가"},
         {"menu_scripts", "스크립트"}, {"scripts_no_scripts", "스크립트가 없습니다"},
-        {"scripts_autorun_menu", "자동 실행 스크립트"}, {"scripts_reload", "모든 스크립트 다시 로드"},
+        {"scripts_autorun_menu", "자동 실행 스크립트 (도크)"}, {"scripts_reload", "모든 스크립트 다시 로드"},
         {"scripts_directories", "디렉터리"},
-        {"menu_help_lua_api", "Lua API 참조 매뉴얼 (PDF)..."}
+        {"menu_help_lua_api", "Lua API 참조 매뉴얼 (PDF)..."},
+        {"menu_help_js_api", "JavaScript API 참조 매뉴얼 (PDF)..."},
+        {"dock_title", "도크"}
     };
 
     // Ukrainian
@@ -374,9 +380,11 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"text_entry_label", "Введення тексту"}, {"text_preview", "Попередній перегляд"},
         {"text_add_to_assets", "Додати до ресурсів"}, {"text_add_to_timeline", "Додати на таймлайн"},
         {"menu_scripts", "Скрипти"}, {"scripts_no_scripts", "Скрипти відсутні"},
-        {"scripts_autorun_menu", "Скрипти автозапуску"}, {"scripts_reload", "Перезавантажити всі скрипти"},
+        {"scripts_autorun_menu", "Скрипти автозапуску (Док)"}, {"scripts_reload", "Перезавантажити всі скрипти"},
         {"scripts_directories", "Каталоги"},
-        {"menu_help_lua_api", "Довідник Lua API (PDF)..."}
+        {"menu_help_lua_api", "Довідник Lua API (PDF)..."},
+        {"menu_help_js_api", "Довідник JavaScript API (PDF)..."},
+        {"dock_title", "ДОК"}
     };
 
     // Arabic
@@ -425,8 +433,10 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"text_entry_label", "إدخال النص"}, {"text_preview", "معاينة"},
         {"text_add_to_assets", "إضافة إلى الوسائط"}, {"text_add_to_timeline", "إضافة إلى المخطط الزمني"},
         {"menu_scripts", "البرمجيات (Scripts)"}, {"scripts_no_scripts", "لا توجد سكربتات في المجلد"},
-        {"scripts_autorun_menu", "سكربتات التشغيل التلقائي"}, {"scripts_reload", "إعادة تحميل كافة السكربتات"},
+        {"scripts_autorun_menu", "سكربتات التشغيل التلقائي (منصة)"}, {"scripts_reload", "إعادة تحميل كافة السكربتات"},
         {"scripts_directories", "المسارات والمجلدات"},
-        {"menu_help_lua_api", "دليل واجهة برمجة Lua (PDF)..."}
+        {"menu_help_lua_api", "دليل واجهة برمجة Lua (PDF)..."},
+        {"menu_help_js_api", "دليل واجهة برمجة JavaScript (PDF)..."},
+        {"dock_title", "منصة"}
     };
 }

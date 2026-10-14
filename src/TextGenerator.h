@@ -29,6 +29,7 @@ public:
     static std::vector<std::pair<std::string, std::string>> get_available_fonts();
     static std::string get_default_font_path();
     static std::string get_arabic_font_path();
+    static std::string get_cjk_font_path();
 
     // Renders text configuration to an RGBA pixel buffer
     static bool render_to_rgba(const TextConfig& config,
