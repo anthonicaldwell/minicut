@@ -1,8 +1,10 @@
 # minicut
 
+[English](../README.md) | [العربية](README_ar.md) | [日本語](README_ja.md) | [한국어](README_ko.md) | [Українська](README_uk.md)
+
 **minicut** هو محرر فيديو حديث، فائق السرعة وخفيف الوزن، مصمم خصيصاً لبيئات سطح مكتب لينكس (Linux). يوفر البرنامج تجربة مونتاج سلسة وسريعة الاستجابة لتحرير الفيديو والصوت والصور والنصوص دون تعقيدات غير ضرورية أو اشتراكات شهرية.
 
-![minicut Interface](docs/screenshot.png)
+![minicut Interface](screenshot.png)
 
 ---
 

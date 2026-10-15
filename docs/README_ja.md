@@ -1,8 +1,10 @@
 # minicut
 
+[English](../README.md) | [العربية](README_ar.md) | [日本語](README_ja.md) | [한국어](README_ko.md) | [Українська](README_uk.md)
+
 **minicut** は、Linux デスクトップ環境向けに設計された、高速かつ軽量でモダンなマルチトラック動画編集エディタです。複雑なサブスクリプションや不要な肥大化を排除し、動画・音声・画像・テキストの快適で直感的な編集ワークフローを提供します。
 
-![minicut Interface](docs/screenshot.png)
+![minicut Interface](screenshot.png)
 
 ---
 

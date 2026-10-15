@@ -341,42 +341,44 @@ echo "Installing binary to $BIN_DIR/minicut..."
 cp -f "$SRC_BIN" "$BIN_DIR/minicut"
 chmod 755 "$BIN_DIR/minicut"
 
-# Also ensure ./minicut exists in current directory for convenience
-if [ "$SRC_BIN" = "build/minicut" ]; then
-    ln -sf "build/minicut" "./minicut" 2>/dev/null || cp -f "build/minicut" "./minicut"
-    chmod 755 "./minicut" 2>/dev/null || true
-elif [ "$SRC_BIN" = "minicut" ]; then
-    chmod 755 "./minicut" 2>/dev/null || true
-fi
-
 # Ensure repository desktop file and any Desktop shortcut are marked executable (required by KDE Plasma)
-chmod 755 "minicut.desktop" 2>/dev/null || true
-if [ -f "$HOME/Desktop/minicut.desktop" ]; then
-    chmod 755 "$HOME/Desktop/minicut.desktop" 2>/dev/null || true
-fi
+for dtop in "desktop/minicut.desktop" "minicut.desktop" "$HOME/Desktop/minicut.desktop"; do
+    if [ -f "$dtop" ]; then
+        chmod 755 "$dtop" 2>/dev/null || true
+    fi
+done
 
 # Install icons across standard resolutions for KDE Plasma / FreeDesktop compliance
-if [ -f "minicut.png" ]; then
-    echo "Installing icons to $ICON_BASE_DIR and $PIXMAPS_DIR..."
-    cp -f "minicut.png" "$PIXMAPS_DIR/minicut.png"
+DESKTOP_ICON=""
+if [ -f "desktop/minicut.png" ]; then
+    DESKTOP_ICON="desktop/minicut.png"
+elif [ -f "icons/minicut.png" ]; then
+    DESKTOP_ICON="icons/minicut.png"
+elif [ -f "minicut.png" ]; then
+    DESKTOP_ICON="minicut.png"
+fi
+
+if [ -n "$DESKTOP_ICON" ]; then
+    echo "Installing icons to $ICON_BASE_DIR and $PIXMAPS_DIR from $DESKTOP_ICON..."
+    cp -f "$DESKTOP_ICON" "$PIXMAPS_DIR/minicut.png"
     for size in 256x256 128x128 64x64 48x48 32x32; do
         target_dir="$ICON_BASE_DIR/$size/apps"
         mkdir -p "$target_dir"
         if [ "$size" = "256x256" ]; then
-            cp -f "minicut.png" "$target_dir/minicut.png"
+            cp -f "$DESKTOP_ICON" "$target_dir/minicut.png"
         elif command -v convert > /dev/null 2>&1; then
-            convert "minicut.png" -resize "$size" "$target_dir/minicut.png" 2>/dev/null || cp -f "minicut.png" "$target_dir/minicut.png"
+            convert "$DESKTOP_ICON" -resize "$size" "$target_dir/minicut.png" 2>/dev/null || cp -f "$DESKTOP_ICON" "$target_dir/minicut.png"
         elif command -v ffmpeg > /dev/null 2>&1; then
             dim="${size%x*}"
-            ffmpeg -y -i "minicut.png" -vf "scale=${dim}:${dim}" "$target_dir/minicut.png" >/dev/null 2>&1 || cp -f "minicut.png" "$target_dir/minicut.png"
+            ffmpeg -y -i "$DESKTOP_ICON" -vf "scale=${dim}:${dim}" "$target_dir/minicut.png" >/dev/null 2>&1 || cp -f "$DESKTOP_ICON" "$target_dir/minicut.png"
         else
-            cp -f "minicut.png" "$target_dir/minicut.png"
+            cp -f "$DESKTOP_ICON" "$target_dir/minicut.png"
         fi
     done
 fi
 
 # Install desktop file with exact binary path for flawless launcher & task manager association
-if [ -f "minicut.desktop" ]; then
+if [ -f "desktop/minicut.desktop" ] || [ -f "minicut.desktop" ]; then
     echo "Installing desktop launcher to $APP_DIR/minicut.desktop..."
     cat << EOF > "$APP_DIR/minicut.desktop"
 [Desktop Entry]
@@ -398,9 +400,15 @@ EOF
 fi
 
 # Install MIME definition
-if [ -f "minicut.xml" ]; then
+MIME_FILE=""
+if [ -f "desktop/minicut.xml" ]; then
+    MIME_FILE="desktop/minicut.xml"
+elif [ -f "minicut.xml" ]; then
+    MIME_FILE="minicut.xml"
+fi
+if [ -n "$MIME_FILE" ]; then
     echo "Installing MIME package to $MIME_DIR/minicut.xml..."
-    cp -f "minicut.xml" "$MIME_DIR/minicut.xml"
+    cp -f "$MIME_FILE" "$MIME_DIR/minicut.xml"
 fi
 
 # Install locales to ~/.config/minicut/locales and $DATA_DIR/locales
@@ -445,11 +453,19 @@ if [ -d "docs" ]; then
     cp -rf docs/* "$DATA_DIR/docs/"
 fi
 
-# Install README files
+# Install default ImGui layout if not already customized
+if [ -f "desktop/imgui.ini" ] && [ ! -f "$HOME/.config/minicut/imgui.ini" ]; then
+    mkdir -p "$HOME/.config/minicut"
+    cp -f "desktop/imgui.ini" "$HOME/.config/minicut/imgui.ini" 2>/dev/null || true
+fi
+
+# Install README files (root and localized docs)
 cp -f README*.md "$HOME/.config/minicut/" 2>/dev/null || true
+cp -f docs/README*.md "$HOME/.config/minicut/" 2>/dev/null || true
 if [ "$INSTALL_MODE" = "system" ]; then
     mkdir -p "$DATA_DIR"
     cp -f README*.md "$DATA_DIR/" 2>/dev/null || true
+    cp -f docs/README*.md "$DATA_DIR/" 2>/dev/null || true
 fi
 
 # Refresh desktop, MIME, and icon databases
@@ -479,7 +495,7 @@ fi
 # Fix ownership if user accidentally invoked install.sh with sudo in user mode
 if [ "$INSTALL_MODE" = "user" ] && [ "$EUID" -eq 0 ] && [ -n "$SUDO_USER" ]; then
     echo "Fixing file ownership for $SUDO_USER..."
-    chown -R "$SUDO_USER:$SUDO_USER" "$BIN_DIR/minicut" "$APP_DIR/minicut.desktop" "$HOME/.config/minicut" "./minicut" 2>/dev/null || true
+    chown -R "$SUDO_USER:$SUDO_USER" "$BIN_DIR/minicut" "$APP_DIR/minicut.desktop" "$HOME/.config/minicut" 2>/dev/null || true
 fi
 
 echo "=========================================="

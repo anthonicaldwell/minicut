@@ -76,6 +76,10 @@ bool App::init(int argc, char* argv[]) {
         const char* home = std::getenv("HOME");
         std::string user_icon = home ? (std::string(home) + "/.local/share/icons/hicolor/256x256/apps/minicut.png") : "";
         std::vector<std::string> icon_candidates = {
+            "desktop/minicut.png",
+            "icons/minicut.png",
+            "../desktop/minicut.png",
+            "../icons/minicut.png",
             "minicut.png",
             "../minicut.png",
             user_icon,
@@ -120,6 +124,25 @@ bool App::init(int argc, char* argv[]) {
     m_imgui_context = ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+
+    // Direct ImGui layout storage to ~/.config/minicut/imgui.ini to keep working directory clean
+    const char* home = std::getenv("HOME");
+    static std::string s_ini_path;
+    if (home) {
+        std::string cfg_dir = std::string(home) + "/.config/minicut";
+        std::error_code ec;
+        fs::create_directories(cfg_dir, ec);
+        s_ini_path = cfg_dir + "/imgui.ini";
+        if (!fs::exists(s_ini_path)) {
+            for (const auto& tmpl : {"desktop/imgui.ini", "../desktop/imgui.ini", "imgui.ini"}) {
+                if (fs::exists(tmpl)) {
+                    fs::copy_file(tmpl, s_ini_path, fs::copy_options::overwrite_existing, ec);
+                    break;
+                }
+            }
+        }
+        io.IniFilename = s_ini_path.c_str();
+    }
 
     // Load persisted settings (language, dialog preference, view section split ratios)
     load_settings();
@@ -1197,8 +1220,12 @@ void App::render_menu_bar() {
             }
             ImGui::Separator();
             if (ImGui::MenuItem(_TR("project_generate_demo"))) {
-                std::string test_v = "demo_colorbars.mp4";
-                std::string test_a = "demo_tone.mp3";
+                std::string test_v = "tests/assets/demo_colorbars.mp4";
+                std::string test_a = "tests/assets/demo_tone.mp3";
+                if (!fs::exists("tests/assets")) {
+                    test_v = "demo_colorbars.mp4";
+                    test_a = "demo_tone.mp3";
+                }
                 if (MediaDecoder::generate_test_media(test_v, test_a)) {
                     push_undo_state();
                     m_clip_manager.import_video(m_project, test_v);
@@ -2415,6 +2442,7 @@ void App::render() {
             );
             if (m_preview_window) {
                 m_preview_imgui_ctx = ImGui::CreateContext(m_imgui_context->IO.Fonts);
+                m_preview_imgui_ctx->IO.IniFilename = nullptr;
                 ImGui::SetCurrentContext(m_preview_imgui_ctx);
                 ImGui_ImplSDL2_InitForOpenGL(m_preview_window, m_gl_context);
                 ImGui_ImplOpenGL3_Init("#version 330");
@@ -2452,6 +2480,7 @@ void App::render() {
             );
             if (m_export_window) {
                 m_export_imgui_ctx = ImGui::CreateContext(m_imgui_context->IO.Fonts);
+                m_export_imgui_ctx->IO.IniFilename = nullptr;
                 ImGui::SetCurrentContext(m_export_imgui_ctx);
                 ImGui_ImplSDL2_InitForOpenGL(m_export_window, m_gl_context);
                 ImGui_ImplOpenGL3_Init("#version 330");

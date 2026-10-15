@@ -4,7 +4,21 @@
 -- Uses gui.file_dialog for dynamic file picking
 -- ============================================================================
 
-local watermark_path = "minicut.png"
+local watermark_path = "desktop/minicut.png"
+do
+    local f = io.open(watermark_path, "r")
+    if f then
+        f:close()
+    else
+        local f2 = io.open("icons/minicut.png", "r")
+        if f2 then
+            f2:close()
+            watermark_path = "icons/minicut.png"
+        else
+            watermark_path = "minicut.png"
+        end
+    end
+end
 local wm_scale = 0.25
 local wm_opacity = 0.75
 local corner = 3 -- 0: Top-Left, 1: Top-Right, 2: Bottom-Left, 3: Bottom-Right

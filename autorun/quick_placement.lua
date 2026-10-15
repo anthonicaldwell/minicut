@@ -5,7 +5,15 @@
 -- ============================================================================
 
 -- gui state
-local media_path = "test_sample.png"
+local media_path = "tests/assets/test_sample.png"
+do
+    local f = io.open(media_path, "r")
+    if f then
+        f:close()
+    else
+        media_path = "test_sample.png"
+    end
+end
 local target_track = 0
 local clip_duration = 4.0
 local offset_x = 0.0

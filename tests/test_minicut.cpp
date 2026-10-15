@@ -251,10 +251,26 @@ void test_media_probe_and_export() {
     std::cout << "[PASS] Media probe and export tests passed." << std::endl;
 }
 
+static std::string resolve_test_asset(const std::string& filename) {
+    std::vector<std::string> candidates = {
+        "tests/assets/" + filename,
+        "assets/" + filename,
+        "../tests/assets/" + filename,
+        "../assets/" + filename,
+        "test_assets/" + filename,
+        "../test_assets/" + filename,
+        filename
+    };
+    for (const auto& c : candidates) {
+        if (fs::exists(c)) return c;
+    }
+    return filename;
+}
+
 void test_image_probe_and_decode() {
     std::cout << "[TEST] Running image probe and decode test..." << std::endl;
-    fs::path temp_img = "test_sample.png";
-    assert(fs::exists(temp_img) && "test_sample.png should exist");
+    fs::path temp_img = resolve_test_asset("test_sample.png");
+    assert(fs::exists(temp_img) && "test_sample.png should exist in tests/assets/");
 
     VideoAsset img_asset;
     bool ok = MediaDecoder::probe_video_file(temp_img.string(), img_asset);
@@ -546,7 +562,7 @@ void test_audio_engine_preview_and_caching() {
     assert(std::abs(engine.get_playhead_time() - 2.5) < 1e-4);
 
     // Preload audio asset
-    std::string tone_path = "demo_tone.mp3";
+    std::string tone_path = resolve_test_asset("demo_tone.mp3");
     if (fs::exists(tone_path)) {
         engine.preload_asset_audio(tone_path);
         assert(engine.is_asset_cached(tone_path));
@@ -559,10 +575,10 @@ void test_audio_engine_preview_and_caching() {
     Project p;
     AudioAsset aa;
     aa.id = "a1";
-    aa.path = "demo_tone.mp3";
+    aa.path = tone_path;
     p.audio_assets.push_back(aa);
     engine.ensure_project_assets_loaded(p);
-    assert(engine.is_asset_cached("demo_tone.mp3"));
+    assert(engine.is_asset_cached(tone_path));
 
     std::cout << "[PASS] AudioEngine preview and caching tests passed." << std::endl;
 }
@@ -605,8 +621,9 @@ void test_clip_import_progress() {
     assert(cm.get_import_progress() == 0.0f);
 
     Project p;
-    if (fs::exists("test_sample.png")) {
-        bool ok = cm.import_image(p, "test_sample.png", 5.0);
+    std::string sample_img = resolve_test_asset("test_sample.png");
+    if (fs::exists(sample_img)) {
+        bool ok = cm.import_image(p, sample_img, 5.0);
         assert(ok);
         assert(!cm.is_importing());
         assert(cm.get_import_progress() == 1.0f);
@@ -767,7 +784,7 @@ void test_slice_and_paste_on_selected_track() {
 void test_filebrowser_system_thumbnail() {
     std::cout << "[TEST] Running FileBrowser system thumbnail resolution test..." << std::endl;
     FileBrowser fb;
-    std::string colorbars_path = "demo_colorbars.mp4";
+    std::string colorbars_path = resolve_test_asset("demo_colorbars.mp4");
     if (fs::exists(colorbars_path)) {
         std::string thumb = fb.find_system_thumbnail(colorbars_path);
         std::cout << "  -> Resolved system thumbnail: " << (thumb.empty() ? "(none / fallback)" : thumb) << std::endl;

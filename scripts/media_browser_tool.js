@@ -3,7 +3,7 @@
 // Demonstrates Duktape JavaScript Engine, gui.file_dialog, and timeline placement
 // ==============================================================================
 
-var mediaFilePath = "test_sample.png";
+var mediaFilePath = "tests/assets/test_sample.png";
 var targetTrack = 0;
 var clipDuration = 4.0;
 var posX = 0.0;

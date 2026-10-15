@@ -19,22 +19,36 @@
 ## 3. Directory & File Structure
 
 ```
-/home/kaiju/.local/bin/
+/home/kaiju/Git/minicut/
+├── .gitignore                  # Git repository exclusion rules
 ├── CMakeLists.txt              # CMake build definitions (minicut & test_minicut)
+├── LICENSE                     # MIT / Project License
+├── README.md                   # Main project overview and getting started guide
 ├── install.sh                  # Installer script for KDE Plasma desktop integration
+├── reinstall.sh                # In-place rebuilder and reinstaller script
 ├── uninstall.sh                # Standalone uninstaller (removes core files, preserves dependencies)
-├── minicut.desktop             # Desktop launcher specification (StartupWMClass, MIME associations)
-├── minicut.xml                 # FreeDesktop MIME type package (application/x-minicut)
-├── minicut.png                 # Application icon (256x256)
-├── imgui.ini                   # ImGui saved panel layout and docking configuration
-├── demo_colorbars.mp4          # Demo video media for testing
-├── demo_tone.mp3               # Demo audio tone for testing
-├── test_sample.png             # Sample image for image-track testing
-├── minicut                     # Compiled production binary
+├── autorun/                    # Script dock autorun scripts (Lua/JS)
+├── backups/                    # Backup archives and release packages (*.zip, *.tar.gz)
 ├── build/                      # Build output directory
 │   ├── minicut                 # Main executable
 │   └── test_minicut            # Automated test suite executable
+├── desktop/                    # Desktop integration and packaging files
+│   ├── minicut.desktop         # Desktop launcher specification (StartupWMClass, MIME associations)
+│   ├── minicut.xml             # FreeDesktop MIME type package (application/x-minicut)
+│   ├── minicut.png             # Application launcher icon (256x256)
+│   └── imgui.ini               # Default ImGui saved panel layout and docking configuration
+├── docs/                       # Project documentation, translated READMEs, API guides, screenshots
+│   ├── PROJECT_SUMMARY.md      # Architecture, component index, and reference guide
+│   ├── LUA_API.md              # Lua scripting reference manual
+│   ├── README_ar.md            # Arabic localized README
+│   ├── README_ja.md            # Japanese localized README
+│   ├── README_ko.md            # Korean localized README
+│   ├── README_uk.md            # Ukrainian localized README
+│   ├── screenshot.png          # Interface preview screenshot
+│   └── *.html / *.pdf          # Formatted API reference manuals in 5 languages
+├── icons/                      # Script shelf and application icons
 ├── locales/                    # JSON localization dictionaries (en, ja/jp, ko, uk, ar)
+├── scripts/                    # On-demand menu scripts (Lua/JS)
 ├── src/                        # Core C++ source files
 │   ├── main.cpp                # Application entry point with CLI argument forwarding
 │   ├── Common.h                # Core data models, transform blitting, and keyframe helpers
@@ -54,9 +68,11 @@
 │   ├── TextGenerator.h / .cpp  # FreeType 2 & FT_Stroker text rasterizer, outline, spacing, PNG export
 │   ├── ScriptEngine.h / .cpp   # Embedded LuaJIT 5.1 runtime, libcurl net library, tool shelf dock
 │   └── MD5.h                   # Lightweight RFC 1321 MD5 hasher for FreeDesktop thumbnail URIs
-├── tests/
+├── tests/                      # Automated test suite and test assets
+│   ├── assets/                 # Test assets (demo_colorbars.mp4, demo_tone.mp3, test_sample.png)
 │   └── test_minicut.cpp        # Full test suite (23 unit, integration, and pipeline tests)
-└── third_party/                # Embedded / fallback dependencies (FFmpeg headers, ImGui, JSON)
+├── third_party/                # Embedded / fallback dependencies (FFmpeg headers, ImGui, JSON)
+└── tools/                      # Developer tools and doc generators (generate_docs.py)
 ```
 
 ---
@@ -114,8 +130,8 @@
   - Displays device volume label, filesystem type, total capacity, and remaining free space tooltips with one-click direct folder navigation.
 
 ### G. Desktop & System Integration
-- **`minicut.desktop`**: Configured with `StartupWMClass=minicut` and associated with `application/x-minicut;video/mp4;video/x-matroska;video/quicktime;`.
-- **`minicut.xml`**: Shared MIME type definition for `.minicut` project files.
+- **`desktop/minicut.desktop`**: Configured with `StartupWMClass=minicut` and associated with `application/x-minicut;video/mp4;video/x-matroska;video/quicktime;`.
+- **`desktop/minicut.xml`**: Shared MIME type definition for `.minicut` project files.
 - **`main.cpp` & `App::init()`**: Accepts initial file argument to directly open `.minicut` projects or import dropped media files.
 - **`install.sh`**: Installs binary, desktop launcher, icons, MIME types, and refreshes desktop/MIME/icon/KDE sycoca caches.
 - **`uninstall.sh`**: Cleanly removes minicut core files without touching any system libraries or dependencies.

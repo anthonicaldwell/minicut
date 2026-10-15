@@ -1,8 +1,10 @@
 # minicut
 
+[English](../README.md) | [العربية](README_ar.md) | [日本語](README_ja.md) | [한국어](README_ko.md) | [Українська](README_uk.md)
+
 **minicut**은 리눅스 데스크톱 환경을 위해 특별히 설계된 빠르고 가벼우며 현대적인 멀티트랙 비선형 비디오 편집기입니다. 불필요한 기능 비대화나 복잡한 구독 모델 없이 비디오, 오디오, 이미지, 텍스트 편집을 위한 쾌적하고 반응성 높은 작업 환경을 제공합니다.
 
-![minicut Interface](docs/screenshot.png)
+![minicut Interface](screenshot.png)
 
 ---
 

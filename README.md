@@ -1,5 +1,7 @@
 # minicut
 
+[English](README.md) | [العربية](docs/README_ar.md) | [日本語](docs/README_ja.md) | [한국어](docs/README_ko.md) | [Українська](docs/README_uk.md)
+
 **minicut** is a fast, lightweight, and modern multi-track non-linear video editor built specifically for Linux desktop environments. It delivers a streamlined, responsive workflow for video, audio, image, and text editing without unnecessary bloat or complex subscription layers.
 
 ![minicut Interface](docs/screenshot.png)
@@ -67,8 +69,8 @@ To install minicut for your user account (automatically checking and installing 
 Run `minicut` from your terminal or launch it from your desktop application launcher:
 ```bash
 minicut
-# Or from the project root:
-./minicut
+# Or from the project build directory:
+./build/minicut
 # Or open an existing project:
 minicut my_project.minicut
 ```

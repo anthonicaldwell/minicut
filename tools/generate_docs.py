@@ -619,7 +619,7 @@ local clip_scale = 1.0
 
 function execute_action()
     minicut.push_undo()
-    local clip_id = timeline.place_clip("test_sample.png", target_track, timeline.get_playhead(), 4.0)
+    local clip_id = timeline.place_clip("tests/assets/test_sample.png", target_track, timeline.get_playhead(), 4.0)
     if clip_id and clip_id ~= "" then
         clip.set_scale(clip_id, clip_scale)
         timeline.add_keyframe(clip_id, "opacity", 0.0, 0.0)
@@ -799,7 +799,7 @@ local clip_scale = 1.0
 
 function execute_action()
     minicut.push_undo()
-    local clip_id = timeline.place_clip("test_sample.png", target_track, timeline.get_playhead(), 4.0)
+    local clip_id = timeline.place_clip("tests/assets/test_sample.png", target_track, timeline.get_playhead(), 4.0)
     if clip_id and clip_id ~= "" then
         clip.set_scale(clip_id, clip_scale)
         timeline.add_keyframe(clip_id, "opacity", 0.0, 0.0)
@@ -1156,7 +1156,7 @@ def generate_js_en_html():
 
 var targetTrack = 0;
 var clipDuration = 4.0;
-var mediaPath = "test_sample.png";
+var mediaPath = "tests/assets/test_sample.png";
 
 function placeMedia() {{
     minicut.push_undo();
@@ -1322,7 +1322,7 @@ def generate_js_ja_html():
 <h2>2. JavaScript プラグイン構成</h2>
 <pre>var targetTrack = 0;
 var clipDuration = 4.0;
-var mediaPath = "test_sample.png";
+var mediaPath = "tests/assets/test_sample.png";
 
 function placeMedia() {{
     minicut.push_undo();
@@ -1452,7 +1452,7 @@ def generate_js_ko_html():
 <h2>2. JavaScript 플러그인 구조</h2>
 <pre>var targetTrack = 0;
 var clipDuration = 4.0;
-var mediaPath = "test_sample.png";
+var mediaPath = "tests/assets/test_sample.png";
 
 function placeMedia() {{
     minicut.push_undo();
@@ -1582,7 +1582,7 @@ def generate_js_uk_html():
 <h2>2. Архітектура JavaScript плагіна</h2>
 <pre>var targetTrack = 0;
 var clipDuration = 4.0;
-var mediaPath = "test_sample.png";
+var mediaPath = "tests/assets/test_sample.png";
 
 function placeMedia() {{
     minicut.push_undo();
@@ -1712,7 +1712,7 @@ def generate_js_ar_html():
 <h2>2. بنية سكربت JavaScript</h2>
 <pre>var targetTrack = 0;
 var clipDuration = 4.0;
-var mediaPath = "test_sample.png";
+var mediaPath = "tests/assets/test_sample.png";
 
 function placeMedia() {{
     minicut.push_undo();
