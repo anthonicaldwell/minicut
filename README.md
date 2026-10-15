@@ -58,13 +58,17 @@ Starting from an initial architectural idea, the application was engineered from
 ## Basic Guidance: How to Use minicut
 
 ### 1. Installation & Launch
-To install minicut for your user account:
+To install minicut for your user account (automatically checking and installing all required system dependencies):
 ```bash
-./install.sh --user
+./install.sh -y
 ```
+*(Use `--deps-only` to check/install dependencies without compiling, or `--no-deps` to skip dependency resolution)*
+
 Run `minicut` from your terminal or launch it from your desktop application launcher:
 ```bash
 minicut
+# Or from the project root:
+./minicut
 # Or open an existing project:
 minicut my_project.minicut
 ```

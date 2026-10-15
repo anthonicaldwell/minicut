@@ -19,6 +19,10 @@ if [ -f "$HOME/.local/bin/minicut" ]; then
     REMOVED_ANY=true
 fi
 
+if [ -L "./minicut" ] || [ -f "./minicut" ]; then
+    rm -f "./minicut" 2>/dev/null || true
+fi
+
 if [ -f "$HOME/.local/share/applications/minicut.desktop" ]; then
     echo "Removing $HOME/.local/share/applications/minicut.desktop..."
     rm -f "$HOME/.local/share/applications/minicut.desktop"

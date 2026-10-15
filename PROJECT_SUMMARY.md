@@ -337,7 +337,7 @@
 - **Clickable Directories**: Clicking folders under `Scripts -> Directories` opens the respective directory in the desktop file manager (`xdg-open`).
 - **OGG, OGV, and OGM Format Support**: Support added for `.ogv` (video), `.ogm` (video), and `.ogg` (audio) in file filters, drag-and-drop import, and desktop MIME types.
 - **Window Title Bar**: Dynamically updates to `"Minicut - <Project Title>"` or `"Minicut - New Project"`.
-- **System Portability**: Clean CMake configuration with multi-arch library detection for Debian/Ubuntu, Arch, Fedora, openSUSE, x86_64, and ARM64. Displays "Built for Linux" and `minicut v1.2.0` in Help/About.
+- **System Portability**: Clean CMake configuration with multi-arch library detection for Debian/Ubuntu, Arch, Fedora, openSUSE, x86_64, and ARM64. Displays "Built for Linux" and `minicut v1.4.1` in Help/About.
 
 ### DD. Korean Text Glyph Atlas & Font Resolution
 - Reordered CJK font candidates in `src/App.cpp` to prioritize `/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc` over `DroidSansFallbackFull.ttf`.
@@ -396,6 +396,18 @@
 - **Layout-Independent Hotkeys**: Framerate-synchronized shortcuts working uniformly regardless of active keyboard layout.
 - **Instant Theme & Colorblind Switching**: Live KDE Plasma, Breeze Light, Breeze Dark, and Protanopia/Deuteranopia/Tritanopia updates without restarting.
 
+### LL. Version 1.4.1 Installer, Dependency Management & Permission Hardening
+- **Automated Dependency Detection & Installation**:
+  - Multi-distribution package detection and resolution supporting Debian/Ubuntu/Kubuntu (`apt-get`), Fedora/RHEL (`dnf`), Arch Linux (`pacman`), and openSUSE (`zypper`).
+  - Automatically identifies missing build essentials, OpenGL/Mesa, SDL2, GLEW, FreeType, libpng, libcurl, FFmpeg dev headers, eSpeak-NG TTS, CJK fonts, and native file dialogs (`kdialog`/`zenity`).
+  - Interactive confirmation prompt with optional non-interactive `-y` / `--yes` flag and `--deps-only` mode.
+- **Pre-Built Binary Distribution Support**:
+  - `install.sh` detects pre-compiled standalone binary packages and seamlessly installs without requiring `CMakeLists.txt` or compiler toolchains.
+- **KDE Plasma 6 & Ubuntu Permission Hardening**:
+  - Strict `chmod 755` permissions applied to `.desktop` entries to avoid Plasma 6 untrusted application execution blocks.
+  - Automatically recovers user ownership if `install.sh` is invoked with `sudo` in user mode.
+  - Generates convenient `./minicut` symlink directly in repository root.
+
 ---
 
 ## 5. Build, Test, and Execution Commands
@@ -415,7 +427,7 @@ cmake --build build -j$(nproc)
 ```bash
 ./build/test_minicut
 ```
-*(All 27 unit, integration, and pipeline tests passing)*
+*(All 40 unit, integration, and pipeline tests passing)*
 
 ### Generating API Documentation
 ```bash
@@ -424,8 +436,14 @@ python3 tools/generate_docs.py
 
 ### Installation & Uninstallation
 ```bash
-# Install to ~/.local (binary, desktop launcher, icons, MIME types, locales, scripts, docs):
-./install.sh --user
+# Check dependencies and install for current user (~/.local):
+./install.sh -y
+
+# Check and install dependencies only (without building):
+./install.sh --deps-only
+
+# Rebuild and install:
+./install.sh --rebuild
 
 # Cleanly uninstall minicut core files (leaves system dependencies intact):
 ./uninstall.sh

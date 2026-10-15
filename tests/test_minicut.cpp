@@ -1152,7 +1152,7 @@ void test_ogg_ogv_ogm_support() {
 void test_window_title_and_version() {
     std::cout << "[TEST] Running window title and version tests..." << std::endl;
     // Version test
-    assert(std::string(MINICUT_VERSION) == "1.4.0");
+    assert(std::string(MINICUT_VERSION) == "1.4.1");
 
     // Title formatting test
     auto format_title = [](const std::string& name) -> std::string {

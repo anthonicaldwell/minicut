@@ -9,6 +9,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 INSTALL_MODE="user"
+CHECK_DEPS=true
+AUTO_YES=false
+DEPS_ONLY=false
+FORCE_REBUILD=false
 
 for arg in "$@"; do
     case "$arg" in
@@ -18,16 +22,32 @@ for arg in "$@"; do
         --user)
             INSTALL_MODE="user"
             ;;
+        --deps-only)
+            DEPS_ONLY=true
+            ;;
+        --no-deps|--skip-deps)
+            CHECK_DEPS=false
+            ;;
+        -y|--yes)
+            AUTO_YES=true
+            ;;
+        --rebuild)
+            FORCE_REBUILD=true
+            ;;
         --uninstall)
             "$SCRIPT_DIR/uninstall.sh"
             exit 0
             ;;
         -h|--help)
             echo "minicut installer"
-            echo "Usage: ./install.sh [OPTION]"
+            echo "Usage: ./install.sh [OPTIONS]"
             echo "Options:"
             echo "  --user       Install for current user into ~/.local (default)"
             echo "  --system     Install system-wide into /usr/local (requires root/sudo)"
+            echo "  --deps-only  Check and install dependencies only, without building or installing"
+            echo "  --no-deps    Skip checking and installing dependencies"
+            echo "  -y, --yes    Automatically install missing dependencies without prompting"
+            echo "  --rebuild    Force re-compiling minicut before installing"
             echo "  --uninstall  Remove installed minicut files"
             echo "  --help       Show this help message"
             exit 0
@@ -39,6 +59,235 @@ for arg in "$@"; do
             ;;
     esac
 done
+
+# ==============================================================================
+# Dependency Checking and Automatic Installation Subsystem
+# ==============================================================================
+check_and_install_dependencies() {
+    echo "=========================================="
+    echo "Checking required and recommended dependencies..."
+    echo "=========================================="
+
+    local missing_pkgs=()
+    local pm=""
+
+    if command -v apt-get >/dev/null 2>&1; then
+        pm="apt"
+
+        local apt_required=(
+            "build-essential"
+            "cmake"
+            "pkg-config"
+            "libsdl2-dev"
+            "libglew-dev"
+            "libgl1-mesa-dev"
+            "libpng-dev"
+        )
+        for pkg in "${apt_required[@]}"; do
+            if ! dpkg -s "$pkg" 2>/dev/null | grep -q "Status: install ok installed"; then
+                missing_pkgs+=("$pkg")
+            fi
+        done
+
+        # Freetype (libfreetype-dev or libfreetype6-dev)
+        if ! dpkg -s libfreetype-dev 2>/dev/null | grep -q "Status: install ok installed" && \
+           ! dpkg -s libfreetype6-dev 2>/dev/null | grep -q "Status: install ok installed"; then
+            missing_pkgs+=("libfreetype-dev")
+        fi
+
+        # Curl development library (libcurl4-openssl-dev or libcurl4-gnutls-dev)
+        if ! dpkg -s libcurl4-openssl-dev 2>/dev/null | grep -q "Status: install ok installed" && \
+           ! dpkg -s libcurl4-gnutls-dev 2>/dev/null | grep -q "Status: install ok installed"; then
+            missing_pkgs+=("libcurl4-openssl-dev")
+        fi
+
+        # FFmpeg development libraries
+        for pkg in libavcodec-dev libavformat-dev libswscale-dev libswresample-dev libavutil-dev; do
+            if ! dpkg -s "$pkg" 2>/dev/null | grep -q "Status: install ok installed"; then
+                missing_pkgs+=("$pkg")
+            fi
+        done
+
+        # Recommended: TTS voice engine
+        if ! dpkg -s libespeak-ng-dev 2>/dev/null | grep -q "Status: install ok installed" && \
+           ! dpkg -s libespeak-ng1 2>/dev/null | grep -q "Status: install ok installed" && \
+           ! dpkg -s espeak-ng 2>/dev/null | grep -q "Status: install ok installed"; then
+            missing_pkgs+=("libespeak-ng-dev")
+        fi
+
+        # Recommended: Multilingual CJK font support
+        if ! dpkg -s fonts-noto-cjk 2>/dev/null | grep -q "Status: install ok installed"; then
+            missing_pkgs+=("fonts-noto-cjk")
+        fi
+
+        # Recommended: KDE native dialog (kdialog) or fallback (zenity)
+        if ! command -v kdialog >/dev/null 2>&1 && ! command -v zenity >/dev/null 2>&1; then
+            missing_pkgs+=("kdialog")
+        fi
+
+        # Recommended: ffmpeg CLI tools
+        if ! command -v ffmpeg >/dev/null 2>&1; then
+            missing_pkgs+=("ffmpeg")
+        fi
+
+    elif command -v dnf >/dev/null 2>&1; then
+        pm="dnf"
+        local dnf_pkgs=(
+            "gcc-c++"
+            "cmake"
+            "pkgconf-pkg-config"
+            "make"
+            "SDL2-devel"
+            "glew-devel"
+            "mesa-libGL-devel"
+            "freetype-devel"
+            "libpng-devel"
+            "libcurl-devel"
+            "espeak-ng-devel"
+            "google-noto-sans-cjk-fonts"
+            "kdialog"
+            "ffmpeg"
+        )
+        for pkg in "${dnf_pkgs[@]}"; do
+            if ! rpm -q "$pkg" >/dev/null 2>&1; then
+                missing_pkgs+=("$pkg")
+            fi
+        done
+        if ! rpm -q ffmpeg-devel >/dev/null 2>&1 && ! rpm -q ffmpeg-free-devel >/dev/null 2>&1; then
+            missing_pkgs+=("ffmpeg-free-devel")
+        fi
+
+    elif command -v pacman >/dev/null 2>&1; then
+        pm="pacman"
+        local pac_pkgs=(
+            "base-devel"
+            "cmake"
+            "pkgconf"
+            "sdl2"
+            "glew"
+            "mesa"
+            "ffmpeg"
+            "freetype2"
+            "libpng"
+            "curl"
+            "espeak-ng"
+            "noto-fonts-cjk"
+            "kdialog"
+        )
+        for pkg in "${pac_pkgs[@]}"; do
+            if ! pacman -Q "$pkg" >/dev/null 2>&1; then
+                missing_pkgs+=("$pkg")
+            fi
+        done
+
+    elif command -v zypper >/dev/null 2>&1; then
+        pm="zypper"
+        local zyp_pkgs=(
+            "gcc-c++"
+            "cmake"
+            "pkg-config"
+            "make"
+            "libSDL2-devel"
+            "glew-devel"
+            "Mesa-libGL-devel"
+            "freetype2-devel"
+            "libpng16-devel"
+            "libcurl-devel"
+            "espeak-ng-devel"
+            "noto-sans-cjk-fonts"
+            "kdialog"
+            "ffmpeg"
+        )
+        for pkg in "${zyp_pkgs[@]}"; do
+            if ! rpm -q "$pkg" >/dev/null 2>&1; then
+                missing_pkgs+=("$pkg")
+            fi
+        done
+    else
+        pm="unknown"
+    fi
+
+    if [ ${#missing_pkgs[@]} -eq 0 ]; then
+        echo "✓ All required and recommended dependencies are satisfied."
+        return 0
+    fi
+
+    echo "Notice: ${#missing_pkgs[@]} missing package(s) detected:"
+    for pkg in "${missing_pkgs[@]}"; do
+        echo "  - $pkg"
+    done
+    echo ""
+
+    if [ "$pm" = "unknown" ]; then
+        echo "Warning: Unsupported package manager. Please install missing packages manually."
+        return 0
+    fi
+
+    local do_install=false
+    if [ "$AUTO_YES" = true ]; then
+        do_install=true
+    elif [ -t 0 ]; then
+        # Interactive terminal prompt
+        read -r -p "Would you like the installer to install missing packages now? [Y/n] " response
+        case "$response" in
+            [nN][oO]|[nN])
+                do_install=false
+                ;;
+            *)
+                do_install=true
+                ;;
+        esac
+    else
+        echo "Non-interactive shell detected. You can install missing packages by running:"
+        if [ "$pm" = "apt" ]; then
+            echo "  sudo apt-get update && sudo apt-get install -y ${missing_pkgs[*]}"
+        elif [ "$pm" = "dnf" ]; then
+            echo "  sudo dnf install -y ${missing_pkgs[*]}"
+        elif [ "$pm" = "pacman" ]; then
+            echo "  sudo pacman -Sy --noconfirm ${missing_pkgs[*]}"
+        elif [ "$pm" = "zypper" ]; then
+            echo "  sudo zypper install -y ${missing_pkgs[*]}"
+        fi
+        echo "Or run './install.sh -y' to automatically install them."
+        return 0
+    fi
+
+    if [ "$do_install" = true ]; then
+        echo "Installing missing dependencies using $pm..."
+        local sudo_cmd=""
+        if [ "$EUID" -ne 0 ]; then
+            if command -v sudo >/dev/null 2>&1; then
+                sudo_cmd="sudo"
+            else
+                echo "Error: Root privileges are required to install packages, but 'sudo' was not found."
+                return 1
+            fi
+        fi
+
+        if [ "$pm" = "apt" ]; then
+            $sudo_cmd apt-get update
+            $sudo_cmd apt-get install -y "${missing_pkgs[@]}"
+        elif [ "$pm" = "dnf" ]; then
+            $sudo_cmd dnf install -y "${missing_pkgs[@]}"
+        elif [ "$pm" = "pacman" ]; then
+            $sudo_cmd pacman -Sy --noconfirm "${missing_pkgs[@]}"
+        elif [ "$pm" = "zypper" ]; then
+            $sudo_cmd zypper install -y "${missing_pkgs[@]}"
+        fi
+
+        echo "✓ Dependencies installed successfully."
+    else
+        echo "Continuing without installing packages as requested."
+    fi
+}
+
+if [ "$CHECK_DEPS" = true ]; then
+    check_and_install_dependencies
+    if [ "$DEPS_ONLY" = true ]; then
+        echo "Dependency setup complete (--deps-only)."
+        exit 0
+    fi
+fi
 
 if [ "$INSTALL_MODE" = "system" ]; then
     BIN_DIR="/usr/local/bin"
@@ -62,11 +311,22 @@ echo "=========================================="
 echo "Installing minicut ($INSTALL_MODE mode)..."
 echo "=========================================="
 
-# Build if needed
-if [ ! -f "build/minicut" ]; then
-    echo "Building minicut..."
-    cmake -B build -S .
-    cmake --build build -j"$(nproc)"
+# Determine binary source (pre-built binary package vs compiling from source)
+SRC_BIN=""
+if [ -f "CMakeLists.txt" ]; then
+    if [ ! -f "build/minicut" ] || [ "$FORCE_REBUILD" = true ]; then
+        echo "Building minicut..."
+        cmake -B build -S .
+        cmake --build build -j"$(nproc)"
+    fi
+    SRC_BIN="build/minicut"
+elif [ -f "build/minicut" ]; then
+    SRC_BIN="build/minicut"
+elif [ -f "minicut" ]; then
+    SRC_BIN="minicut"
+else
+    echo "Error: minicut executable binary not found and no CMakeLists.txt available to compile it!"
+    exit 1
 fi
 
 # Ensure directories exist
@@ -78,8 +338,22 @@ mkdir -p "$MIME_DIR"
 
 # Install binary
 echo "Installing binary to $BIN_DIR/minicut..."
-cp -f "build/minicut" "$BIN_DIR/minicut"
-chmod +x "$BIN_DIR/minicut"
+cp -f "$SRC_BIN" "$BIN_DIR/minicut"
+chmod 755 "$BIN_DIR/minicut"
+
+# Also ensure ./minicut exists in current directory for convenience
+if [ "$SRC_BIN" = "build/minicut" ]; then
+    ln -sf "build/minicut" "./minicut" 2>/dev/null || cp -f "build/minicut" "./minicut"
+    chmod 755 "./minicut" 2>/dev/null || true
+elif [ "$SRC_BIN" = "minicut" ]; then
+    chmod 755 "./minicut" 2>/dev/null || true
+fi
+
+# Ensure repository desktop file and any Desktop shortcut are marked executable (required by KDE Plasma)
+chmod 755 "minicut.desktop" 2>/dev/null || true
+if [ -f "$HOME/Desktop/minicut.desktop" ]; then
+    chmod 755 "$HOME/Desktop/minicut.desktop" 2>/dev/null || true
+fi
 
 # Install icons across standard resolutions for KDE Plasma / FreeDesktop compliance
 if [ -f "minicut.png" ]; then
@@ -202,10 +476,27 @@ elif command -v kbuildsycoca5 > /dev/null 2>&1; then
     kbuildsycoca5 --noincremental 2>/dev/null || true
 fi
 
+# Fix ownership if user accidentally invoked install.sh with sudo in user mode
+if [ "$INSTALL_MODE" = "user" ] && [ "$EUID" -eq 0 ] && [ -n "$SUDO_USER" ]; then
+    echo "Fixing file ownership for $SUDO_USER..."
+    chown -R "$SUDO_USER:$SUDO_USER" "$BIN_DIR/minicut" "$APP_DIR/minicut.desktop" "$HOME/.config/minicut" "./minicut" 2>/dev/null || true
+fi
+
 echo "=========================================="
 echo "minicut successfully installed!"
 echo "Binary:  $BIN_DIR/minicut"
 echo "Desktop: $APP_DIR/minicut.desktop"
-echo "Icon:    $ICON_DIR/minicut.png"
+echo "Icon:    $PIXMAPS_DIR/minicut.png"
 echo "MIME:    $MIME_DIR/minicut.xml"
 echo "=========================================="
+
+if [[ ":$PATH:" != *":$BIN_DIR:"* ]]; then
+    echo ""
+    echo "Notice: $BIN_DIR is not currently in your active PATH."
+    echo "To launch 'minicut' directly from any terminal, add it to your PATH:"
+    echo "  export PATH=\"\$HOME/.local/bin:\$PATH\""
+    echo "Or launch it via full path or project directory:"
+    echo "  $BIN_DIR/minicut"
+    echo "  ./minicut"
+fi
+
