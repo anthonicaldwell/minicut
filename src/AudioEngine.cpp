@@ -88,6 +88,22 @@ void AudioEngine::ensure_project_assets_loaded(const Project& project) {
             preload_asset_audio(v.path);
         }
     }
+    // Also preload any asset referenced by clips placed on audio tracks to ensure timeline audio is never lost
+    for (const auto& track : project.tracks) {
+        if (track.type == "audio") {
+            for (const auto& clip : track.clips) {
+                const AudioAsset* aa = project.find_audio_asset(clip.asset_id);
+                if (aa && !aa->path.empty()) {
+                    preload_asset_audio(aa->path);
+                } else {
+                    const VideoAsset* va = project.find_video_asset(clip.asset_id);
+                    if (va && !va->is_image && !va->path.empty()) {
+                        preload_asset_audio(va->path);
+                    }
+                }
+            }
+        }
+    }
 }
 
 void AudioEngine::preload_asset_audio(const std::string& path) {
@@ -315,7 +331,7 @@ void AudioEngine::process_audio(float* stream, int num_samples) {
                         asset_path = aa->path;
                     } else {
                         const VideoAsset* va = proj.find_video_asset(clip.asset_id);
-                        if (va && va->has_audio) {
+                        if (va && (va->has_audio || !va->is_image)) {
                             asset_path = va->path;
                         }
                     }

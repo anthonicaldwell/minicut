@@ -10,7 +10,7 @@
 #include <chrono>
 #include <GL/glew.h>
 
-#define MINICUT_VERSION "1.4.1"
+#define MINICUT_VERSION "1.5.0"
 
 // Forward declarations
 struct VideoAsset;
@@ -29,7 +29,25 @@ struct VideoAsset {
     double fps = 30.0;
     bool has_audio = false;
     bool is_image = false;
+    double scale = 1.0;    // Uniform scale multiplier (1.0 = 100%)
+    double scale_x = 1.0;  // Horizontal scale multiplier (1.0 = 100%)
+    double scale_y = 1.0;  // Vertical scale multiplier (1.0 = 100%)
     GLuint thumbnail_texture = 0;
+
+    // Generated text asset properties for persistence and dynamic re-rendering
+    std::string text_content;
+    std::string text_font_path;
+    float text_font_size = 48.0f;
+    float text_font_color[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    bool text_use_bg = false;
+    float text_bg_color[4] = { 0.0f, 0.0f, 0.0f, 0.6f };
+    bool text_use_outline = false;
+    float text_outline_color[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
+    float text_outline_thickness = 2.5f;
+    float text_letter_spacing = 0.0f;
+    float text_line_spacing = 1.25f;
+    int text_justification = 0;
+    std::string folder; // Virtual folder / filter in asset browser
 };
 
 struct AudioAsset {
@@ -38,11 +56,12 @@ struct AudioAsset {
     double duration = 0.0; // In seconds
     int sample_rate = 44100;
     int channels = 2;
+    std::string folder; // Virtual folder / filter in asset browser
 };
 
 struct Keyframe {
     std::string clip_id;
-    std::string parameter; // "opacity" or "volume"
+    std::string parameter; // "opacity", "volume", "scale_x", "scale_y", etc.
     double time = 0.0;     // Time relative to clip start (seconds)
     double value = 1.0;    // Opacity [0.0, 1.0], Volume [0.0, 2.0]
 };
@@ -57,6 +76,7 @@ struct ProjectPrefab {
     int total_clips = 0;
     std::string raw_json;        // Full project JSON payload for lossless instantiation
     GLuint thumbnail_texture = 0;
+    std::string folder;          // Virtual folder / filter in asset browser
 };
 
 struct Clip {
@@ -71,6 +91,8 @@ struct Clip {
     double pos_y = 0.0;      // Center Y offset in pixels relative to canvas center
     double rotation = 0.0;   // Rotation angle in degrees
     double scale = 1.0;      // Scale multiplier (1.0 = 100%)
+    double scale_x = 1.0;    // Horizontal scale multiplier (1.0 = 100%)
+    double scale_y = 1.0;    // Vertical scale multiplier (1.0 = 100%)
     double opacity = 1.0;    // Opacity [0.0, 1.0]
 
     // Prefab membership / provenance
@@ -107,6 +129,57 @@ struct Project {
     std::vector<Track> tracks;
     std::vector<Keyframe> keyframes;
     std::vector<ProjectPrefab> prefabs;
+    std::vector<std::string> asset_folders; // Persistent list of user-created virtual asset folders
+
+    bool add_asset_folder(const std::string& folder_name) {
+        if (folder_name.empty()) return false;
+        for (const auto& f : asset_folders) {
+            if (f == folder_name) return false;
+        }
+        asset_folders.push_back(folder_name);
+        return true;
+    }
+
+    bool rename_asset_folder(const std::string& old_name, const std::string& new_name) {
+        if (old_name.empty() || new_name.empty() || old_name == new_name) return false;
+        bool found = false;
+        for (auto& f : asset_folders) {
+            if (f == old_name) {
+                f = new_name;
+                found = true;
+                break;
+            }
+        }
+        if (!found) asset_folders.push_back(new_name);
+        for (auto& v : video_assets) {
+            if (v.folder == old_name) v.folder = new_name;
+        }
+        for (auto& a : audio_assets) {
+            if (a.folder == old_name) a.folder = new_name;
+        }
+        for (auto& pf : prefabs) {
+            if (pf.folder == old_name) pf.folder = new_name;
+        }
+        return true;
+    }
+
+    bool remove_asset_folder(const std::string& folder_name) {
+        if (folder_name.empty()) return false;
+        auto it = std::find(asset_folders.begin(), asset_folders.end(), folder_name);
+        if (it != asset_folders.end()) {
+            asset_folders.erase(it);
+        }
+        for (auto& v : video_assets) {
+            if (v.folder == folder_name) v.folder.clear();
+        }
+        for (auto& a : audio_assets) {
+            if (a.folder == folder_name) a.folder.clear();
+        }
+        for (auto& pf : prefabs) {
+            if (pf.folder == folder_name) pf.folder.clear();
+        }
+        return true;
+    }
 
     double get_total_duration() const {
         double max_time = 10.0; // Minimum default timeline length
@@ -171,6 +244,13 @@ struct Project {
         return nullptr;
     }
 
+    VideoAsset* find_video_asset_mut(const std::string& id) {
+        for (auto& a : video_assets) {
+            if (a.id == id) return &a;
+        }
+        return nullptr;
+    }
+
     const AudioAsset* find_audio_asset(const std::string& id) const {
         for (const auto& a : audio_assets) {
             if (a.id == id) return &a;
@@ -178,8 +258,22 @@ struct Project {
         return nullptr;
     }
 
+    AudioAsset* find_audio_asset_mut(const std::string& id) {
+        for (auto& a : audio_assets) {
+            if (a.id == id) return &a;
+        }
+        return nullptr;
+    }
+
     const ProjectPrefab* find_prefab(const std::string& id) const {
         for (const auto& p : prefabs) {
+            if (p.id == id) return &p;
+        }
+        return nullptr;
+    }
+
+    ProjectPrefab* find_prefab_mut(const std::string& id) {
+        for (auto& p : prefabs) {
             if (p.id == id) return &p;
         }
         return nullptr;
@@ -270,11 +364,43 @@ struct Project {
     }
 
     double get_clip_param(const Clip& clip, const std::string& param, double clip_rel_time) const {
+        bool legacy_uniform_only = (std::abs(clip.scale_x - 1.0) < 1e-6 &&
+                                    std::abs(clip.scale_y - 1.0) < 1e-6 &&
+                                    std::abs(clip.scale - 1.0) > 1e-6);
+        if (param == "scale_x") {
+            double def_x = legacy_uniform_only ? clip.scale : clip.scale_x;
+            if (!get_clip_keyframes(clip.id, "scale_x").empty()) {
+                return evaluate_keyframe(clip.id, "scale_x", clip_rel_time, def_x);
+            }
+            if (!get_clip_keyframes(clip.id, "scale").empty()) {
+                return evaluate_keyframe(clip.id, "scale", clip_rel_time, def_x);
+            }
+            return def_x;
+        }
+        if (param == "scale_y") {
+            double def_y = legacy_uniform_only ? clip.scale : clip.scale_y;
+            if (!get_clip_keyframes(clip.id, "scale_y").empty()) {
+                return evaluate_keyframe(clip.id, "scale_y", clip_rel_time, def_y);
+            }
+            if (!get_clip_keyframes(clip.id, "scale").empty()) {
+                return evaluate_keyframe(clip.id, "scale", clip_rel_time, def_y);
+            }
+            return def_y;
+        }
+        if (param == "scale") {
+            double def_s = legacy_uniform_only ? clip.scale : clip.scale_x;
+            if (!get_clip_keyframes(clip.id, "scale").empty()) {
+                return evaluate_keyframe(clip.id, "scale", clip_rel_time, def_s);
+            }
+            if (!get_clip_keyframes(clip.id, "scale_x").empty()) {
+                return evaluate_keyframe(clip.id, "scale_x", clip_rel_time, def_s);
+            }
+            return def_s;
+        }
         double def_val = 1.0;
         if (param == "pos_x") def_val = clip.pos_x;
         else if (param == "pos_y") def_val = clip.pos_y;
         else if (param == "rotation") def_val = clip.rotation;
-        else if (param == "scale") def_val = clip.scale;
         else if (param == "opacity") def_val = clip.opacity;
         else if (param == "volume") def_val = 1.0;
         return evaluate_keyframe(clip.id, param, clip_rel_time, def_val);
@@ -329,16 +455,16 @@ struct Project {
 };
 
 // ----------------------------------------------------------------------------
-// High-Quality Transformed Layer Blitting (Position, Rotation, Scale, Opacity)
+// High-Quality Transformed Layer Blitting (Position, Rotation, Scale X/Y, Opacity)
 // ----------------------------------------------------------------------------
 inline void blit_transformed_layer(
     std::vector<uint8_t>& dst_rgba, int dst_w, int dst_h,
     const std::vector<uint8_t>& src_rgba, int src_w, int src_h,
-    double pos_x, double pos_y, double rotation_deg, double scale, double opacity)
+    double pos_x, double pos_y, double rotation_deg, double scale_x, double scale_y, double opacity)
 {
     if (src_rgba.empty() || src_w <= 0 || src_h <= 0 || dst_w <= 0 || dst_h <= 0) return;
     if (opacity <= 0.001) return;
-    if (scale <= 0.001) return;
+    if (scale_x <= 0.001 || scale_y <= 0.001) return;
 
     // Scale pos_x and pos_y relative to reference 1280x720 coordinates
     double scale_factor_x = static_cast<double>(dst_w) / 1280.0;
@@ -348,8 +474,56 @@ inline void blit_transformed_layer(
 
     // Base fit scale: fit source into destination canvas while preserving aspect ratio
     double base_scale = std::min(static_cast<double>(dst_w) / src_w, static_cast<double>(dst_h) / src_h);
-    double total_scale = base_scale * scale;
-    if (total_scale <= 0.0001) return;
+    double total_scale_x = base_scale * scale_x;
+    double total_scale_y = base_scale * scale_y;
+    if (total_scale_x <= 0.0001 || total_scale_y <= 0.0001) return;
+
+    float alpha_mod = static_cast<float>(std::clamp(opacity, 0.0, 1.0));
+
+    // Fast path for unrotated 1:1 full-canvas video frames
+    if (std::abs(rotation_deg) < 1e-4 &&
+        std::abs(actual_pos_x) < 1e-3 && std::abs(actual_pos_y) < 1e-3 &&
+        std::abs(total_scale_x - 1.0) < 1e-4 && std::abs(total_scale_y - 1.0) < 1e-4 &&
+        src_w == dst_w && src_h == dst_h)
+    {
+        const size_t total_px = static_cast<size_t>(dst_w) * static_cast<size_t>(dst_h);
+        const uint8_t* src_ptr = src_rgba.data();
+        uint8_t* dst_ptr = dst_rgba.data();
+        if (alpha_mod >= 0.999f) {
+            for (size_t i = 0; i < total_px; ++i) {
+                uint8_t sa = src_ptr[3];
+                if (sa == 255) {
+                    dst_ptr[0] = src_ptr[0];
+                    dst_ptr[1] = src_ptr[1];
+                    dst_ptr[2] = src_ptr[2];
+                    dst_ptr[3] = 255;
+                } else if (sa > 0) {
+                    uint32_t inv_sa = 255 - sa;
+                    dst_ptr[0] = static_cast<uint8_t>((src_ptr[0] * sa + dst_ptr[0] * inv_sa) >> 8);
+                    dst_ptr[1] = static_cast<uint8_t>((src_ptr[1] * sa + dst_ptr[1] * inv_sa) >> 8);
+                    dst_ptr[2] = static_cast<uint8_t>((src_ptr[2] * sa + dst_ptr[2] * inv_sa) >> 8);
+                    dst_ptr[3] = 255;
+                }
+                src_ptr += 4;
+                dst_ptr += 4;
+            }
+        } else {
+            uint32_t mod_256 = static_cast<uint32_t>(alpha_mod * 256.0f);
+            for (size_t i = 0; i < total_px; ++i) {
+                uint32_t sa = (src_ptr[3] * mod_256) >> 8;
+                if (sa > 0) {
+                    uint32_t inv_sa = 255 - sa;
+                    dst_ptr[0] = static_cast<uint8_t>((src_ptr[0] * sa + dst_ptr[0] * inv_sa) >> 8);
+                    dst_ptr[1] = static_cast<uint8_t>((src_ptr[1] * sa + dst_ptr[1] * inv_sa) >> 8);
+                    dst_ptr[2] = static_cast<uint8_t>((src_ptr[2] * sa + dst_ptr[2] * inv_sa) >> 8);
+                    dst_ptr[3] = 255;
+                }
+                src_ptr += 4;
+                dst_ptr += 4;
+            }
+        }
+        return;
+    }
 
     double rad = -rotation_deg * (3.14159265358979323846 / 180.0); // Negative for inverse mapping
     double cos_r = std::cos(rad);
@@ -358,8 +532,8 @@ inline void blit_transformed_layer(
     double cx = dst_w * 0.5 + actual_pos_x;
     double cy = dst_h * 0.5 + actual_pos_y;
 
-    double half_w = (src_w * total_scale) * 0.5;
-    double half_h = (src_h * total_scale) * 0.5;
+    double half_w = (src_w * total_scale_x) * 0.5;
+    double half_h = (src_h * total_scale_y) * 0.5;
 
     // Destination bounding box of the 4 rotated corners
     double f_rad = rotation_deg * (3.14159265358979323846 / 180.0);
@@ -388,10 +562,62 @@ inline void blit_transformed_layer(
 
     if (start_x > end_x || start_y > end_y) return;
 
-    float alpha_mod = static_cast<float>(std::clamp(opacity, 0.0, 1.0));
-    double inv_scale = 1.0 / total_scale;
+    double inv_scale_x = 1.0 / total_scale_x;
+    double inv_scale_y = 1.0 / total_scale_y;
     double half_src_w = src_w * 0.5;
     double half_src_h = src_h * 0.5;
+
+    // Fast axis-aligned bilinear path when rotation == 0
+    if (std::abs(rotation_deg) < 1e-4) {
+        for (int y = start_y; y <= end_y; ++y) {
+            double v = (y - cy) * inv_scale_y + half_src_h;
+            if (v < 0.0 || v > static_cast<double>(src_h - 1)) continue;
+
+            int y0 = static_cast<int>(v);
+            int y1 = std::min(y0 + 1, src_h - 1);
+            float fy = static_cast<float>(v - y0);
+            float inv_fy = 1.0f - fy;
+
+            const uint8_t* row0 = src_rgba.data() + (y0 * src_w) * 4;
+            const uint8_t* row1 = src_rgba.data() + (y1 * src_w) * 4;
+            uint8_t* dst_ptr = dst_rgba.data() + (y * dst_w + start_x) * 4;
+
+            double u = (start_x - cx) * inv_scale_x + half_src_w;
+            for (int x = start_x; x <= end_x; ++x, dst_ptr += 4, u += inv_scale_x) {
+                if (u < 0.0 || u > static_cast<double>(src_w - 1)) continue;
+
+                int x0 = static_cast<int>(u);
+                int x1 = std::min(x0 + 1, src_w - 1);
+                float fx = static_cast<float>(u - x0);
+                float inv_fx = 1.0f - fx;
+
+                float w00 = inv_fx * inv_fy;
+                float w10 = fx * inv_fy;
+                float w01 = inv_fx * fy;
+                float w11 = fx * fy;
+
+                const uint8_t* p00 = row0 + x0 * 4;
+                const uint8_t* p10 = row0 + x1 * 4;
+                const uint8_t* p01 = row1 + x0 * 4;
+                const uint8_t* p11 = row1 + x1 * 4;
+
+                float a = p00[3] * w00 + p10[3] * w10 + p01[3] * w01 + p11[3] * w11;
+                float src_a = (a / 255.0f) * alpha_mod;
+                if (src_a <= 0.001f) continue;
+
+                float r = p00[0] * w00 + p10[0] * w10 + p01[0] * w01 + p11[0] * w11;
+                float g = p00[1] * w00 + p10[1] * w10 + p01[1] * w01 + p11[1] * w11;
+                float b = p00[2] * w00 + p10[2] * w10 + p01[2] * w01 + p11[2] * w11;
+
+                float inv_a = 1.0f - src_a;
+                dst_ptr[0] = static_cast<uint8_t>(r * src_a + dst_ptr[0] * inv_a);
+                dst_ptr[1] = static_cast<uint8_t>(g * src_a + dst_ptr[1] * inv_a);
+                dst_ptr[2] = static_cast<uint8_t>(b * src_a + dst_ptr[2] * inv_a);
+                dst_ptr[3] = 255;
+            }
+        }
+        return;
+    }
 
     for (int y = start_y; y <= end_y; ++y) {
         double dy = y - cy;
@@ -405,8 +631,8 @@ inline void blit_transformed_layer(
             double ry = dx * sin_r + dy * cos_r;
 
             // Scale back
-            double u = rx * inv_scale + half_src_w;
-            double v = ry * inv_scale + half_src_h;
+            double u = rx * inv_scale_x + half_src_w;
+            double v = ry * inv_scale_y + half_src_h;
 
             if (u < 0.0 || u > static_cast<double>(src_w - 1) || v < 0.0 || v > static_cast<double>(src_h - 1)) {
                 continue;
@@ -446,6 +672,14 @@ inline void blit_transformed_layer(
             dst_rgba[dst_row_idx + 3] = 255;
         }
     }
+}
+
+inline void blit_transformed_layer(
+    std::vector<uint8_t>& dst_rgba, int dst_w, int dst_h,
+    const std::vector<uint8_t>& src_rgba, int src_w, int src_h,
+    double pos_x, double pos_y, double rotation_deg, double scale, double opacity)
+{
+    blit_transformed_layer(dst_rgba, dst_w, dst_h, src_rgba, src_w, src_h, pos_x, pos_y, rotation_deg, scale, scale, opacity);
 }
 
 inline std::string format_timecode(double seconds, bool show_subseconds = true) {

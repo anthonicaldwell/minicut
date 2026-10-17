@@ -150,7 +150,9 @@ void KeyframeEditor::render_parameter_row(
             if (param == "pos_x") clip->pos_x = val_f;
             else if (param == "pos_y") clip->pos_y = val_f;
             else if (param == "rotation") clip->rotation = val_f;
-            else if (param == "scale") clip->scale = val_f;
+            else if (param == "scale") { clip->scale = val_f; clip->scale_x = val_f; clip->scale_y = val_f; }
+            else if (param == "scale_x") { clip->scale_x = val_f; clip->scale = val_f; }
+            else if (param == "scale_y") { clip->scale_y = val_f; }
             else if (param == "opacity") clip->opacity = val_f;
             else if (param == "volume" || param == "volume_left" || param == "volume_right") {
                 project.set_or_add_keyframe(clip->id, param, rel_playhead, val_f);
@@ -169,7 +171,9 @@ void KeyframeEditor::render_parameter_row(
             if (param == "pos_x") clip->pos_x = default_val;
             else if (param == "pos_y") clip->pos_y = default_val;
             else if (param == "rotation") clip->rotation = default_val;
-            else if (param == "scale") clip->scale = default_val;
+            else if (param == "scale") { clip->scale = default_val; clip->scale_x = default_val; clip->scale_y = default_val; }
+            else if (param == "scale_x") { clip->scale_x = default_val; clip->scale = default_val; }
+            else if (param == "scale_y") { clip->scale_y = default_val; }
             else if (param == "opacity") clip->opacity = default_val;
             else if (param == "volume" || param == "volume_left" || param == "volume_right") {
                 project.set_or_add_keyframe(clip->id, param, rel_playhead, default_val);
@@ -207,7 +211,9 @@ void KeyframeEditor::render_image_tools(
     ImGui::TextDisabled("Presets:");
     ImGui::SameLine();
     if (ImGui::SmallButton("Reset All")) {
-        clip->pos_x = 0.0; clip->pos_y = 0.0; clip->rotation = 0.0; clip->scale = 1.0; clip->opacity = 1.0;
+        clip->pos_x = 0.0; clip->pos_y = 0.0; clip->rotation = 0.0;
+        clip->scale = 1.0; clip->scale_x = 1.0; clip->scale_y = 1.0;
+        clip->opacity = 1.0;
         project.remove_clip_keyframes(clip->id);
         if (on_project_changed) on_project_changed();
     }
@@ -226,14 +232,18 @@ void KeyframeEditor::render_image_tools(
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("Ken Burns (In)")) {
-        project.set_or_add_keyframe(clip->id, "scale", 0.0, 1.0);
-        project.set_or_add_keyframe(clip->id, "scale", clip->duration, 1.25);
+        project.set_or_add_keyframe(clip->id, "scale_x", 0.0, 1.0);
+        project.set_or_add_keyframe(clip->id, "scale_x", clip->duration, 1.25);
+        project.set_or_add_keyframe(clip->id, "scale_y", 0.0, 1.0);
+        project.set_or_add_keyframe(clip->id, "scale_y", clip->duration, 1.25);
         if (on_project_changed) on_project_changed();
     }
     ImGui::SameLine();
     if (ImGui::SmallButton("Ken Burns (Out)")) {
-        project.set_or_add_keyframe(clip->id, "scale", 0.0, 1.25);
-        project.set_or_add_keyframe(clip->id, "scale", clip->duration, 1.0);
+        project.set_or_add_keyframe(clip->id, "scale_x", 0.0, 1.25);
+        project.set_or_add_keyframe(clip->id, "scale_x", clip->duration, 1.0);
+        project.set_or_add_keyframe(clip->id, "scale_y", 0.0, 1.25);
+        project.set_or_add_keyframe(clip->id, "scale_y", clip->duration, 1.0);
         if (on_project_changed) on_project_changed();
     }
 
@@ -251,7 +261,8 @@ void KeyframeEditor::render_image_tools(
         render_parameter_row(project, clip, "pos_x", _TR("inspector_position_x"), rel_playhead, 0.0, -1920.0f, 1920.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
         render_parameter_row(project, clip, "pos_y", _TR("inspector_position_y"), rel_playhead, 0.0, -1080.0f, 1080.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
         render_parameter_row(project, clip, "rotation", _TR("inspector_rotation"), rel_playhead, 0.0, -360.0f, 360.0f, 0.5f, "%.1f deg", on_scrub, on_project_changed);
-        render_parameter_row(project, clip, "scale", _TR("inspector_scale"), rel_playhead, 1.0, 0.01f, 5.0f, 0.01f, "%.2fx", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "scale_x", _TR("inspector_scale_x"), rel_playhead, 1.0, 0.01f, 5.0f, 0.01f, "%.2fx", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "scale_y", _TR("inspector_scale_y"), rel_playhead, 1.0, 0.01f, 5.0f, 0.01f, "%.2fx", on_scrub, on_project_changed);
         render_parameter_row(project, clip, "opacity", _TR("inspector_opacity"), rel_playhead, 1.0, 0.0f, 1.0f, 0.01f, "%.2f", on_scrub, on_project_changed);
 
         ImGui::EndTable();
@@ -273,14 +284,14 @@ void KeyframeEditor::render_image_tools(
     ImGui::Separator();
 
     // Curve Graph Selector
-    const char* params[] = { "pos_x", "pos_y", "rotation", "scale", "opacity" };
-    const char* param_labels[] = { "Position X Curve", "Position Y Curve", "Rotation Curve", "Scale Curve", "Opacity Curve" };
-    if (m_selected_param_idx < 0 || m_selected_param_idx > 4) m_selected_param_idx = 4; // Default to Opacity
+    const char* params[] = { "pos_x", "pos_y", "rotation", "scale_x", "scale_y", "opacity" };
+    const char* param_labels[] = { "Position X Curve", "Position Y Curve", "Rotation Curve", "Scale X Curve", "Scale Y Curve", "Opacity Curve" };
+    if (m_selected_param_idx < 0 || m_selected_param_idx > 5) m_selected_param_idx = 5; // Default to Opacity
 
     ImGui::Text("Keyframe Curve Graph:");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(180.0f);
-    if (ImGui::Combo("##ParamCombo", &m_selected_param_idx, param_labels, 5)) {
+    if (ImGui::Combo("##ParamCombo", &m_selected_param_idx, param_labels, 6)) {
         m_selected_kf_idx = -1;
     }
 
@@ -289,7 +300,7 @@ void KeyframeEditor::render_image_tools(
     if (sel_param == "pos_x") { min_v = -640.0f; max_v = 640.0f; }
     else if (sel_param == "pos_y") { min_v = -360.0f; max_v = 360.0f; }
     else if (sel_param == "rotation") { min_v = -180.0f; max_v = 180.0f; }
-    else if (sel_param == "scale") { min_v = 0.0f; max_v = 3.0f; }
+    else if (sel_param == "scale_x" || sel_param == "scale_y") { min_v = 0.0f; max_v = 3.0f; }
     else if (sel_param == "opacity") { min_v = 0.0f; max_v = 1.0f; }
 
     render_curve_graph(project, clip, sel_param, min_v, max_v, playhead_time, on_scrub, on_project_changed);
@@ -317,7 +328,9 @@ void KeyframeEditor::render_video_tools(
     ImGui::TextDisabled("Presets:");
     ImGui::SameLine();
     if (ImGui::SmallButton("Reset All")) {
-        clip->pos_x = 0.0; clip->pos_y = 0.0; clip->rotation = 0.0; clip->scale = 1.0; clip->opacity = 1.0;
+        clip->pos_x = 0.0; clip->pos_y = 0.0; clip->rotation = 0.0;
+        clip->scale = 1.0; clip->scale_x = 1.0; clip->scale_y = 1.0;
+        clip->opacity = 1.0;
         project.remove_clip_keyframes(clip->id);
         if (on_project_changed) on_project_changed();
     }
@@ -349,7 +362,8 @@ void KeyframeEditor::render_video_tools(
         render_parameter_row(project, clip, "pos_x", _TR("inspector_position_x"), rel_playhead, 0.0, -1920.0f, 1920.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
         render_parameter_row(project, clip, "pos_y", _TR("inspector_position_y"), rel_playhead, 0.0, -1080.0f, 1080.0f, 1.0f, "%.0f px", on_scrub, on_project_changed);
         render_parameter_row(project, clip, "rotation", _TR("inspector_rotation"), rel_playhead, 0.0, -360.0f, 360.0f, 0.5f, "%.1f deg", on_scrub, on_project_changed);
-        render_parameter_row(project, clip, "scale", _TR("inspector_scale"), rel_playhead, 1.0, 0.01f, 5.0f, 0.01f, "%.2fx", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "scale_x", _TR("inspector_scale_x"), rel_playhead, 1.0, 0.01f, 5.0f, 0.01f, "%.2fx", on_scrub, on_project_changed);
+        render_parameter_row(project, clip, "scale_y", _TR("inspector_scale_y"), rel_playhead, 1.0, 0.01f, 5.0f, 0.01f, "%.2fx", on_scrub, on_project_changed);
         render_parameter_row(project, clip, "opacity", _TR("inspector_opacity"), rel_playhead, 1.0, 0.0f, 1.0f, 0.01f, "%.2f", on_scrub, on_project_changed);
 
         ImGui::EndTable();
@@ -371,14 +385,14 @@ void KeyframeEditor::render_video_tools(
     ImGui::Separator();
 
     // Curve Graph Selector
-    const char* params[] = { "opacity", "scale", "rotation", "pos_x", "pos_y" };
-    const char* param_labels[] = { "Opacity Curve", "Scale Curve", "Rotation Curve", "Position X Curve", "Position Y Curve" };
-    if (m_selected_param_idx < 0 || m_selected_param_idx > 4) m_selected_param_idx = 0;
+    const char* params[] = { "opacity", "scale_x", "scale_y", "rotation", "pos_x", "pos_y" };
+    const char* param_labels[] = { "Opacity Curve", "Scale X Curve", "Scale Y Curve", "Rotation Curve", "Position X Curve", "Position Y Curve" };
+    if (m_selected_param_idx < 0 || m_selected_param_idx > 5) m_selected_param_idx = 0;
 
     ImGui::Text("Keyframe Curve Graph:");
     ImGui::SameLine();
     ImGui::SetNextItemWidth(180.0f);
-    if (ImGui::Combo("##ParamCombo", &m_selected_param_idx, param_labels, 5)) {
+    if (ImGui::Combo("##ParamCombo", &m_selected_param_idx, param_labels, 6)) {
         m_selected_kf_idx = -1;
     }
 
@@ -387,7 +401,7 @@ void KeyframeEditor::render_video_tools(
     if (sel_param == "pos_x") { min_v = -640.0f; max_v = 640.0f; }
     else if (sel_param == "pos_y") { min_v = -360.0f; max_v = 360.0f; }
     else if (sel_param == "rotation") { min_v = -180.0f; max_v = 180.0f; }
-    else if (sel_param == "scale") { min_v = 0.0f; max_v = 3.0f; }
+    else if (sel_param == "scale_x" || sel_param == "scale_y") { min_v = 0.0f; max_v = 3.0f; }
     else if (sel_param == "opacity") { min_v = 0.0f; max_v = 1.0f; }
 
     render_curve_graph(project, clip, sel_param, min_v, max_v, playhead_time, on_scrub, on_project_changed);

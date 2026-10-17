@@ -448,6 +448,20 @@ std::string TextGenerator::create_text_asset(Project& project,
     va.is_image = true;
     va.has_audio = false;
 
+    // Persist raw text content and styling configuration for lossless reload & dynamic re-rendering
+    va.text_content = config.text;
+    va.text_font_path = config.font_path;
+    va.text_font_size = config.font_size;
+    for (int i = 0; i < 4; ++i) va.text_font_color[i] = config.font_color[i];
+    va.text_use_bg = config.use_bg;
+    for (int i = 0; i < 4; ++i) va.text_bg_color[i] = config.bg_color[i];
+    va.text_use_outline = config.use_outline;
+    for (int i = 0; i < 4; ++i) va.text_outline_color[i] = config.outline_color[i];
+    va.text_outline_thickness = config.outline_thickness;
+    va.text_letter_spacing = config.letter_spacing;
+    va.text_line_spacing = config.line_spacing;
+    va.text_justification = config.justification;
+
     // Generate thumbnail OpenGL texture from rendered file
     std::vector<uint8_t> rgba;
     int tw = 0, th = 0;

@@ -19,11 +19,15 @@
 #include "AIDialog.h"
 #include "render/RenderSystem.h"
 #include "TextGenerator.h"
+#include "ShaderManager.h"
 
 #include <SDL2/SDL.h>
 #include <GL/glew.h>
 #include <string>
 #include <vector>
+#include <atomic>
+#include <mutex>
+#include <thread>
 
 struct ImGuiContext;
 
@@ -101,6 +105,10 @@ public:
     bool is_selected_clip_visual();
     ExportManager& get_export_manager() { return m_export_manager; }
 
+    void apply_custom_shader(const CustomShader& shader);
+    void set_status_message(const std::string& msg, double duration = 3.0);
+    void cleanup_temp_files();
+
 private:
     void apply_kde_plasma_theme();
     void apply_breeze_dark_theme();
@@ -112,7 +120,6 @@ private:
     // Settings & Localization
     void load_settings();
     void save_settings();
-    void cleanup_temp_files();
 
     // Playback control
     void toggle_playback();
@@ -149,6 +156,7 @@ private:
     void open_project(const std::string& path);
     void save_project(const std::string& path = "");
     void add_asset_to_timeline(const std::string& asset_id, bool is_video, double insert_time);
+    void generate_demo_media();
 
     // SDL & OpenGL state
     SDL_Window* m_window = nullptr;
@@ -253,9 +261,13 @@ private:
     double m_gizmo_orig_pos_x = 0.0;
     double m_gizmo_orig_pos_y = 0.0;
     double m_gizmo_orig_scale = 1.0;
+    double m_gizmo_orig_scale_x = 1.0;
+    double m_gizmo_orig_scale_y = 1.0;
     double m_gizmo_orig_rotation = 0.0;
     double m_gizmo_orig_angle = 0.0;
     double m_gizmo_orig_dist = 1.0;
+    double m_last_requested_playhead = -1.0;
+    float m_prefab_poll_timer = 0.0f;
 
     // Generated preview toolbar icons
     GLuint m_icon_tex_transform = 0;
@@ -265,4 +277,34 @@ private:
     GLuint m_icon_tex_rotate = 0;
     GLuint m_icon_tex_reset = 0;
     GLuint m_icon_tex_popout = 0;
+
+    // Project Loading Progress State
+    struct ProjectLoadProgress {
+        std::atomic<bool> active{false};
+        std::atomic<bool> worker_done{false};
+        std::atomic<float> progress{0.0f};
+        std::string project_filename;
+        std::string current_stage;
+        std::string current_item;
+        std::mutex mutex;
+        std::thread* worker_thread = nullptr;
+        Project loaded_project;
+        bool success = false;
+
+        void set(float p, const std::string& stage, const std::string& item) {
+            progress.store(p);
+            std::lock_guard<std::mutex> lock(mutex);
+            current_stage = stage;
+            current_item = item;
+        }
+
+        void get(std::string& stage, std::string& item) {
+            std::lock_guard<std::mutex> lock(mutex);
+            stage = current_stage;
+            item = current_item;
+        }
+    };
+    ProjectLoadProgress m_project_load_state;
+    void render_project_load_modal();
+    void poll_project_loading();
 };

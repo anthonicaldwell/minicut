@@ -33,6 +33,19 @@ struct FormatPreset {
     bool is_custom = false;
 };
 
+struct BatchJob {
+    int id = 0;
+    std::string project_path;
+    std::string output_path;
+    std::string format = "mp4";
+    int width = 1920;
+    int height = 1080;
+    int fps = 30;
+    enum class Status { Queued, Processing, Completed, Failed, Cancelled } status = Status::Queued;
+    float progress = 0.0f;
+    std::string error_message;
+};
+
 class ExportManager {
 public:
     ExportManager();
@@ -40,6 +53,10 @@ public:
 
     bool start_export(const Project& project, const ExportConfig& config);
     void cancel_export();
+
+    bool export_headless_sync(const Project& project, const ExportConfig& config,
+                              const std::function<void(float progress, const std::string& status)>& progress_cb = nullptr);
+    std::string get_error_message();
 
     static bool write_srt_file(const std::string& srt_path, const Project& project);
 
@@ -55,7 +72,7 @@ public:
     bool is_dialog_open() const { return m_show_dialog; }
     void dismiss_status() { m_is_finished.store(false); m_is_error.store(false); }
     bool is_window_active() const {
-        return m_show_dialog || m_is_exporting.load() || m_is_finished.load() || m_is_error.load();
+        return m_show_dialog || m_is_exporting.load() || m_is_finished.load() || m_is_error.load() || m_is_batch_running.load();
     }
     void render_ui(const std::function<void(const ExportConfig& cfg)>& on_start_export = nullptr, bool standalone_window = false);
 
@@ -68,10 +85,27 @@ public:
     bool delete_format_preset(int index);
     const std::vector<FormatPreset>& get_presets() const { return m_presets; }
 
+    // Batch Processing API
+    const std::vector<BatchJob>& get_batch_jobs() const { return m_batch_jobs; }
+    std::vector<BatchJob>& get_batch_jobs_mut() { return m_batch_jobs; }
+    void add_batch_job(const std::string& project_path, const std::string& output_path = "",
+                       const std::string& format = "mp4", int width = 1920, int height = 1080, int fps = 30);
+    bool edit_batch_job(int job_id, const std::string& project_path, const std::string& output_path,
+                        const std::string& format, int width, int height, int fps);
+    bool delete_batch_job(int job_id);
+    void clear_batch_jobs();
+    void start_batch_processing();
+    void cancel_batch_processing();
+    bool is_batch_running() const { return m_is_batch_running.load(); }
+    int get_current_batch_job_id() const { return m_current_batch_job_id.load(); }
+    float get_batch_overall_progress() const;
+
 private:
     void export_thread_func(Project project_snapshot, ExportConfig config);
     void render_settings_contents(const std::function<void(const ExportConfig& cfg)>& on_start_export);
     void render_progress_contents();
+    void render_batch_contents();
+    void batch_thread_func();
 
     std::atomic<bool> m_is_exporting{false};
     std::atomic<bool> m_cancel_requested{false};
@@ -100,4 +134,24 @@ private:
     int m_selected_preset_idx = 0;
     char m_new_preset_name_buf[128] = "";
     bool m_show_save_preset_dialog = false;
+
+    // Batch Processing State
+    std::vector<BatchJob> m_batch_jobs;
+    mutable std::mutex m_batch_mutex;
+    std::thread m_batch_thread;
+    std::atomic<bool> m_is_batch_running{false};
+    std::atomic<bool> m_batch_cancel_requested{false};
+    std::atomic<int> m_current_batch_job_id{0};
+    int m_selected_batch_job_id = -1;
+    int m_next_batch_job_id = 1;
+
+    // Batch dialog modal state
+    bool m_show_add_batch_dialog = false;
+    bool m_show_edit_batch_dialog = false;
+    char m_batch_input_project[512] = "";
+    char m_batch_input_output[512] = "";
+    int m_batch_input_width = 1920;
+    int m_batch_input_height = 1080;
+    int m_batch_input_fps = 30;
+    int m_batch_input_fmt_idx = 0;
 };

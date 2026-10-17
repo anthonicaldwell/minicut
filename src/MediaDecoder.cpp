@@ -1,7 +1,12 @@
 #include "MediaDecoder.h"
+#include <png.h>
+#include <filesystem>
 #include <iostream>
 #include <chrono>
 #include <cstdlib>
+#include <cstring>
+
+namespace fs = std::filesystem;
 
 extern "C" {
 #include <libavformat/avformat.h>
@@ -20,6 +25,14 @@ DecodedVideoContext::~DecodedVideoContext() {
 }
 
 void DecodedVideoContext::close() {
+    if (frame) {
+        av_frame_free(&frame);
+        frame = nullptr;
+    }
+    if (packet) {
+        av_packet_free(&packet);
+        packet = nullptr;
+    }
     if (sws_ctx) {
         sws_freeContext(sws_ctx);
         sws_ctx = nullptr;
@@ -34,19 +47,26 @@ void DecodedVideoContext::close() {
     }
     video_stream_idx = -1;
     last_decoded_pts = -1.0;
+    fps = 30.0;
     is_image = false;
     cached_image_rgba.reset();
     cached_w = 0;
     cached_h = 0;
+    last_frame_rgba.clear();
+    last_frame_w = 0;
+    last_frame_h = 0;
 }
 
 bool DecodedVideoContext::open(const std::string& filepath) {
     close();
 
-    std::string ext = filepath.substr(filepath.find_last_of("."));
-    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-    if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".webp") {
-        is_image = true;
+    size_t dot_pos = filepath.find_last_of(".");
+    if (dot_pos != std::string::npos) {
+        std::string ext = filepath.substr(dot_pos);
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext == ".png" || ext == ".jpg" || ext == ".jpeg" || ext == ".bmp" || ext == ".webp") {
+            is_image = true;
+        }
     }
 
     if (avformat_open_input(&format_ctx, filepath.c_str(), nullptr, nullptr) != 0) {
@@ -62,6 +82,10 @@ bool DecodedVideoContext::open(const std::string& filepath) {
     for (unsigned int i = 0; i < format_ctx->nb_streams; ++i) {
         if (format_ctx->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO) {
             video_stream_idx = static_cast<int>(i);
+            AVRational r = format_ctx->streams[i]->r_frame_rate;
+            if (r.den > 0 && r.num > 0) {
+                fps = av_q2d(r);
+            }
             break;
         }
     }
@@ -89,11 +113,20 @@ bool DecodedVideoContext::open(const std::string& filepath) {
         return false;
     }
 
+    // Enable multi-threaded FFmpeg decoding for video files
+    if (!is_image) {
+        int hw_threads = static_cast<int>(std::thread::hardware_concurrency());
+        codec_ctx->thread_count = std::clamp(hw_threads > 0 ? hw_threads / 2 : 2, 2, 4);
+        codec_ctx->thread_type = FF_THREAD_FRAME | FF_THREAD_SLICE;
+    }
+
     if (avcodec_open2(codec_ctx, decoder, nullptr) < 0) {
         close();
         return false;
     }
 
+    packet = av_packet_alloc();
+    frame = av_frame_alloc();
     width = codec_ctx->width;
     height = codec_ctx->height;
     return true;
@@ -108,44 +141,73 @@ bool DecodedVideoContext::decode_frame_at(double target_sec, int out_w, int out_
         return true;
     }
 
+    // Fast sequential cache hit: if target_sec falls within the already-decoded video frame interval,
+    // return the cached RGBA buffer immediately instead of seeking backward to the keyframe!
+    double frame_dur = (fps > 1.0 && fps < 240.0) ? (1.0 / fps) : (1.0 / 30.0);
+    if (!is_image && last_decoded_pts >= 0.0 &&
+        last_frame_w == out_w && last_frame_h == out_h && !last_frame_rgba.empty())
+    {
+        if (target_sec >= (last_decoded_pts - 0.045) && target_sec < (last_decoded_pts + frame_dur * 0.85)) {
+            out_rgba = last_frame_rgba;
+            return true;
+        }
+    }
+
     AVStream* stream = format_ctx->streams[video_stream_idx];
     int64_t target_pts = static_cast<int64_t>(target_sec / av_q2d(stream->time_base));
 
-    // Seek if not close to sequential playback
-    bool need_seek = !is_image && (last_decoded_pts < 0.0 || target_sec < last_decoded_pts || (target_sec - last_decoded_pts) > 0.5);
+    // Seek only if jumping backward beyond current frame tolerance or jumping forward > 0.75s
+    bool need_seek = !is_image && (last_decoded_pts < 0.0 ||
+                                   target_sec < (last_decoded_pts - 0.045) ||
+                                   (target_sec - last_decoded_pts) > 0.75);
     if (need_seek) {
         avcodec_flush_buffers(codec_ctx);
         av_seek_frame(format_ctx, video_stream_idx, target_pts, AVSEEK_FLAG_BACKWARD);
     }
 
-    AVPacket* packet = av_packet_alloc();
-    AVFrame* frame = av_frame_alloc();
+    if (!packet) packet = av_packet_alloc();
+    if (!frame) frame = av_frame_alloc();
     bool found = false;
 
+    auto convert_current_frame = [&]() {
+        sws_ctx = sws_getCachedContext(
+            sws_ctx,
+            codec_ctx->width, codec_ctx->height, codec_ctx->pix_fmt,
+            out_w, out_h, AV_PIX_FMT_RGBA,
+            SWS_FAST_BILINEAR, nullptr, nullptr, nullptr
+        );
+
+        out_rgba.resize(static_cast<size_t>(out_w) * static_cast<size_t>(out_h) * 4);
+        uint8_t* dst_data[4] = { out_rgba.data(), nullptr, nullptr, nullptr };
+        int dst_linesize[4] = { out_w * 4, 0, 0, 0 };
+
+        sws_scale(sws_ctx, frame->data, frame->linesize, 0, codec_ctx->height, dst_data, dst_linesize);
+        found = true;
+    };
+
+    // First drain any already-buffered frame inside the multi-threaded codec context
+    while (!need_seek && avcodec_receive_frame(codec_ctx, frame) == 0) {
+        double frame_pts_sec = (frame->pts != AV_NOPTS_VALUE) ? (frame->pts * av_q2d(stream->time_base)) :
+                               ((frame->best_effort_timestamp != AV_NOPTS_VALUE) ? (frame->best_effort_timestamp * av_q2d(stream->time_base)) : 0.0);
+        last_decoded_pts = frame_pts_sec;
+        if (is_image || frame_pts_sec >= (target_sec - frame_dur * 0.9)) {
+            convert_current_frame();
+            break;
+        }
+    }
+
     int max_packets = 120;
-    while (max_packets-- > 0 && av_read_frame(format_ctx, packet) >= 0) {
+    while (!found && max_packets-- > 0 && av_read_frame(format_ctx, packet) >= 0) {
         if (packet->stream_index == video_stream_idx) {
             if (avcodec_send_packet(codec_ctx, packet) == 0) {
                 while (avcodec_receive_frame(codec_ctx, frame) == 0) {
-                    double frame_pts_sec = (frame->pts != AV_NOPTS_VALUE) ? (frame->pts * av_q2d(stream->time_base)) : 0.0;
+                    double frame_pts_sec = (frame->pts != AV_NOPTS_VALUE) ? (frame->pts * av_q2d(stream->time_base)) :
+                                           ((frame->best_effort_timestamp != AV_NOPTS_VALUE) ? (frame->best_effort_timestamp * av_q2d(stream->time_base)) : 0.0);
                     last_decoded_pts = frame_pts_sec;
 
                     // If this is a still image or at/past target_sec or reached packet limit
-                    if (is_image || frame_pts_sec >= (target_sec - 0.04) || max_packets < 5) {
-                        // Setup sws context if needed
-                        sws_ctx = sws_getCachedContext(
-                            sws_ctx,
-                            codec_ctx->width, codec_ctx->height, codec_ctx->pix_fmt,
-                            out_w, out_h, AV_PIX_FMT_RGBA,
-                            SWS_BILINEAR, nullptr, nullptr, nullptr
-                        );
-
-                        out_rgba.resize(out_w * out_h * 4);
-                        uint8_t* dst_data[4] = { out_rgba.data(), nullptr, nullptr, nullptr };
-                        int dst_linesize[4] = { out_w * 4, 0, 0, 0 };
-
-                        sws_scale(sws_ctx, frame->data, frame->linesize, 0, codec_ctx->height, dst_data, dst_linesize);
-                        found = true;
+                    if (is_image || frame_pts_sec >= (target_sec - frame_dur * 0.9) || max_packets < 5) {
+                        convert_current_frame();
                         break;
                     }
                 }
@@ -155,14 +217,32 @@ bool DecodedVideoContext::decode_frame_at(double target_sec, int out_w, int out_
         if (found) break;
     }
 
-    av_frame_free(&frame);
-    av_packet_free(&packet);
+    // If stream hit EOF or needs flush at the end of stream
+    if (!found) {
+        avcodec_send_packet(codec_ctx, nullptr);
+        while (avcodec_receive_frame(codec_ctx, frame) == 0) {
+            double frame_pts_sec = (frame->pts != AV_NOPTS_VALUE) ? (frame->pts * av_q2d(stream->time_base)) : last_decoded_pts;
+            last_decoded_pts = frame_pts_sec;
+            convert_current_frame();
+            if (found) break;
+        }
+        if (!found && !last_frame_rgba.empty() && last_frame_w == out_w && last_frame_h == out_h) {
+            out_rgba = last_frame_rgba;
+            return true;
+        }
+    }
 
-    if (found && is_image) {
-        cached_image_rgba = std::make_shared<SwapBuffer<uint8_t>>(out_rgba.size());
-        std::memcpy(cached_image_rgba->data(), out_rgba.data(), out_rgba.size());
-        cached_w = out_w;
-        cached_h = out_h;
+    if (found) {
+        if (is_image) {
+            cached_image_rgba = std::make_shared<SwapBuffer<uint8_t>>(out_rgba.size());
+            std::memcpy(cached_image_rgba->data(), out_rgba.data(), out_rgba.size());
+            cached_w = out_w;
+            cached_h = out_h;
+        } else {
+            last_frame_rgba = out_rgba;
+            last_frame_w = out_w;
+            last_frame_h = out_h;
+        }
     }
 
     return found;
@@ -197,6 +277,14 @@ void MediaDecoder::request_frame(double timeline_time, const Project& project_sn
     m_request_cv.notify_one();
 }
 
+void MediaDecoder::invalidate_context(const std::string& filepath) {
+    {
+        std::lock_guard<std::mutex> lock(m_request_mutex);
+        m_invalidated_paths.push_back(filepath);
+    }
+    m_request_cv.notify_one();
+}
+
 bool MediaDecoder::update_preview_texture(GLuint texture_id, int& out_w, int& out_h, double& out_time) {
     std::lock_guard<std::mutex> lock(m_frame_mutex);
     if (!m_has_new_frame) {
@@ -207,10 +295,22 @@ bool MediaDecoder::update_preview_texture(GLuint texture_id, int& out_w, int& ou
     }
 
     glBindTexture(GL_TEXTURE_2D, texture_id);
-    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_ready_width, m_ready_height, 0,
-                 GL_RGBA, GL_UNSIGNED_BYTE, m_ready_rgba.data());
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    if (m_allocated_tex_id == texture_id &&
+        m_allocated_tex_w == m_ready_width &&
+        m_allocated_tex_h == m_ready_height)
+    {
+        // Fast in-place update avoids GPU texture reallocation stalls on Intel integrated graphics
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, m_ready_width, m_ready_height,
+                        GL_RGBA, GL_UNSIGNED_BYTE, m_ready_rgba.data());
+    } else {
+        glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_ready_width, m_ready_height, 0,
+                     GL_RGBA, GL_UNSIGNED_BYTE, m_ready_rgba.data());
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+        m_allocated_tex_id = texture_id;
+        m_allocated_tex_w = m_ready_width;
+        m_allocated_tex_h = m_ready_height;
+    }
 
     out_w = m_ready_width;
     out_h = m_ready_height;
@@ -220,41 +320,63 @@ bool MediaDecoder::update_preview_texture(GLuint texture_id, int& out_w, int& ou
 }
 
 void MediaDecoder::worker_loop() {
-    std::vector<uint8_t> composite_buffer;
-    std::vector<uint8_t> layer_buffer;
     const int preview_w = 1280;
     const int preview_h = 720;
-    composite_buffer.resize(preview_w * preview_h * 4);
+    const size_t frame_bytes = static_cast<size_t>(preview_w) * static_cast<size_t>(preview_h) * 4;
+
+    std::vector<uint8_t> composite_buffer(frame_bytes);
+    std::vector<uint8_t> layer_buffer;
+
+    // Precompute dark checkerboard pattern once instead of nested loops per frame
+    std::vector<uint8_t> checkerboard_template(frame_bytes);
+    for (int y = 0; y < preview_h; ++y) {
+        for (int x = 0; x < preview_w; ++x) {
+            size_t idx = (static_cast<size_t>(y) * preview_w + x) * 4;
+            bool check = ((x >> 5) & 1) == ((y >> 5) & 1);
+            uint8_t bg = check ? 24 : 18;
+            checkerboard_template[idx + 0] = bg;
+            checkerboard_template[idx + 1] = bg;
+            checkerboard_template[idx + 2] = bg;
+            checkerboard_template[idx + 3] = 255;
+        }
+    }
 
     while (m_running.load()) {
         double current_req_time = 0.0;
         Project current_project;
+        std::vector<std::string> invalidated;
 
         {
             std::unique_lock<std::mutex> lock(m_request_mutex);
             m_request_cv.wait(lock, [this]() {
-                return !m_running.load() || m_has_new_request;
+                return !m_running.load() || m_has_new_request || !m_invalidated_paths.empty();
             });
 
             if (!m_running.load()) break;
+
+            if (!m_invalidated_paths.empty()) {
+                invalidated.swap(m_invalidated_paths);
+            }
+            if (!m_has_new_request) {
+                for (const auto& p : invalidated) {
+                    m_video_contexts.erase(p);
+                }
+                continue;
+            }
 
             current_req_time = m_requested_time;
             current_project = m_project_snapshot;
             m_has_new_request = false;
         }
 
-        // Fill background with subtle dark checkerboard pattern
-        for (int y = 0; y < preview_h; ++y) {
-            for (int x = 0; x < preview_w; ++x) {
-                int idx = (y * preview_w + x) * 4;
-                bool check = ((x / 32) % 2) == ((y / 32) % 2);
-                uint8_t bg = check ? 24 : 18;
-                composite_buffer[idx + 0] = bg;
-                composite_buffer[idx + 1] = bg;
-                composite_buffer[idx + 2] = bg;
-                composite_buffer[idx + 3] = 255;
-            }
+        for (const auto& p : invalidated) {
+            m_video_contexts.erase(p);
         }
+
+        if (composite_buffer.size() != frame_bytes) {
+            composite_buffer.resize(frame_bytes);
+        }
+        std::memcpy(composite_buffer.data(), checkerboard_template.data(), frame_bytes);
 
         bool has_solo_video = false;
         for (const auto& track : current_project.tracks) {
@@ -297,15 +419,17 @@ void MediaDecoder::worker_loop() {
                     double rel_time = clip.clip_relative_time(current_req_time);
                     double media_time = clip.media_time(current_req_time);
 
-                    double pos_x = current_project.get_clip_param(clip, "pos_x", rel_time);
-                    double pos_y = current_project.get_clip_param(clip, "pos_y", rel_time);
-                    double rot   = current_project.get_clip_param(clip, "rotation", rel_time);
-                    double scale = current_project.get_clip_param(clip, "scale", rel_time);
+                    double pos_x   = current_project.get_clip_param(clip, "pos_x", rel_time);
+                    double pos_y   = current_project.get_clip_param(clip, "pos_y", rel_time);
+                    double rot     = current_project.get_clip_param(clip, "rotation", rel_time);
+                    double scale_x = current_project.get_clip_param(clip, "scale_x", rel_time) * asset->scale_x;
+                    double scale_y = current_project.get_clip_param(clip, "scale_y", rel_time) * asset->scale_y;
                     double opacity = current_project.get_clip_param(clip, "opacity", rel_time);
                     opacity = std::clamp(opacity, 0.0, 1.0);
 
                     bool has_spatial_transform = (std::abs(pos_x) > 1e-3 || std::abs(pos_y) > 1e-3 ||
-                                                  std::abs(rot) > 1e-3 || std::abs(scale - 1.0) > 1e-3);
+                                                  std::abs(rot) > 1e-3 || std::abs(scale_x - 1.0) > 1e-3 ||
+                                                  std::abs(scale_y - 1.0) > 1e-3);
 
                     if (asset->is_image || has_spatial_transform) {
                         int src_w = ctx_it->second->width > 0 ? ctx_it->second->width : preview_w;
@@ -314,20 +438,50 @@ void MediaDecoder::worker_loop() {
                             blit_transformed_layer(
                                 composite_buffer, preview_w, preview_h,
                                 layer_buffer, src_w, src_h,
-                                pos_x, pos_y, rot, scale, opacity
+                                pos_x, pos_y, rot, scale_x, scale_y, opacity
                             );
                         }
                     } else {
                         if (ctx_it->second->decode_frame_at(media_time, preview_w, preview_h, layer_buffer)) {
-                            float alpha = static_cast<float>(opacity);
-                            for (size_t i = 0; i < composite_buffer.size(); i += 4) {
-                                float src_a = (layer_buffer[i + 3] / 255.0f) * alpha;
-                                float inv_a = 1.0f - src_a;
-
-                                composite_buffer[i + 0] = static_cast<uint8_t>(layer_buffer[i + 0] * src_a + composite_buffer[i + 0] * inv_a);
-                                composite_buffer[i + 1] = static_cast<uint8_t>(layer_buffer[i + 1] * src_a + composite_buffer[i + 1] * inv_a);
-                                composite_buffer[i + 2] = static_cast<uint8_t>(layer_buffer[i + 2] * src_a + composite_buffer[i + 2] * inv_a);
-                                composite_buffer[i + 3] = 255;
+                            if (opacity >= 0.999) {
+                                // Fast integer alpha / copy path
+                                const uint8_t* src_ptr = layer_buffer.data();
+                                uint8_t* dst_ptr = composite_buffer.data();
+                                const size_t total_px = static_cast<size_t>(preview_w) * static_cast<size_t>(preview_h);
+                                for (size_t i = 0; i < total_px; ++i) {
+                                    uint8_t sa = src_ptr[3];
+                                    if (sa == 255) {
+                                        dst_ptr[0] = src_ptr[0];
+                                        dst_ptr[1] = src_ptr[1];
+                                        dst_ptr[2] = src_ptr[2];
+                                        dst_ptr[3] = 255;
+                                    } else if (sa > 0) {
+                                        uint32_t inv_sa = 255 - sa;
+                                        dst_ptr[0] = static_cast<uint8_t>((src_ptr[0] * sa + dst_ptr[0] * inv_sa) >> 8);
+                                        dst_ptr[1] = static_cast<uint8_t>((src_ptr[1] * sa + dst_ptr[1] * inv_sa) >> 8);
+                                        dst_ptr[2] = static_cast<uint8_t>((src_ptr[2] * sa + dst_ptr[2] * inv_sa) >> 8);
+                                        dst_ptr[3] = 255;
+                                    }
+                                    src_ptr += 4;
+                                    dst_ptr += 4;
+                                }
+                            } else {
+                                uint32_t mod_256 = static_cast<uint32_t>(opacity * 256.0);
+                                const uint8_t* src_ptr = layer_buffer.data();
+                                uint8_t* dst_ptr = composite_buffer.data();
+                                const size_t total_px = static_cast<size_t>(preview_w) * static_cast<size_t>(preview_h);
+                                for (size_t i = 0; i < total_px; ++i) {
+                                    uint32_t sa = (src_ptr[3] * mod_256) >> 8;
+                                    if (sa > 0) {
+                                        uint32_t inv_sa = 255 - sa;
+                                        dst_ptr[0] = static_cast<uint8_t>((src_ptr[0] * sa + dst_ptr[0] * inv_sa) >> 8);
+                                        dst_ptr[1] = static_cast<uint8_t>((src_ptr[1] * sa + dst_ptr[1] * inv_sa) >> 8);
+                                        dst_ptr[2] = static_cast<uint8_t>((src_ptr[2] * sa + dst_ptr[2] * inv_sa) >> 8);
+                                        dst_ptr[3] = 255;
+                                    }
+                                    src_ptr += 4;
+                                    dst_ptr += 4;
+                                }
                             }
                         }
                     }
@@ -335,23 +489,20 @@ void MediaDecoder::worker_loop() {
             }
         }
 
-        // Publish to main thread
+        // Publish to main thread via zero-copy vector swap
         {
             std::lock_guard<std::mutex> lock(m_frame_mutex);
-            m_ready_rgba = composite_buffer;
+            m_ready_rgba.swap(composite_buffer);
             m_ready_width = preview_w;
             m_ready_height = preview_h;
             m_ready_time = current_req_time;
             m_has_new_frame = true;
         }
-
-        // Modest throttle to prevent 100% CPU in worker loop
-        std::this_thread::sleep_for(std::chrono::milliseconds(5));
     }
 }
 
 // ----------------------------------------------------------------------------
-// Probing & Thumbnail Generation
+// Probing, Thumbnail Generation & Frame I/O
 // ----------------------------------------------------------------------------
 
 bool MediaDecoder::probe_video_file(const std::string& path, VideoAsset& out_asset) {
@@ -452,8 +603,88 @@ GLuint MediaDecoder::create_thumbnail_texture(const std::string& path, double at
     return upload_rgba_texture(w, h, rgba);
 }
 
+bool MediaDecoder::save_rgba_to_png(const std::string& path, int w, int h, const std::vector<uint8_t>& rgba) {
+    if (w <= 0 || h <= 0 || rgba.size() < static_cast<size_t>(w) * static_cast<size_t>(h) * 4) {
+        return false;
+    }
+    fs::path p(path);
+    if (p.has_parent_path()) {
+        std::error_code ec;
+        fs::create_directories(p.parent_path(), ec);
+    }
+
+    FILE* fp = fopen(path.c_str(), "wb");
+    if (!fp) return false;
+
+    png_structp png = png_create_write_struct(PNG_LIBPNG_VER_STRING, nullptr, nullptr, nullptr);
+    if (!png) {
+        fclose(fp);
+        return false;
+    }
+
+    png_infop info = png_create_info_struct(png);
+    if (!info) {
+        png_destroy_write_struct(&png, nullptr);
+        fclose(fp);
+        return false;
+    }
+
+    if (setjmp(png_jmpbuf(png))) {
+        png_destroy_write_struct(&png, &info);
+        fclose(fp);
+        return false;
+    }
+
+    png_init_io(png, fp);
+    png_set_IHDR(
+        png, info, w, h, 8,
+        PNG_COLOR_TYPE_RGBA,
+        PNG_INTERLACE_NONE,
+        PNG_COMPRESSION_TYPE_DEFAULT,
+        PNG_FILTER_TYPE_DEFAULT
+    );
+    png_write_info(png, info);
+
+    std::vector<png_bytep> row_pointers(h);
+    for (int y = 0; y < h; ++y) {
+        row_pointers[y] = const_cast<png_bytep>(&rgba[static_cast<size_t>(y) * w * 4]);
+    }
+
+    png_write_image(png, row_pointers.data());
+    png_write_end(png, nullptr);
+    png_destroy_write_struct(&png, &info);
+    fclose(fp);
+    return true;
+}
+
+bool MediaDecoder::encode_rgba_frames_to_mp4(const std::string& path, int w, int h, int fps, const std::vector<std::vector<uint8_t>>& frames) {
+    if (w <= 0 || h <= 0 || fps <= 0 || frames.empty()) return false;
+    int enc_w = (w % 2 == 0) ? w : (w + 1);
+    int enc_h = (h % 2 == 0) ? h : (h + 1);
+    fs::path p(path);
+    if (p.has_parent_path()) {
+        std::error_code ec;
+        fs::create_directories(p.parent_path(), ec);
+    }
+
+    std::string cmd = "ffmpeg -y -f rawvideo -vcodec rawvideo -s " + std::to_string(w) + "x" + std::to_string(h) +
+                      " -pix_fmt rgba -r " + std::to_string(fps) + " -i - -vf \"scale=" + std::to_string(enc_w) + ":" + std::to_string(enc_h) +
+                      "\" -c:v libx264 -pix_fmt yuv420p \"" + path + "\" > /dev/null 2>&1";
+    FILE* pipe = popen(cmd.c_str(), "w");
+    if (!pipe) return false;
+
+    const size_t expected_bytes = static_cast<size_t>(w) * static_cast<size_t>(h) * 4;
+    for (const auto& f : frames) {
+        if (f.size() >= expected_bytes) {
+            fwrite(f.data(), 1, expected_bytes, pipe);
+        }
+    }
+    int rc = pclose(pipe);
+    return (rc == 0 && fs::exists(path));
+}
+
 bool MediaDecoder::generate_test_media(const std::string& video_path, const std::string& audio_path) {
-    std::string v_cmd = "ffmpeg -y -f lavfi -i testsrc=duration=5:size=1280x720:rate=30 -c:v libx264 -pix_fmt yuv420p \"" + video_path + "\" > /dev/null 2>&1";
+    std::string v_cmd = "ffmpeg -y -f lavfi -i testsrc=duration=5:size=1280x720:rate=30 -f lavfi -i sine=frequency=440:duration=5 -c:v libx264 -c:a aac -pix_fmt yuv420p \"" + video_path + "\" > /dev/null 2>&1";
     std::string a_cmd = "ffmpeg -y -f lavfi -i \"sine=frequency=440:duration=5\" \"" + audio_path + "\" > /dev/null 2>&1";
     int r1 = std::system(v_cmd.c_str());
     int r2 = std::system(a_cmd.c_str());

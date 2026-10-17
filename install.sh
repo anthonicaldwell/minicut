@@ -377,10 +377,19 @@ if [ -n "$DESKTOP_ICON" ]; then
     done
 fi
 
+# Clean up any duplicate or legacy desktop files first to ensure only 1 icon appears
+rm -f "$APP_DIR/minicut.desktop" "$APP_DIR/org.minicut.desktop" "$HOME/.local/bin/minicut.desktop" 2>/dev/null || true
+
+# Determine desktop filename (override org.minicut.desktop to shadow system install if present)
+DESKTOP_FILENAME="minicut.desktop"
+if [ -f "/usr/share/applications/org.minicut.desktop" ] || [ -f "/usr/local/share/applications/org.minicut.desktop" ]; then
+    DESKTOP_FILENAME="org.minicut.desktop"
+fi
+
 # Install desktop file with exact binary path for flawless launcher & task manager association
 if [ -f "desktop/minicut.desktop" ] || [ -f "minicut.desktop" ]; then
-    echo "Installing desktop launcher to $APP_DIR/minicut.desktop..."
-    cat << EOF > "$APP_DIR/minicut.desktop"
+    echo "Installing desktop launcher to $APP_DIR/$DESKTOP_FILENAME..."
+    cat << EOF > "$APP_DIR/$DESKTOP_FILENAME"
 [Desktop Entry]
 Version=1.0
 Type=Application
@@ -396,7 +405,7 @@ Keywords=video;editor;cut;clip;ffmpeg;render;multitrack;
 StartupWMClass=minicut
 StartupNotify=true
 EOF
-    chmod +x "$APP_DIR/minicut.desktop"
+    chmod +x "$APP_DIR/$DESKTOP_FILENAME"
 fi
 
 # Install MIME definition
@@ -478,7 +487,7 @@ if command -v update-desktop-database > /dev/null 2>&1; then
 fi
 
 if command -v xdg-mime > /dev/null 2>&1; then
-    xdg-mime default minicut.desktop application/x-minicut 2>/dev/null || true
+    xdg-mime default "$DESKTOP_FILENAME" application/x-minicut 2>/dev/null || true
 fi
 
 if command -v gtk-update-icon-cache > /dev/null 2>&1; then
@@ -495,13 +504,13 @@ fi
 # Fix ownership if user accidentally invoked install.sh with sudo in user mode
 if [ "$INSTALL_MODE" = "user" ] && [ "$EUID" -eq 0 ] && [ -n "$SUDO_USER" ]; then
     echo "Fixing file ownership for $SUDO_USER..."
-    chown -R "$SUDO_USER:$SUDO_USER" "$BIN_DIR/minicut" "$APP_DIR/minicut.desktop" "$HOME/.config/minicut" 2>/dev/null || true
+    chown -R "$SUDO_USER:$SUDO_USER" "$BIN_DIR/minicut" "$APP_DIR/$DESKTOP_FILENAME" "$HOME/.config/minicut" 2>/dev/null || true
 fi
 
 echo "=========================================="
 echo "minicut successfully installed!"
 echo "Binary:  $BIN_DIR/minicut"
-echo "Desktop: $APP_DIR/minicut.desktop"
+echo "Desktop: $APP_DIR/$DESKTOP_FILENAME"
 echo "Icon:    $PIXMAPS_DIR/minicut.png"
 echo "MIME:    $MIME_DIR/minicut.xml"
 echo "=========================================="

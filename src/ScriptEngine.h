@@ -8,6 +8,8 @@
 #include <unordered_map>
 #include <filesystem>
 #include <functional>
+#include <atomic>
+#include <thread>
 #include <GL/glew.h>
 
 class Timeline;
@@ -26,6 +28,18 @@ struct ScriptItem {
     bool is_javascript = false; // True if .js file
     GLuint icon_texture = 0;   // Texture for dock icon
     bool icon_checked = false; // Has icon search been performed?
+};
+
+struct ScriptFrameBuffer {
+    int id = 0;
+    int width = 0;
+    int height = 0;
+    int channels = 4;
+    double time = 0.0;
+    std::string clip_id;
+    std::vector<uint8_t> rgba;
+    std::string applied_shader;
+    std::unordered_map<std::string, float> applied_uniforms;
 };
 
 class ScriptEngine {
@@ -97,6 +111,38 @@ public:
     void set_app(App* app) { m_app = app; }
     App* get_app() { return m_app; }
 
+    void set_mock_ai_response(const std::string& resp) {
+        m_mock_ai_response = resp;
+        m_has_mock_ai_response = true;
+    }
+    void clear_mock_ai_response() {
+        m_mock_ai_response.clear();
+        m_has_mock_ai_response = false;
+    }
+    bool has_mock_ai_response() const { return m_has_mock_ai_response; }
+    std::string get_mock_ai_response() const { return m_mock_ai_response; }
+    std::unordered_map<int, ScriptFrameBuffer>& get_frame_buffers() { return m_frame_buffers; }
+    std::unordered_map<int, std::string>& get_shaders() { return m_shaders; }
+
+    bool is_rendering_shader() const { return m_is_rendering_shader.load(); }
+    float get_shader_progress() const { return m_shader_progress.load(); }
+    void set_rendering_shader(bool active, float p = 0.0f) {
+        m_is_rendering_shader.store(active);
+        m_shader_progress.store(p);
+    }
+    void update_shader_progress(float p) {
+        m_shader_progress.store(p);
+    }
+
+    bool render_shader_across_clip(Clip* clip,
+                                  const std::string& shader_src,
+                                  const std::unordered_map<std::string, float>& uniforms,
+                                  bool create_new,
+                                  int target_track,
+                                  double new_start_time,
+                                  std::string& out_clip_id);
+    void poll_shader_rendering();
+
 private:
     void register_lua_api();
     void scan_directories();
@@ -104,6 +150,7 @@ private:
     void clear_textures();
     void call_panel_render(ScriptItem& item);
 
+public:
     // Static Lua C-API Dispatchers
     // GUI
     static int lua_gui_text(lua_State* L);
@@ -162,6 +209,12 @@ private:
 
     // Assets API
     static int lua_assets_create_text(lua_State* L);
+    static int lua_assets_get_scale(lua_State* L);
+    static int lua_assets_get_scale_x(lua_State* L);
+    static int lua_assets_get_scale_y(lua_State* L);
+    static int lua_assets_set_scale(lua_State* L);
+    static int lua_assets_set_scale_x(lua_State* L);
+    static int lua_assets_set_scale_y(lua_State* L);
 
     // Keyframing
     static int lua_timeline_add_keyframe(lua_State* L);
@@ -174,7 +227,12 @@ private:
     static int lua_clip_get_position(lua_State* L);
     static int lua_clip_set_position(lua_State* L);
     static int lua_clip_get_scale(lua_State* L);
+    static int lua_clip_get_scale_xy(lua_State* L);
+    static int lua_clip_get_scale_x(lua_State* L);
+    static int lua_clip_get_scale_y(lua_State* L);
     static int lua_clip_set_scale(lua_State* L);
+    static int lua_clip_set_scale_x(lua_State* L);
+    static int lua_clip_set_scale_y(lua_State* L);
     static int lua_clip_get_rotation(lua_State* L);
     static int lua_clip_set_rotation(lua_State* L);
     static int lua_clip_get_opacity(lua_State* L);
@@ -187,6 +245,37 @@ private:
     static int lua_clip_get_transform(lua_State* L);
     static int lua_clip_set_transform(lua_State* L);
     static int lua_clip_reset_transform(lua_State* L);
+
+    // Raw Frame Data, Shaders & SFX Pipeline API
+    static int lua_clip_get_frame(lua_State* L);
+    static int lua_clip_set_frame(lua_State* L);
+    static int lua_clip_create_from_frame(lua_State* L);
+    static int lua_shader_create(lua_State* L);
+    static int lua_shader_set_uniform(lua_State* L);
+    static int lua_shader_apply(lua_State* L);
+
+    // Localization API
+    static int lua_locale_get(lua_State* L);
+    static int lua_locale_get_language(lua_State* L);
+    static int lua_locale_set_language(lua_State* L);
+    static int lua_locale_is_rtl(lua_State* L);
+    static int lua_locale_register(lua_State* L);
+
+    // AI Library
+    static int lua_ai_is_available(lua_State* L);
+    static int lua_ai_is_enabled(lua_State* L);
+    static int lua_ai_set_enabled(lua_State* L);
+    static int lua_ai_has_api_key(lua_State* L);
+    static int lua_ai_set_api_key(lua_State* L);
+    static int lua_ai_is_busy(lua_State* L);
+    static int lua_ai_get_status(lua_State* L);
+    static int lua_ai_set_mock_response(lua_State* L);
+    static int lua_ai_clear_mock_response(lua_State* L);
+    static int lua_ai_prompt(lua_State* L);
+    static int lua_ai_prompt_json(lua_State* L);
+    static int lua_ai_parse_json(lua_State* L);
+    static int lua_ai_to_json(lua_State* L);
+    static int lua_ai_struct(lua_State* L);
 
     // Export API
     static int lua_export_get_audio_progress(lua_State* L);
@@ -275,7 +364,12 @@ private:
     static duk_ret_t js_clip_get_position(duk_context* ctx);
     static duk_ret_t js_clip_set_position(duk_context* ctx);
     static duk_ret_t js_clip_get_scale(duk_context* ctx);
+    static duk_ret_t js_clip_get_scale_xy(duk_context* ctx);
+    static duk_ret_t js_clip_get_scale_x(duk_context* ctx);
+    static duk_ret_t js_clip_get_scale_y(duk_context* ctx);
     static duk_ret_t js_clip_set_scale(duk_context* ctx);
+    static duk_ret_t js_clip_set_scale_x(duk_context* ctx);
+    static duk_ret_t js_clip_set_scale_y(duk_context* ctx);
     static duk_ret_t js_clip_get_rotation(duk_context* ctx);
     static duk_ret_t js_clip_set_rotation(duk_context* ctx);
     static duk_ret_t js_clip_get_opacity(duk_context* ctx);
@@ -288,6 +382,37 @@ private:
     static duk_ret_t js_clip_get_transform(duk_context* ctx);
     static duk_ret_t js_clip_set_transform(duk_context* ctx);
     static duk_ret_t js_clip_reset_transform(duk_context* ctx);
+
+    // Raw Frame Data, Shaders & SFX Pipeline API
+    static duk_ret_t js_clip_get_frame(duk_context* ctx);
+    static duk_ret_t js_clip_set_frame(duk_context* ctx);
+    static duk_ret_t js_clip_create_from_frame(duk_context* ctx);
+    static duk_ret_t js_shader_create(duk_context* ctx);
+    static duk_ret_t js_shader_set_uniform(duk_context* ctx);
+    static duk_ret_t js_shader_apply(duk_context* ctx);
+
+    // Localization API
+    static duk_ret_t js_locale_get(duk_context* ctx);
+    static duk_ret_t js_locale_get_language(duk_context* ctx);
+    static duk_ret_t js_locale_set_language(duk_context* ctx);
+    static duk_ret_t js_locale_is_rtl(duk_context* ctx);
+    static duk_ret_t js_locale_register(duk_context* ctx);
+
+    // AI Library
+    static duk_ret_t js_ai_is_available(duk_context* ctx);
+    static duk_ret_t js_ai_is_enabled(duk_context* ctx);
+    static duk_ret_t js_ai_set_enabled(duk_context* ctx);
+    static duk_ret_t js_ai_has_api_key(duk_context* ctx);
+    static duk_ret_t js_ai_set_api_key(duk_context* ctx);
+    static duk_ret_t js_ai_is_busy(duk_context* ctx);
+    static duk_ret_t js_ai_get_status(duk_context* ctx);
+    static duk_ret_t js_ai_set_mock_response(duk_context* ctx);
+    static duk_ret_t js_ai_clear_mock_response(duk_context* ctx);
+    static duk_ret_t js_ai_prompt(duk_context* ctx);
+    static duk_ret_t js_ai_prompt_json(duk_context* ctx);
+    static duk_ret_t js_ai_parse_json(duk_context* ctx);
+    static duk_ret_t js_ai_to_json(duk_context* ctx);
+    static duk_ret_t js_ai_struct(duk_context* ctx);
 
     // JS Export API
     static duk_ret_t js_export_get_audio_progress(duk_context* ctx);
@@ -304,6 +429,12 @@ private:
     static duk_ret_t js_project_get_name(duk_context* ctx);
     static duk_ret_t js_project_set_name(duk_context* ctx);
     static duk_ret_t js_assets_create_text(duk_context* ctx);
+    static duk_ret_t js_assets_get_scale(duk_context* ctx);
+    static duk_ret_t js_assets_get_scale_x(duk_context* ctx);
+    static duk_ret_t js_assets_get_scale_y(duk_context* ctx);
+    static duk_ret_t js_assets_set_scale(duk_context* ctx);
+    static duk_ret_t js_assets_set_scale_x(duk_context* ctx);
+    static duk_ret_t js_assets_set_scale_y(duk_context* ctx);
 
     // Minicut & Utilities
     static duk_ret_t js_minicut_log(duk_context* ctx);
@@ -350,4 +481,26 @@ private:
     bool m_shelf_visible = true;
 
     std::string m_current_render_script_id;
+
+    // Frame Buffers, SFX & Shader caches
+    std::unordered_map<int, ScriptFrameBuffer> m_frame_buffers;
+    int m_next_frame_id = 1;
+    std::unordered_map<int, std::string> m_shaders;
+    int m_next_shader_id = 1;
+
+    // AI Mock testing support
+    std::string m_mock_ai_response;
+    bool m_has_mock_ai_response = false;
+
+    // Shader rendering across clip & progress
+    std::atomic<bool> m_is_rendering_shader{false};
+    std::atomic<float> m_shader_progress{0.0f};
+    std::atomic<bool> m_shader_task_done{false};
+    std::thread* m_shader_thread = nullptr;
+
+    std::string m_pending_asset_id;
+    std::string m_pending_video_path;
+    double m_pending_fps = 30.0;
+    double m_pending_duration = 0.0;
+    int m_pending_total_frames = 0;
 };

@@ -71,6 +71,7 @@ public:
     void set_track_header_width(float w) { m_track_header_w = std::clamp(w, 80.0f, 400.0f); }
 
     bool is_rename_modal_open() const { return m_open_rename_modal; }
+    bool is_box_selecting() const { return m_drag_mode == DragMode::BoxSelect; }
 
 private:
     float m_track_header_w = 145.0f;
@@ -88,6 +89,7 @@ private:
     bool m_is_box_selecting = false;
     ImVec2 m_box_select_start = ImVec2(0, 0);
     ImVec2 m_box_select_cur = ImVec2(0, 0);
+    std::vector<std::string> m_box_select_initial_selection;
 
     // Track rename modal state
     int m_rename_track_idx = -1;

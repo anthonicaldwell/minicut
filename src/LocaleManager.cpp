@@ -90,13 +90,40 @@ bool LocaleManager::set_locale(const std::string& lang_code) {
     // 2. Try loading JSON file to override or supplement
     load_locale_file(code);
 
-    // 3. If Arabic (RTL), shape all translations for right-to-left cursive presentation
+    // 3. Apply any custom plugin translations registered for this language
+    auto cust_it = m_custom_translations.find(code);
+    if (cust_it != m_custom_translations.end()) {
+        for (const auto& [k, v] : cust_it->second) {
+            m_translations[k] = v;
+        }
+    }
+
+    // 4. If Arabic (RTL), shape all translations for right-to-left cursive presentation
     if (m_current_locale == "ar") {
         for (auto& [k, v] : m_translations) {
             v = ArabicShaper::process(v, true);
         }
     }
     return true;
+}
+
+void LocaleManager::register_string(const std::string& lang_code, const std::string& key, const std::string& value) {
+    if (key.empty()) return;
+    std::string code = lang_code.empty() ? m_current_locale : lang_code;
+    if (code == "jp") code = "ja";
+    m_custom_translations[code][key] = value;
+    if (code == "ja") {
+        m_custom_translations["jp"][key] = value;
+    }
+    if (code == m_current_locale) {
+        m_translations[key] = (code == "ar") ? ArabicShaper::process(value, true) : value;
+    }
+}
+
+void LocaleManager::register_dictionary(const std::string& lang_code, const std::unordered_map<std::string, std::string>& dict) {
+    for (const auto& [k, v] : dict) {
+        register_string(lang_code, k, v);
+    }
 }
 
 void LocaleManager::load_locale_file(const std::string& code) {
@@ -147,6 +174,15 @@ std::string LocaleManager::get(const std::string& key, const std::string& fallba
         return it->second;
     }
 
+    // Check custom English fallback
+    auto cust_en = m_custom_translations.find("en");
+    if (cust_en != m_custom_translations.end()) {
+        auto ck = cust_en->second.find(key);
+        if (ck != cust_en->second.end() && !ck->second.empty()) {
+            return ck->second;
+        }
+    }
+
     // Check English embedded fallback
     auto en_it = m_embedded.find("en");
     if (en_it != m_embedded.end()) {
@@ -166,6 +202,14 @@ const char* LocaleManager::tr(const char* key, const char* fallback) const {
         return it->second.c_str();
     }
 
+    auto cust_en = m_custom_translations.find("en");
+    if (cust_en != m_custom_translations.end()) {
+        auto ck = cust_en->second.find(key);
+        if (ck != cust_en->second.end() && !ck->second.empty()) {
+            return ck->second.c_str();
+        }
+    }
+
     auto en_it = m_embedded.find("en");
     if (en_it != m_embedded.end()) {
         auto key_it = en_it->second.find(key);
@@ -180,7 +224,7 @@ const char* LocaleManager::tr(const char* key, const char* fallback) const {
 void LocaleManager::populate_embedded_fallbacks() {
     // English
     m_embedded["en"] = {
-        {"menu_file", "File"}, {"menu_edit", "Edit"}, {"menu_assets", "Assets"}, {"menu_project", "Project"},
+        {"menu_file", "File"}, {"menu_edit", "Edit"}, {"menu_assets", "Assets"}, {"menu_project", "Project"}, {"menu_modifiers", "Modifiers"},
         {"menu_settings", "Settings"}, {"menu_help", "Help"},
         {"file_new", "New Project"}, {"file_open", "Open Project..."},
         {"file_save", "Save Project"}, {"file_save_as", "Save Project As..."},
@@ -204,6 +248,7 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"timeline_delete_prefab", "Delete Prefab Block"}, {"timeline_dissolve_prefab", "Dissolve Prefab (Keep Clips)"},
         {"inspector_position_x", "Position X"}, {"inspector_position_y", "Position Y"},
         {"inspector_rotation", "Rotation"}, {"inspector_scale", "Scale"},
+        {"inspector_scale_x", "Scale X"}, {"inspector_scale_y", "Scale Y"},
         {"inspector_opacity", "Opacity"}, {"inspector_volume", "Audio Gain / Volume"},
         {"inspector_track_depth", "Track Render Depth (0-100)"},
         {"inspector_fade_in", "Fade In (1s)"}, {"inspector_fade_out", "Fade Out (1s)"},
@@ -233,7 +278,7 @@ void LocaleManager::populate_embedded_fallbacks() {
 
     // Japanese
     m_embedded["ja"] = {
-        {"menu_file", "ファイル"}, {"menu_edit", "編集"}, {"menu_assets", "素材"}, {"menu_project", "プロジェクト"},
+        {"menu_file", "ファイル"}, {"menu_edit", "編集"}, {"menu_assets", "素材"}, {"menu_project", "プロジェクト"}, {"menu_modifiers", "修飾子"},
         {"menu_settings", "設定"}, {"menu_help", "ヘルプ"},
         {"file_new", "新規プロジェクト"}, {"file_open", "プロジェクトを開く..."},
         {"file_save", "プロジェクトを保存"}, {"file_save_as", "名前を付けて保存..."},
@@ -257,6 +302,7 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"timeline_delete_prefab", "プレハブブロックを削除"}, {"timeline_dissolve_prefab", "プレハブを分解 (クリップを保持)"},
         {"inspector_position_x", "位置 X"}, {"inspector_position_y", "位置 Y"},
         {"inspector_rotation", "回転"}, {"inspector_scale", "拡大縮小"},
+        {"inspector_scale_x", "拡大縮小 X"}, {"inspector_scale_y", "拡大縮小 Y"},
         {"inspector_opacity", "不透明度"}, {"inspector_volume", "音声ゲイン / 音量"},
         {"inspector_track_depth", "トラック描画深度 (0-100)"},
         {"inspector_fade_in", "フェードイン (1秒)"}, {"inspector_fade_out", "フェードアウト (1秒)"},
@@ -287,7 +333,7 @@ void LocaleManager::populate_embedded_fallbacks() {
 
     // Korean
     m_embedded["ko"] = {
-        {"menu_file", "파일"}, {"menu_edit", "편집"}, {"menu_assets", "에셋"}, {"menu_project", "프로젝트"},
+        {"menu_file", "파일"}, {"menu_edit", "편집"}, {"menu_assets", "에셋"}, {"menu_project", "프로젝트"}, {"menu_modifiers", "수정자"},
         {"menu_settings", "설정"}, {"menu_help", "도움말"},
         {"file_new", "새 프로젝트"}, {"file_open", "프로젝트 열기..."},
         {"file_save", "프로젝트 저장"}, {"file_save_as", "다른 이름으로 저장..."},
@@ -311,6 +357,7 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"timeline_delete_prefab", "프리팹 블록 삭제"}, {"timeline_dissolve_prefab", "프리팹 분해 (클립 유지)"},
         {"inspector_position_x", "위치 X"}, {"inspector_position_y", "위치 Y"},
         {"inspector_rotation", "회전"}, {"inspector_scale", "크기 조절"},
+        {"inspector_scale_x", "크기 조절 X"}, {"inspector_scale_y", "크기 조절 Y"},
         {"inspector_opacity", "불투명도"}, {"inspector_volume", "오디오 게인 / 볼륨"},
         {"inspector_track_depth", "트랙 렌더링 깊이 (0-100)"},
         {"inspector_fade_in", "페이드 인 (1초)"}, {"inspector_fade_out", "페이드 아웃 (1초)"},
@@ -340,7 +387,7 @@ void LocaleManager::populate_embedded_fallbacks() {
 
     // Ukrainian
     m_embedded["uk"] = {
-        {"menu_file", "Файл"}, {"menu_edit", "Правка"}, {"menu_assets", "Ресурси"}, {"menu_project", "Проєкт"},
+        {"menu_file", "Файл"}, {"menu_edit", "Правка"}, {"menu_assets", "Ресурси"}, {"menu_project", "Проєкт"}, {"menu_modifiers", "Модифікатори"},
         {"menu_settings", "Налаштування"}, {"menu_help", "Довідка"},
         {"file_new", "Новий проєкт"}, {"file_open", "Відкрити проєкт..."},
         {"file_save", "Зберегти проєкт"}, {"file_save_as", "Зберегти проєкт як..."},
@@ -364,6 +411,7 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"timeline_delete_prefab", "Видалити блок префабу"}, {"timeline_dissolve_prefab", "Розформувати префаб (залишити кліпи)"},
         {"inspector_position_x", "Позиція X"}, {"inspector_position_y", "Позиція Y"},
         {"inspector_rotation", "Поворот"}, {"inspector_scale", "Масштаб"},
+        {"inspector_scale_x", "Масштаб X"}, {"inspector_scale_y", "Масштаб Y"},
         {"inspector_opacity", "Непрозорість"}, {"inspector_volume", "Підсилення / Гучність"},
         {"inspector_track_depth", "Глибина рендерингу доріжки (0-100)"},
         {"inspector_fade_in", "Плавне наростання (1с)"}, {"inspector_fade_out", "Плавне затухання (1с)"},
@@ -393,7 +441,8 @@ void LocaleManager::populate_embedded_fallbacks() {
 
     // Arabic
     m_embedded["ar"] = {
-        {"menu_file", "ملف"}, {"menu_edit", "تعديل"}, {"menu_assets", "الوسائط"}, {"menu_project", "مشروع"},
+        {"menu_file", "ملف"}, {"menu_edit", "تعديل"}, {"menu_assets", "الوسائط"}, {"menu_project", "مشروع"}, {"menu_modifiers", "المعدلات"},
+        {"menu_settings", "إعدادات"}, {"menu_help", "مساعدة"},
         {"menu_settings", "إعدادات"}, {"menu_help", "مساعدة"},
         {"file_new", "مشروع جديد"}, {"file_open", "فتح مشروع..."},
         {"file_save", "حفظ المشروع"}, {"file_save_as", "حفظ المشروع كـ..."},
@@ -417,6 +466,7 @@ void LocaleManager::populate_embedded_fallbacks() {
         {"timeline_delete_prefab", "حذف كتلة القالب"}, {"timeline_dissolve_prefab", "فك القالب (الاحتفاظ بالمقاطع)"},
         {"inspector_position_x", "الموضع X"}, {"inspector_position_y", "الموضع Y"},
         {"inspector_rotation", "التدوير"}, {"inspector_scale", "المقياس"},
+        {"inspector_scale_x", "المقياس X"}, {"inspector_scale_y", "المقياس Y"},
         {"inspector_opacity", "الشفافية"}, {"inspector_volume", "مستوى الصوت"},
         {"inspector_track_depth", "عمق عرض المسار (0-100)"},
         {"inspector_fade_in", "تلاشي للداخل (1 ثانية)"}, {"inspector_fade_out", "تلاشي للخارج (1 ثانية)"},

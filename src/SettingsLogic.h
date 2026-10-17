@@ -5,6 +5,7 @@
 #include <atomic>
 #include <functional>
 #include <vector>
+#include <algorithm>
 
 enum class AuthStatus {
     Idle,
@@ -22,6 +23,7 @@ public:
 
     void load_from_disk();
     void save_to_disk();
+    void reset_to_defaults();
 
     // General Settings
     bool get_use_system_file_dialog() const { return m_use_system_file_dialog; }
@@ -33,12 +35,36 @@ public:
     std::string get_render_backend() const { return m_render_backend; }
     void set_render_backend(const std::string& backend) { m_render_backend = backend; }
 
+    bool get_prefab_hot_reload() const { return m_prefab_hot_reload; }
+    void set_prefab_hot_reload(bool val) { m_prefab_hot_reload = val; }
+
+    float get_prefab_reload_interval() const { return m_prefab_reload_interval; }
+    void set_prefab_reload_interval(float val) { m_prefab_reload_interval = std::clamp(val, 0.5f, 60.0f); }
+
     // Accessibility Settings
     bool get_light_theme() const { return m_light_theme; }
     void set_light_theme(bool val) { m_light_theme = val; }
 
     int get_colorblind_mode() const { return m_colorblind_mode; }
     void set_colorblind_mode(int mode) { m_colorblind_mode = mode; }
+
+    float get_menu_font_size() const { return m_menu_font_size; }
+    void set_menu_font_size(float sz) { m_menu_font_size = sz; }
+
+    // Preview Window Background & Padding Settings
+    int get_preview_bg_mode() const { return m_preview_bg_mode; }
+    void set_preview_bg_mode(int mode) { m_preview_bg_mode = mode; }
+
+    const float* get_preview_bg_custom_color() const { return m_preview_bg_color; }
+    void set_preview_bg_custom_color(float r, float g, float b, float a = 1.0f) {
+        m_preview_bg_color[0] = r;
+        m_preview_bg_color[1] = g;
+        m_preview_bg_color[2] = b;
+        m_preview_bg_color[3] = a;
+    }
+
+    float get_preview_padding() const { return m_preview_padding; }
+    void set_preview_padding(float pad) { m_preview_padding = pad; }
 
     // Layout Splitters & Timeline Dimensions
     float get_split_h() const { return m_split_h; }
@@ -90,8 +116,14 @@ private:
     bool m_use_system_file_dialog = true;
     std::string m_language = "en";
     std::string m_render_backend = "OpenGL3";
+    bool m_prefab_hot_reload = true;
+    float m_prefab_reload_interval = 3.0f;
     bool m_light_theme = false;
     int m_colorblind_mode = 0; // 0=None, 1=Protanopia, 2=Deuteranopia, 3=Tritanopia, 4=High Contrast
+    float m_menu_font_size = 15.0f;
+    int m_preview_bg_mode = 0; // 0=Theme Dark, 1=Black, 2=Deep Navy, 3=Neutral Gray, 4=Checkerboard, 5=Custom
+    float m_preview_bg_color[4] = { 0.10f, 0.10f, 0.12f, 1.0f };
+    float m_preview_padding = 8.0f;
 
     float m_split_h = 0.46f;
     float m_split_top_v = 0.28f;

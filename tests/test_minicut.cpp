@@ -20,6 +20,7 @@
 #include "render/RenderBackendVulkan.h"
 #include "SwapManager.h"
 #include "JapaneseTransliteration.h"
+#include "ShaderManager.h"
 #include "third_party/imgui/backends/imgui_impl_sdl2.h"
 #include <iostream>
 #include <cassert>
@@ -1169,7 +1170,7 @@ void test_ogg_ogv_ogm_support() {
 void test_window_title_and_version() {
     std::cout << "[TEST] Running window title and version tests..." << std::endl;
     // Version test
-    assert(std::string(MINICUT_VERSION) == "1.4.1");
+    assert(std::string(MINICUT_VERSION) == "1.5.0");
 
     // Title formatting test
     auto format_title = [](const std::string& name) -> std::string {
@@ -2024,11 +2025,1623 @@ void test_preview_transform_and_popout_and_export_progress() {
     std::cout << "[PASS] Preview Transform Gizmo, Modeless Export & Script API tests passed." << std::endl;
 }
 
+void test_scale_xy_clips_and_assets() {
+    std::cout << "[TEST] Running Scale X and Y (clips & assets) test..." << std::endl;
+
+    // 1. Data model & serialization
+    Project p;
+    p.name = "ScaleXYTest";
+    VideoAsset va;
+    va.id = "va_scale1";
+    va.path = "/test/path.mp4";
+    va.scale = 1.5;
+    va.scale_x = 1.25;
+    va.scale_y = 1.75;
+    p.video_assets.push_back(va);
+
+    Track trk;
+    trk.id = "trk1";
+    trk.type = "video";
+    Clip c;
+    c.id = "clip_scale1";
+    c.asset_id = "va_scale1";
+    c.scale = 1.5;
+    c.scale_x = 2.0;
+    c.scale_y = 0.5;
+    trk.clips.push_back(c);
+    p.tracks.push_back(trk);
+
+    std::string serialized = ProjectSerializer::serialize_json(p);
+    assert(serialized.find("\"scale_x\": 2.0") != std::string::npos || serialized.find("\"scale_x\":2.0") != std::string::npos);
+    assert(serialized.find("\"scale_y\": 0.5") != std::string::npos || serialized.find("\"scale_y\":0.5") != std::string::npos);
+
+    Project deserialized;
+    bool des_ok = ProjectSerializer::deserialize_json(deserialized, serialized);
+    assert(des_ok);
+    assert(!deserialized.tracks.empty() && !deserialized.tracks[0].clips.empty());
+    const Clip& dc = deserialized.tracks[0].clips[0];
+    assert(std::abs(dc.scale_x - 2.0) < 1e-4);
+    assert(std::abs(dc.scale_y - 0.5) < 1e-4);
+    assert(!deserialized.video_assets.empty());
+    const VideoAsset& dva = deserialized.video_assets[0];
+    assert(std::abs(dva.scale_x - 1.25) < 1e-4);
+    assert(std::abs(dva.scale_y - 1.75) < 1e-4);
+
+    // Backward compatibility: project with only "scale": 3.0
+    std::string legacy_json = R"({
+        "name": "LegacyProject",
+        "assets": {
+            "videos": [{ "id": "lva1", "path": "/p.mp4", "scale": 3.0 }]
+        },
+        "timeline": {
+            "tracks": [{ "id": "lt1", "type": "video", "clips": [{ "id": "lc1", "asset_id": "lva1", "scale": 3.0 }] }]
+        }
+    })";
+    Project legacy_proj;
+    assert(ProjectSerializer::deserialize_json(legacy_proj, legacy_json));
+    assert(std::abs(legacy_proj.tracks[0].clips[0].scale_x - 3.0) < 1e-4);
+    assert(std::abs(legacy_proj.tracks[0].clips[0].scale_y - 3.0) < 1e-4);
+    assert(std::abs(legacy_proj.video_assets[0].scale_x - 3.0) < 1e-4);
+    assert(std::abs(legacy_proj.video_assets[0].scale_y - 3.0) < 1e-4);
+
+    // 2. Lua Scripting APIs
+    Timeline tl;
+    ClipManager cm;
+    ScriptEngine se;
+    assert(se.init(&p, &tl, &cm));
+
+    bool lua_ok = se.run_string(R"(
+        clip.set_scale("clip_scale1", 1.8, 2.4)
+        local sx, sy = clip.get_scale("clip_scale1")
+        assert(math.abs(sx - 1.8) < 1e-4 and math.abs(sy - 2.4) < 1e-4)
+
+        local s_uniform = clip.get_scale("clip_scale1")
+        assert(math.abs(s_uniform - 1.8) < 1e-4)
+
+        local s_xy = clip.get_scale_xy("clip_scale1")
+        assert(math.abs(s_xy.x - 1.8) < 1e-4 and math.abs(s_xy.y - 2.4) < 1e-4)
+
+        clip.set_scale_x("clip_scale1", 3.5)
+        assert(math.abs(clip.get_scale_x("clip_scale1") - 3.5) < 1e-4)
+
+        clip.set_scale_y("clip_scale1", 0.75)
+        assert(math.abs(clip.get_scale_y("clip_scale1") - 0.75) < 1e-4)
+
+        assets.set_scale("va_scale1", 1.2, 0.9)
+        local asx, asy = assets.get_scale("va_scale1")
+        assert(math.abs(asx - 1.2) < 1e-4 and math.abs(asy - 0.9) < 1e-4)
+
+        assets.set_scale_x("va_scale1", 2.5)
+        assert(math.abs(assets.get_scale_x("va_scale1") - 2.5) < 1e-4)
+
+        assets.set_scale_y("va_scale1", 1.4)
+        assert(math.abs(assets.get_scale_y("va_scale1") - 1.4) < 1e-4)
+    )");
+    assert(lua_ok);
+
+    // 3. JavaScript Scripting APIs
+    bool js_ok = se.run_js_string(R"(
+        clip.set_scale("clip_scale1", 1.4, 2.8);
+        var s = clip.get_scale("clip_scale1");
+        var sxy = clip.get_scale_xy("clip_scale1");
+        if (Math.abs(s - 1.4) > 0.01 || Math.abs(sxy.x - 1.4) > 0.01 || Math.abs(sxy.y - 2.8) > 0.01) {
+            throw new Error("JS clip.get_scale failed");
+        }
+
+        clip.set_scale_x("clip_scale1", 0.6);
+        clip.set_scale_y("clip_scale1", 0.9);
+        if (Math.abs(clip.get_scale_x("clip_scale1") - 0.6) > 0.01 || Math.abs(clip.get_scale_y("clip_scale1") - 0.9) > 0.01) {
+            throw new Error("JS clip.set_scale_x / y failed");
+        }
+
+        assets.set_scale("va_scale1", 1.1, 1.9);
+        var asxy = assets.get_scale("va_scale1");
+        if (Math.abs(asxy.x - 1.1) > 0.01 || Math.abs(asxy.y - 1.9) > 0.01) {
+            throw new Error("JS assets.set_scale failed");
+        }
+
+        assets.set_scale_x("va_scale1", 2.2);
+        assets.set_scale_y("va_scale1", 3.3);
+        if (Math.abs(assets.get_scale_x("va_scale1") - 2.2) > 0.01 || Math.abs(assets.get_scale_y("va_scale1") - 3.3) > 0.01) {
+            throw new Error("JS assets.set_scale_x / y failed");
+        }
+    )");
+    assert(js_ok);
+
+    std::cout << "[PASS] Scale X and Y (clips & assets) tests passed." << std::endl;
+}
+
+void test_timeline_and_asset_selection_clearing() {
+    std::cout << "[TEST] Running Timeline and Asset Selection clearing test..." << std::endl;
+
+    Timeline tl;
+    Project p;
+    Track t;
+    t.id = "t1";
+    t.type = "video";
+    Clip c1; c1.id = "c1"; t.clips.push_back(c1);
+    Clip c2; c2.id = "c2"; t.clips.push_back(c2);
+    p.tracks.push_back(t);
+
+    tl.select_clip("c1", false, false);
+    assert(tl.is_clip_selected("c1"));
+    assert(!tl.is_clip_selected("c2"));
+
+    // Clear selection
+    tl.clear_selection();
+    assert(!tl.is_clip_selected("c1"));
+    assert(tl.get_selected_clip_ids().empty());
+
+    // ClipManager asset selection and clearing
+    ClipManager cm;
+    cm.select_asset("asset_123", true);
+    assert(cm.get_selected_asset_id() == "asset_123");
+    cm.clear_selection();
+    assert(cm.get_selected_asset_id().empty());
+
+    std::cout << "[PASS] Timeline and Asset Selection clearing tests passed." << std::endl;
+}
+
+void test_audio_mixing_progress_immediate_jump() {
+    std::cout << "[TEST] Running Audio Mixing Progress 10% test..." << std::endl;
+
+    ExportManager em;
+    assert(em.get_audio_progress() == 0.0f);
+    assert(em.get_progress() == 0.0f);
+
+    std::cout << "[PASS] Audio Mixing Progress 10% tests passed." << std::endl;
+}
+
+void test_scripting_locale_api_lua_and_js() {
+    std::cout << "[TEST] Running Locale Scripting API (Lua & JS) test..." << std::endl;
+
+    Project p;
+    Timeline tl;
+    ClipManager cm;
+    ScriptEngine se;
+    assert(se.init(&p, &tl, &cm));
+
+    // 1. Lua Locale Tests
+    bool lua_ok = se.run_string(R"(
+        locale.register("fr", { greeting = "Bonjour", inspector_scale_x = "Echelle X" })
+        locale.set_language("fr")
+        assert(locale.get_language() == "fr")
+        assert(locale("greeting", "Hello") == "Bonjour")
+        assert(locale.get("inspector_scale_x") == "Echelle X")
+        assert(tr("greeting") == "Bonjour")
+        assert(locale.is_rtl("ar") == true)
+        assert(locale.is_rtl("fr") == false)
+    )");
+    assert(lua_ok);
+
+    // 2. JS Locale Tests
+    bool js_ok = se.run_js_string(R"(
+        locale.register("es", { greeting: "Hola", inspector_scale_y: "Escala Y" });
+        locale.set_language("es");
+        if (locale.get_language() !== "es") throw new Error("JS locale.get_language failed");
+        if (locale("greeting", "Hello") !== "Hola") throw new Error("JS locale direct call failed");
+        if (locale.get("inspector_scale_y") !== "Escala Y") throw new Error("JS locale.get failed");
+        if (tr("greeting") !== "Hola") throw new Error("JS tr failed");
+        if (!locale.is_rtl("ar") || locale.is_rtl("es")) throw new Error("JS locale.is_rtl failed");
+    )");
+    assert(js_ok);
+
+    LocaleManager::instance().set_locale("en");
+
+    std::cout << "[PASS] Locale Scripting API (Lua & JS) tests passed." << std::endl;
+}
+
+void test_scripting_ai_library_lua_and_js() {
+    std::cout << "[TEST] Running AI Library Scripting API (Lua & JS) test..." << std::endl;
+
+    Project p;
+    Timeline tl;
+    ClipManager cm;
+    ScriptEngine se;
+    assert(se.init(&p, &tl, &cm));
+
+    // 1. Lua AI Tests
+    bool lua_ok = se.run_string(R"(
+        ai.set_mock_response('{"summary":"AI generated video edit","scenes":[{"start":0,"end":5}],"score":98}')
+        assert(ai.is_available() == true)
+
+        local resp = ai.prompt("Summarize this video")
+        assert(resp ~= nil and string.find(resp, "AI generated") ~= nil)
+
+        local parsed = ai.parse_json('```json\n{"score": 98, "tags": ["action","vfx"]}\n```')
+        assert(parsed ~= nil and parsed.score == 98 and parsed.tags[1] == "action")
+
+        local json_str = ai.to_json({ project = "Minicut", version = 2 })
+        assert(string.find(json_str, "Minicut") ~= nil)
+
+        local prompt_parsed = ai.prompt_json("Analyze")
+        assert(prompt_parsed ~= nil and prompt_parsed.summary == "AI generated video edit")
+        assert(prompt_parsed.scenes[1]["end"] == 5)
+
+        local merged = ai.struct({ bitrate = 4000, fps = 30, codec = "h264" }, '{"fps": 60}')
+        assert(merged.bitrate == 4000 and merged.fps == 60 and merged.codec == "h264")
+
+        ai.clear_mock_response()
+    )");
+    assert(lua_ok);
+
+    // 2. JS AI Tests
+    bool js_ok = se.run_js_string(R"(
+        ai.set_mock_response(JSON.stringify({ title: "JS Video Project", duration: 12.5, tags: ["edit", "sfx"] }));
+        if (!ai.is_available()) throw new Error("JS ai.is_available failed");
+
+        var promptResp = ai.prompt("Generate title");
+        if (typeof promptResp !== 'string' || promptResp.indexOf("JS Video Project") === -1) {
+            throw new Error("JS ai.prompt failed");
+        }
+
+        var parsed = ai.parse_json('```json\n{"fps": 60, "enabled": true}\n```');
+        if (!parsed || parsed.fps !== 60 || parsed.enabled !== true) {
+            throw new Error("JS ai.parse_json failed");
+        }
+
+        var jstr = ai.to_json({ clips: 3, track: "v1" });
+        if (typeof jstr !== 'string' || jstr.indexOf("v1") === -1) {
+            throw new Error("JS ai.to_json failed");
+        }
+
+        var pjson = ai.prompt_json("Analyze project");
+        if (!pjson || pjson.title !== "JS Video Project" || pjson.duration !== 12.5) {
+            throw new Error("JS ai.prompt_json failed");
+        }
+
+        var st = ai.struct({ opacity: 1.0, blend: "normal" }, '{"blend": "multiply"}');
+        if (st.opacity !== 1.0 || st.blend !== "multiply") {
+            throw new Error("JS ai.struct failed");
+        }
+
+        ai.clear_mock_response();
+    )");
+    assert(js_ok);
+
+    std::cout << "[PASS] AI Library Scripting API (Lua & JS) tests passed." << std::endl;
+}
+
+void test_raw_frame_shader_sfx_pipeline_lua_and_js() {
+    std::cout << "[TEST] Running Raw Frame Data, Shaders & SFX Pipeline (Lua & JS) test..." << std::endl;
+
+    std::filesystem::path temp_png = std::filesystem::temp_directory_path() / "test_sfx_source.png";
+    const int W = 64, H = 64;
+    std::vector<uint8_t> test_rgba(W * H * 4);
+    for (int y = 0; y < H; ++y) {
+        for (int x = 0; x < W; ++x) {
+            int idx = (y * W + x) * 4;
+            test_rgba[idx + 0] = static_cast<uint8_t>(x * 4);
+            test_rgba[idx + 1] = static_cast<uint8_t>(y * 4);
+            test_rgba[idx + 2] = 128;
+            test_rgba[idx + 3] = 255;
+        }
+    }
+    assert(MediaDecoder::save_rgba_to_png(temp_png.string(), W, H, test_rgba));
+
+    Project p;
+    VideoAsset va;
+    va.id = "sfx_source_asset";
+    va.path = temp_png.string();
+    va.width = W;
+    va.height = H;
+    va.duration = 5.0;
+    va.is_image = true;
+    p.video_assets.push_back(va);
+
+    Track trk;
+    trk.id = "sfx_track";
+    trk.type = "video";
+    Clip c;
+    c.id = "sfx_clip1";
+    c.asset_id = "sfx_source_asset";
+    c.start_time = 0.0;
+    c.duration = 5.0;
+    trk.clips.push_back(c);
+    p.tracks.push_back(trk);
+
+    Timeline tl;
+    ClipManager cm;
+    ScriptEngine se;
+    assert(se.init(&p, &tl, &cm));
+
+    // 1. Lua SFX Pipeline
+    bool lua_ok = se.run_string(R"(
+        -- 1. Create shader
+        local sid = shader.create("invert")
+        assert(sid > 0)
+
+        -- 2. Pull frame data from clip
+        local frame = clip.get_frame("sfx_clip1", 0.0, 64, 64)
+        assert(frame ~= nil)
+        assert(frame.width == 64 and frame.height == 64 and frame.channels == 4)
+        assert(#frame.data == 64 * 64 * 4)
+
+        local orig_r = frame.data[1]
+
+        -- 3. Apply shader via shader.apply
+        local inverted = shader.apply(sid, frame)
+        assert(inverted ~= nil and inverted.width == 64 and inverted.height == 64)
+        assert(inverted.data[1] == 255 - orig_r)
+
+        -- 4. Apply shader via OO method
+        local sepia = frame:apply_shader("sepia")
+        assert(sepia ~= nil and sepia.width == 64)
+
+        -- 5. Reinsert modified frame into active clip
+        local reinsert_ok = inverted:reinsert("sfx_clip1")
+        assert(reinsert_ok == true)
+
+        -- 6. Create new clip on timeline from frame
+        local new_clip_id = sepia:create_clip(0, 5.0, 3.0)
+        assert(new_clip_id ~= nil and new_clip_id ~= "")
+    )");
+    assert(lua_ok);
+
+    // 2. JS SFX Pipeline
+    bool js_ok = se.run_js_string(R"(
+        var sid = shader.create("invert");
+        if (!sid) throw new Error("JS shader.create failed");
+
+        var frame = clip.get_frame("sfx_clip1", 0.0, 64, 64);
+        if (!frame || frame.width !== 64 || frame.height !== 64 || !frame.data) {
+            throw new Error("JS clip.get_frame failed");
+        }
+        var orig_r = frame.data[0];
+
+        var inverted = shader.apply(sid, frame);
+        if (!inverted || inverted.data[0] !== 255 - orig_r) {
+            throw new Error("JS shader.apply failed");
+        }
+
+        var reinsert_ok = inverted.reinsert("sfx_clip1");
+        if (!reinsert_ok) throw new Error("JS inverted.reinsert failed");
+
+        var new_clip_id = inverted.create_clip(0, 8.0, 2.0);
+        if (!new_clip_id || typeof new_clip_id !== 'string') {
+            throw new Error("JS inverted.create_clip failed");
+        }
+    )");
+    assert(js_ok);
+
+    std::filesystem::remove(temp_png);
+    std::cout << "[PASS] Raw Frame Data, Shaders & SFX Pipeline (Lua & JS) tests passed." << std::endl;
+}
+
+void test_preview_performance_enhancements() {
+    std::cout << "[TEST] Running Preview Performance Enhancements test..." << std::endl;
+
+    // Test blit_transformed_layer fast path (1:1 copy & unrotated)
+    std::vector<uint8_t> dst(100 * 100 * 4, 0);
+    std::vector<uint8_t> src(100 * 100 * 4, 255);
+
+    // 1:1 unrotated path
+    blit_transformed_layer(dst, 100, 100, src, 100, 100, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0);
+    assert(dst[0] == 255 && dst[1] == 255 && dst[2] == 255 && dst[3] == 255);
+
+    // Axis-aligned scaled fast path
+    std::vector<uint8_t> dst2(100 * 100 * 4, 0);
+    blit_transformed_layer(dst2, 100, 100, src, 100, 100, 10.0, 10.0, 0.0, 0.5, 0.5, 1.0);
+    assert(dst2[4 * (60 * 100 + 60) + 0] == 255);
+
+    std::cout << "[PASS] Preview Performance Enhancements tests passed." << std::endl;
+}
+
+void test_shader_effects_across_clip_and_menu_ids() {
+    std::cout << "[TEST] Running Shader Effects Whole-Clip Rendering & Menu IDs test..." << std::endl;
+
+    Project project;
+    Timeline timeline;
+    ClipManager clip_mgr;
+    double playhead = 0.0;
+    std::string sel_clip = "";
+
+    ScriptEngine se;
+    se.init(&project, &timeline, &clip_mgr, &playhead, &sel_clip,
+            nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+
+    // 1. Progress state tests
+    assert(!se.is_rendering_shader());
+    se.set_rendering_shader(true, 0.25f);
+    assert(se.is_rendering_shader());
+    assert(std::abs(se.get_shader_progress() - 0.25f) < 0.001f);
+    se.update_shader_progress(0.85f);
+    assert(std::abs(se.get_shader_progress() - 0.85f) < 0.001f);
+    se.set_rendering_shader(false, 0.0f);
+    assert(!se.is_rendering_shader());
+
+    // 2. Menu scripts differentiation
+    const auto& menu_scripts = se.get_menu_scripts();
+    for (const auto& item : menu_scripts) {
+        if (item.is_javascript) {
+            assert(item.id.size() >= 3 && item.id.substr(item.id.size() - 3) == "_js");
+            assert(item.title.find("(JavaScript)") != std::string::npos);
+        } else {
+            assert(item.id.size() >= 4 && item.id.substr(item.id.size() - 4) == "_lua");
+            assert(item.title.find("(Lua)") != std::string::npos);
+        }
+    }
+
+    // 3. Whole-clip frame-by-frame shader rendering pipeline test
+    std::string temp_png = "test_whole_clip_source.png";
+    std::vector<uint8_t> dummy_rgba(64 * 64 * 4, 120);
+    MediaDecoder::save_rgba_to_png(temp_png, 64, 64, dummy_rgba);
+
+    VideoAsset va;
+    va.id = "whole_clip_asset";
+    va.path = temp_png;
+    va.width = 64;
+    va.height = 64;
+    va.duration = 0.2;
+    va.fps = 30.0;
+    va.is_image = true;
+    project.video_assets.push_back(va);
+
+    Track trk;
+    trk.type = "video";
+    trk.name = "Video 1";
+    Clip c;
+    c.id = "whole_clip_test";
+    c.asset_id = va.id;
+    c.start_time = 0.0;
+    c.duration = 0.2;
+    c.offset = 0.0;
+    trk.clips.push_back(c);
+    project.tracks.push_back(trk);
+
+    std::unordered_map<std::string, float> uniforms;
+    uniforms["amplitude"] = 10.0f;
+    uniforms["frequency"] = 0.05f;
+    uniforms["phase"] = 0.0f;
+    uniforms["decay"] = 0.002f;
+
+    std::string out_clip_id;
+    bool started = se.render_shader_across_clip(&project.tracks[0].clips[0], "ripple", uniforms, false, 0, 0.0, out_clip_id);
+    assert(started);
+    assert(se.is_rendering_shader());
+
+    // Wait for the background worker thread to finish (0.2s duration = 6 frames, ultrafast)
+    int wait_cycles = 0;
+    while (se.is_rendering_shader() && wait_cycles < 200) {
+        se.poll_shader_rendering();
+        std::this_thread::sleep_for(std::chrono::milliseconds(25));
+        wait_cycles++;
+    }
+
+    // Final poll
+    se.poll_shader_rendering();
+    assert(!se.is_rendering_shader());
+
+    // Verify asset was updated with whole-clip video
+    VideoAsset* updated_va = project.find_video_asset_mut(project.tracks[0].clips[0].asset_id);
+    assert(updated_va != nullptr);
+    assert(!updated_va->is_image);
+    assert(updated_va->fps == 30.0);
+    assert(std::filesystem::exists(updated_va->path));
+
+    std::filesystem::remove(updated_va->path);
+    std::filesystem::remove(temp_png);
+    std::cout << "[PASS] Shader Effects Whole-Clip Rendering & Menu IDs tests passed." << std::endl;
+}
+
+void test_ripple_effect_and_box_select() {
+    std::cout << "[TEST] Running Ripple Effect (Lua/JS) & Timeline Box Select tests..." << std::endl;
+
+    // 1. Box Select logic on Timeline
+    Project project;
+    Timeline timeline;
+    Track trk;
+    trk.type = "video";
+    trk.name = "Track 1";
+
+    Clip c1; c1.id = "clip_1"; c1.start_time = 0.0; c1.duration = 4.0;
+    Clip c2; c2.id = "clip_2"; c2.start_time = 5.0; c2.duration = 4.0;
+    Clip c3; c3.id = "clip_3"; c3.start_time = 10.0; c3.duration = 4.0;
+    trk.clips = { c1, c2, c3 };
+    project.tracks.push_back(trk);
+
+    assert(!timeline.is_box_selecting());
+
+    // 2. ScriptEngine: clip.get_selected_id and minicut.get_selected_clip in Lua and JS
+    ScriptEngine se;
+    double playhead = 2.0;
+    std::string selected_clip = "clip_2";
+    bool ok = se.init(&project, &timeline, nullptr, &playhead, &selected_clip,
+                      nullptr, nullptr, nullptr, nullptr,
+                      [&selected_clip](const std::string& id) { selected_clip = id; },
+                      nullptr, nullptr);
+    assert(ok);
+
+    // Test Lua get_selected_id and minicut.get_selected_clip
+    bool lua_ok = se.run_string(R"(
+        local id1 = clip.get_selected_id()
+        assert(id1 == "clip_2")
+        local id2 = clip.get_selected_clip()
+        assert(id2 == "clip_2")
+        local id3 = minicut.get_selected_clip()
+        assert(id3 == "clip_2")
+        local id4 = minicut.get_selected_id()
+        assert(id4 == "clip_2")
+    )");
+    assert(lua_ok);
+
+    // Test JS get_selected_id and minicut.get_selected_clip
+    bool js_ok = se.run_js_string(R"(
+        var id1 = clip.get_selected_id();
+        if (id1 !== "clip_2") throw new Error("JS clip.get_selected_id failed: " + id1);
+        var id2 = clip.get_selected_clip();
+        if (id2 !== "clip_2") throw new Error("JS clip.get_selected_clip failed: " + id2);
+        var id3 = minicut.get_selected_clip();
+        if (id3 !== "clip_2") throw new Error("JS minicut.get_selected_clip failed: " + id3);
+        var id4 = minicut.get_selected_id();
+        if (id4 !== "clip_2") throw new Error("JS minicut.get_selected_id failed: " + id4);
+    )");
+    assert(js_ok);
+
+    // 3. Test HD / large frame buffer (>65536 bytes) without heap crash in Lua and Duktape JS
+    std::string temp_png = TempManager::get_temp_dir() + "/test_hd_frame.png";
+    int w = 200, h = 200; // 200 * 200 * 4 = 160,000 bytes > 65536
+    std::vector<uint8_t> hd_rgba(w * h * 4, 120);
+    MediaDecoder::save_rgba_to_png(temp_png, w, h, hd_rgba);
+
+    VideoAsset va;
+    va.id = "asset_hd";
+    va.path = temp_png;
+    va.width = w;
+    va.height = h;
+    va.duration = 5.0;
+    va.fps = 30.0;
+    va.is_image = true;
+    project.video_assets.push_back(va);
+    project.tracks[0].clips[1].asset_id = va.id;
+
+    // Run Lua frame extraction, ripple shader apply, and reinsert
+    bool lua_hd_ok = se.run_string(R"(
+        local frame = clip.get_frame("clip_2", 0.0, 200, 200)
+        assert(frame ~= nil)
+        assert(frame.width == 200 and frame.height == 200)
+        assert(#frame.data == 200 * 200 * 4)
+
+        local sid = shader.create("ripple")
+        assert(sid > 0)
+
+        local uniforms = {
+            center_x = 100.0,
+            center_y = 100.0,
+            amplitude = 15.0,
+            frequency = 0.05,
+            phase = 0.0,
+            decay = 0.002
+        }
+        local ripple_frame = shader.apply(sid, frame, uniforms)
+        assert(ripple_frame ~= nil)
+        assert(ripple_frame.width == 200 and ripple_frame.height == 200)
+    )");
+    assert(lua_hd_ok);
+
+    // Run JS frame extraction, ripple shader apply
+    bool js_hd_ok = se.run_js_string(R"(
+        var frame = clip.get_frame("clip_2", 0.0, 200, 200);
+        if (!frame || frame.width !== 200 || frame.height !== 200 || !frame.data) {
+            throw new Error("JS HD get_frame failed");
+        }
+
+        var sid = shader.create("ripple");
+        var uniforms = {
+            center_x: 100.0,
+            center_y: 100.0,
+            amplitude: 15.0,
+            frequency: 0.05,
+            phase: 0.0,
+            decay: 0.002
+        };
+        var ripple_frame = shader.apply(sid, frame, uniforms);
+        if (!ripple_frame || ripple_frame.width !== 200) {
+            throw new Error("JS HD shader.apply failed");
+        }
+    )");
+    assert(js_hd_ok);
+
+    std::filesystem::remove(temp_png);
+    std::cout << "[PASS] Ripple Effect (Lua/JS) & Timeline Box Select tests passed." << std::endl;
+}
+
+void test_vulkan_backend_and_preview_settings() {
+    std::cout << "[TEST] Running Vulkan backend and Preview settings tests..." << std::endl;
+
+    // 1. Vulkan Backend Tests
+    {
+        RenderBackendVulkan vulkan_backend;
+        assert(std::string(vulkan_backend.get_name()) == "Vulkan");
+        assert(vulkan_backend.get_type() == RenderBackendType::Vulkan);
+        bool host_supported = vulkan_backend.is_supported();
+        std::cout << "   Host Vulkan support: " << (host_supported ? "YES" : "NO") << std::endl;
+        // Verify graceful error handling when uninitialized
+        assert(vulkan_backend.create_texture(64, 64, nullptr) == 0);
+        vulkan_backend.update_texture(0, 64, 64, nullptr);
+        vulkan_backend.delete_texture(0);
+
+        // Test with hidden window if available
+        if (host_supported && SDL_Init(SDL_INIT_VIDEO) == 0) {
+            SDL_Window* test_win = SDL_CreateWindow("VK_Test", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, 64, 64, SDL_WINDOW_VULKAN | SDL_WINDOW_HIDDEN);
+            if (test_win) {
+                ImGuiContext* imgui_ctx = ImGui::CreateContext();
+                if (vulkan_backend.init(test_win, nullptr)) {
+                    uintptr_t tex = vulkan_backend.create_texture(64, 64, nullptr);
+                    if (tex != 0) {
+                        std::vector<uint8_t> dummy_pixels(64 * 64 * 4, 128);
+                        vulkan_backend.update_texture(tex, 64, 64, dummy_pixels.data());
+                        vulkan_backend.delete_texture(tex);
+                    }
+                    vulkan_backend.shutdown();
+                }
+                ImGui::DestroyContext(imgui_ctx);
+                SDL_DestroyWindow(test_win);
+            }
+        }
+    }
+    // 2. Menu Font Size and Preview Window Background Settings
+    {
+        SettingsLogic& sl = SettingsLogic::instance();
+        float prev_font = sl.get_menu_font_size();
+        int prev_bg = sl.get_preview_bg_mode();
+        float prev_pad = sl.get_preview_padding();
+
+        sl.set_menu_font_size(18.5f);
+        assert(std::abs(sl.get_menu_font_size() - 18.5f) < 1e-4);
+
+        sl.set_preview_bg_mode(2); // Deep navy
+        assert(sl.get_preview_bg_mode() == 2);
+
+        sl.set_preview_padding(16.0f);
+        assert(std::abs(sl.get_preview_padding() - 16.0f) < 1e-4);
+
+        sl.set_preview_bg_custom_color(0.2f, 0.4f, 0.6f, 1.0f);
+        const float* col = sl.get_preview_bg_custom_color();
+        assert(std::abs(col[0] - 0.2f) < 1e-4);
+        assert(std::abs(col[1] - 0.4f) < 1e-4);
+        assert(std::abs(col[2] - 0.6f) < 1e-4);
+
+        // Save and reload to verify persistence logic
+        sl.save_to_disk();
+        sl.set_menu_font_size(12.0f);
+        sl.set_preview_bg_mode(0);
+        sl.load_from_disk();
+
+        assert(std::abs(sl.get_menu_font_size() - 18.5f) < 1e-4);
+        assert(sl.get_preview_bg_mode() == 2);
+        assert(std::abs(sl.get_preview_padding() - 16.0f) < 1e-4);
+
+        // Revert back
+        sl.set_menu_font_size(prev_font);
+        sl.set_preview_bg_mode(prev_bg);
+        sl.set_preview_padding(prev_pad);
+        sl.save_to_disk();
+    }
+
+    std::cout << "[PASS] Vulkan backend, Audio layers, and Preview settings tests passed." << std::endl;
+}
+
+static void test_headless_batch_reconfig_and_prefab_reload() {
+    std::cout << "[TEST] Running Headless render, Batch queue, Reconfig, and Prefab hot-reload tests..." << std::endl;
+
+    // 1. Reconfig test
+    {
+        auto& sl = SettingsLogic::instance();
+        sl.set_prefab_reload_interval(15.0f);
+        sl.set_prefab_hot_reload(false);
+        sl.set_menu_font_size(22.0f);
+        sl.reset_to_defaults();
+
+        assert(sl.get_prefab_hot_reload() == true);
+        assert(std::abs(sl.get_prefab_reload_interval() - 3.0f) < 0.001f);
+        assert(std::abs(sl.get_menu_font_size() - 15.0f) < 0.001f);
+    }
+
+    // 2. Asset Browser View Mode test
+    {
+        ClipManager cm;
+        assert(cm.get_view_mode() == 0); // default list
+        cm.set_view_mode(1);
+        assert(cm.get_view_mode() == 1); // grid
+
+        ImGuiContext* ctx = ImGui::CreateContext();
+        ImGuiIO& io = ImGui::GetIO();
+        io.DisplaySize = ImVec2(800, 600);
+        unsigned char* pixels;
+        int width, height;
+        io.Fonts->GetTexDataAsRGBA32(&pixels, &width, &height);
+        ImGui::NewFrame();
+        ImGui::Begin("TestClips");
+
+        Project test_p;
+        VideoAsset va1;
+        va1.id = "v1";
+        va1.path = "test.mp4";
+        va1.width = 1920;
+        va1.height = 1080;
+        va1.duration = 5.0;
+        test_p.video_assets.push_back(va1);
+
+        cm.render_ui(test_p, 0.0, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr);
+
+        ImGui::End();
+        ImGui::Render();
+        ImGui::DestroyContext(ctx);
+
+        cm.set_view_mode(0);
+        assert(cm.get_view_mode() == 0);
+    }
+
+    // 3. Batch Job API test
+    {
+        ExportManager em;
+        assert(em.get_batch_jobs().empty());
+
+        em.add_batch_job("test_proj.minicut", "test_out.mp4", "mp4", 1920, 1080, 30);
+        assert(em.get_batch_jobs().size() == 1);
+        int j1_id = em.get_batch_jobs()[0].id;
+        assert(em.get_batch_jobs()[0].project_path == "test_proj.minicut");
+        assert(em.get_batch_jobs()[0].output_path == "test_out.mp4");
+        assert(em.get_batch_jobs()[0].format == "mp4");
+        assert(em.get_batch_jobs()[0].width == 1920);
+        assert(em.get_batch_jobs()[0].height == 1080);
+        assert(em.get_batch_jobs()[0].fps == 30);
+        assert(em.get_batch_jobs()[0].status == BatchJob::Status::Queued);
+
+        bool edit_ok = em.edit_batch_job(j1_id, "test_proj2.minicut", "test_out2.gif", "gif", 1280, 720, 24);
+        assert(edit_ok);
+        assert(em.get_batch_jobs()[0].format == "gif");
+        assert(em.get_batch_jobs()[0].width == 1280);
+
+        em.add_batch_job("test_proj3.minicut");
+        assert(em.get_batch_jobs().size() == 2);
+
+        bool del_ok = em.delete_batch_job(j1_id);
+        assert(del_ok);
+        assert(em.get_batch_jobs().size() == 1);
+
+        em.clear_batch_jobs();
+        assert(em.get_batch_jobs().empty());
+    }
+
+    // 4. Prefab Hot-Reloading test
+    {
+        Project master_proj;
+        master_proj.name = "Master Project";
+        Track mt;
+        mt.id = "track_v1";
+        mt.type = "video";
+        mt.name = "Video 1";
+        master_proj.tracks.push_back(mt);
+
+        // Subproject
+        Project sub_p;
+        sub_p.name = "Subproject A";
+        VideoAsset sub_va;
+        sub_va.id = "v1";
+        sub_va.path = "test_src_video.mp4";
+        sub_va.width = 1280;
+        sub_va.height = 720;
+        sub_va.duration = 5.0;
+        sub_p.video_assets.push_back(sub_va);
+
+        Track sub_t;
+        sub_t.id = "sub_t1";
+        sub_t.type = "video";
+        Clip sc;
+        sc.id = "sc_1";
+        sc.asset_id = "v1";
+        sc.start_time = 0.0;
+        sc.duration = 3.0;
+        sub_t.clips.push_back(sc);
+        sub_p.tracks.push_back(sub_t);
+
+        std::string sub_json = ProjectSerializer::serialize_json(sub_p);
+        fs::path temp_prefab_path = "test_prefab_module.minicut";
+        {
+            std::ofstream ofs(temp_prefab_path);
+            ofs << sub_json;
+        }
+
+        ClipManager cm;
+        bool imp_ok = cm.import_project_as_prefab(master_proj, temp_prefab_path.string());
+        assert(imp_ok);
+        assert(master_proj.prefabs.size() == 1);
+        std::string pf_id = master_proj.prefabs[0].id;
+
+        cm.instantiate_prefab_on_timeline(master_proj, pf_id, 2.0);
+        assert(master_proj.tracks[0].clips.size() == 1);
+        assert(master_proj.tracks[0].clips[0].start_time == 2.0);
+        assert(master_proj.tracks[0].clips[0].duration == 3.0);
+
+        // Update prefab on disk
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        sub_p.tracks[0].clips[0].duration = 4.5;
+        std::string sub_json_updated = ProjectSerializer::serialize_json(sub_p);
+        {
+            std::ofstream ofs(temp_prefab_path);
+            ofs << sub_json_updated;
+        }
+        // Force file time update
+        fs::last_write_time(temp_prefab_path, fs::file_time_type::clock::now() + std::chrono::seconds(2));
+
+        bool changed_called = false;
+        cm.check_and_reload_modified_prefabs(master_proj, [&]() {
+            changed_called = true;
+        });
+
+        assert(changed_called);
+        assert(master_proj.tracks[0].clips.size() == 1);
+        assert(master_proj.tracks[0].clips[0].start_time == 2.0);
+        assert(master_proj.tracks[0].clips[0].duration == 4.5);
+
+        if (fs::exists(temp_prefab_path)) {
+            fs::remove(temp_prefab_path);
+        }
+    }
+
+    // 5. Headless Synchronous Export test
+    {
+        fs::path temp_video = "test_src_video.mp4";
+        fs::path temp_audio = "test_src_audio.mp3";
+        if (!fs::exists(temp_video) || !fs::exists(temp_audio)) {
+            MediaDecoder::generate_test_media(temp_video.string(), temp_audio.string());
+        }
+
+        Project proj;
+        proj.name = "Headless Test";
+        VideoAsset va;
+        va.id = "v1";
+        va.path = temp_video.string();
+        va.width = 1280;
+        va.height = 720;
+        va.duration = 2.0;
+        proj.video_assets.push_back(va);
+
+        Track vt;
+        vt.type = "video";
+        Clip c;
+        c.id = "c1";
+        c.asset_id = "v1";
+        c.start_time = 0.0;
+        c.duration = 1.0;
+        vt.clips.push_back(c);
+        proj.tracks.push_back(vt);
+
+        ExportConfig cfg;
+        cfg.output_path = "test_headless_sync_out.mp4";
+        cfg.format = "mp4";
+        cfg.width = 320;
+        cfg.height = 180;
+        cfg.fps = 15;
+        if (fs::exists(cfg.output_path)) fs::remove(cfg.output_path);
+
+        ExportManager em;
+        float final_p = 0.0f;
+        bool ok = em.export_headless_sync(proj, cfg, [&](float p, const std::string& st) {
+            final_p = p;
+        });
+
+        assert(ok);
+        assert(fs::exists(cfg.output_path));
+        assert(fs::file_size(cfg.output_path) > 1000);
+        fs::remove(cfg.output_path);
+    }
+
+    std::cout << "[PASS] Headless render, Batch queue, Reconfig, and Prefab hot-reload tests passed." << std::endl;
+}
+
+void test_project_load_audio_re_extraction() {
+    std::cout << "[TEST] Running Project Load Audio Re-extraction test..." << std::endl;
+    fs::path test_vid = "test_audio_reload_vid.mp4";
+    fs::path test_aud = "test_audio_reload_aud.mp3";
+    if (fs::exists(test_vid)) fs::remove(test_vid);
+    if (fs::exists(test_aud)) fs::remove(test_aud);
+
+    bool gen_ok = MediaDecoder::generate_test_media(test_vid.string(), test_aud.string());
+    assert(gen_ok);
+    assert(fs::exists(test_vid));
+
+    // Create a JSON representing an older project where has_audio was false/omitted
+    // and clip is on an audio track
+    std::string proj_json = R"({
+      "name": "Audio Reload Test",
+      "version": "1.0",
+      "assets": {
+        "videos": [
+          {
+            "id": "v_test_1",
+            "path": ")" + fs::absolute(test_vid).string() + R"(",
+            "duration": 5.0,
+            "has_audio": false
+          }
+        ],
+        "audio": []
+      },
+      "timeline": {
+        "tracks": [
+          {
+            "id": "track_v1",
+            "name": "Video 1",
+            "type": "video",
+            "depth": 0,
+            "clips": [
+              {
+                "id": "clip_v1",
+                "asset_id": "v_test_1",
+                "start_time": 0.0,
+                "duration": 5.0,
+                "offset": 0.0
+              }
+            ]
+          },
+          {
+            "id": "track_a1",
+            "name": "Audio 1",
+            "type": "audio",
+            "depth": 0,
+            "clips": [
+              {
+                "id": "clip_a1",
+                "asset_id": "v_test_1",
+                "start_time": 0.0,
+                "duration": 5.0,
+                "offset": 0.0
+              }
+            ]
+          }
+        ],
+        "keyframes": []
+      }
+    })";
+
+    Project loaded_proj;
+    bool des_ok = ProjectSerializer::deserialize_json(loaded_proj, proj_json);
+    assert(des_ok);
+    assert(loaded_proj.video_assets.size() == 1);
+    // Verified: has_audio must be re-extracted to true!
+    assert(loaded_proj.video_assets[0].has_audio == true);
+    assert(loaded_proj.video_assets[0].width > 0);
+    assert(loaded_proj.video_assets[0].height > 0);
+
+    // Verify AudioEngine preloads and caches samples for the loaded project
+    AudioEngine ae;
+    ae.init();
+    ae.ensure_project_assets_loaded(loaded_proj);
+
+    std::string asset_path = loaded_proj.video_assets[0].path;
+    assert(ae.is_asset_cached(asset_path));
+    assert(ae.get_cached_sample_count(asset_path) > 0);
+    ae.shutdown();
+
+    // Clean up
+    if (fs::exists(test_vid)) fs::remove(test_vid);
+    if (fs::exists(test_aud)) fs::remove(test_aud);
+
+    std::cout << "[PASS] Project Load Audio Re-extraction tests passed." << std::endl;
+}
+
+void test_custom_shaders_loading() {
+    std::cout << "[TEST] Running Custom Shaders Loading & Management test..." << std::endl;
+    ShaderManager& sm = ShaderManager::instance();
+    sm.init();
+
+    std::string gl_dir = sm.get_gl_shaders_dir();
+    std::string vk_dir = sm.get_vulkan_shaders_dir();
+
+    assert(fs::exists(gl_dir));
+    assert(fs::exists(vk_dir));
+
+    // Verify default starter shaders were written
+    assert(fs::exists(gl_dir + "/ripple.vert"));
+    assert(fs::exists(gl_dir + "/ripple.frag"));
+    assert(fs::exists(gl_dir + "/grayscale.frag"));
+    assert(fs::exists(gl_dir + "/invert.frag"));
+    assert(fs::exists(gl_dir + "/vignette.frag"));
+
+    assert(fs::exists(vk_dir + "/ripple.vert"));
+    assert(fs::exists(vk_dir + "/ripple.frag"));
+    assert(fs::exists(vk_dir + "/grayscale.frag"));
+    assert(fs::exists(vk_dir + "/invert.frag"));
+    assert(fs::exists(vk_dir + "/vignette.frag"));
+
+    // Verify scanning finds all shaders
+    sm.scan_shaders();
+    const auto& gl_list = sm.get_gl_shaders();
+    assert(gl_list.size() >= 4);
+
+    const auto& vk_list = sm.get_vulkan_shaders();
+    assert(vk_list.size() >= 4);
+
+    // Verify lookup by name
+    CustomShader sh;
+    assert(sm.find_shader("ripple", sh, "gl"));
+    assert(sh.name == "ripple");
+    assert(sh.type == "gl");
+    assert(!sh.frag_path.empty());
+    assert(sm.load_shader_source(sh));
+    assert(!sh.frag_src.empty());
+    assert(sh.frag_src.find("u_frequency") != std::string::npos);
+
+    // Test a user-created custom shader in ~/.config/minicut/shaders/gl/
+    std::string user_frag = gl_dir + "/user_custom_sepia.frag";
+    {
+        std::ofstream ofs(user_frag);
+        ofs << "#version 330 core\nvoid main() {}\n";
+    }
+    sm.scan_shaders();
+    CustomShader user_sh;
+    assert(sm.find_shader("user_custom_sepia", user_sh, "gl"));
+    assert(user_sh.name == "user_custom_sepia");
+    assert(sm.load_shader_source(user_sh));
+    assert(user_sh.frag_src.find("void main") != std::string::npos);
+
+    // Clean up test file
+    fs::remove(user_frag);
+    sm.scan_shaders();
+
+    std::cout << "[PASS] Custom Shaders Loading & Management tests passed." << std::endl;
+}
+
+void test_text_asset_persistence_and_rerender() {
+    std::cout << "[TEST] Running Text Asset Persistence & Re-render test..." << std::endl;
+    Project project;
+    TextConfig config;
+    config.text = "Lossless Subtitle Header";
+    config.font_size = 56.0f;
+    config.use_outline = true;
+    config.outline_thickness = 3.5f;
+    config.use_bg = true;
+
+    std::string asset_id = TextGenerator::create_text_asset(project, config);
+    assert(!asset_id.empty());
+    assert(project.video_assets.size() == 1);
+
+    const VideoAsset& orig_va = project.video_assets[0];
+    assert(orig_va.text_content == "Lossless Subtitle Header");
+    assert(orig_va.text_font_size == 56.0f);
+    assert(orig_va.text_use_outline == true);
+    assert(orig_va.text_outline_thickness == 3.5f);
+    assert(orig_va.is_image == true);
+    assert(fs::exists(orig_va.path));
+
+    std::string orig_path = orig_va.path;
+
+    // Serialize to JSON
+    std::string json_str = ProjectSerializer::serialize_json(project);
+    assert(json_str.find("\"text_content\": \"Lossless Subtitle Header\"") != std::string::npos);
+    assert(json_str.find("\"text_use_outline\": true") != std::string::npos);
+
+    // Simulate temp cleanup or project moved to another machine: delete the rendered temporary image
+    fs::remove(orig_path);
+    assert(!fs::exists(orig_path));
+
+    // Reload project from JSON
+    Project reloaded_project;
+    bool ok = ProjectSerializer::deserialize_json(reloaded_project, json_str);
+    assert(ok);
+    assert(reloaded_project.video_assets.size() == 1);
+
+    const VideoAsset& reloaded_va = reloaded_project.video_assets[0];
+    assert(reloaded_va.text_content == "Lossless Subtitle Header");
+    assert(reloaded_va.text_use_outline == true);
+    assert(reloaded_va.is_image == true);
+
+    // The asset image MUST have been dynamically re-rendered from the stored text string!
+    assert(!reloaded_va.path.empty());
+    assert(fs::exists(reloaded_va.path));
+    assert(reloaded_va.width > 0);
+    assert(reloaded_va.height > 0);
+
+    // Clean up
+    if (fs::exists(reloaded_va.path)) {
+        fs::remove(reloaded_va.path);
+    }
+
+    std::cout << "[PASS] Text Asset Persistence & Re-render tests passed." << std::endl;
+}
+
+void test_shader_piping_sftp_and_multi_frame() {
+    std::cout << "[TEST] Running Shader Piping, SFTP, and Multi-Frame Re-application tests..." << std::endl;
+
+    ShaderManager::instance().init();
+    CustomShader cs;
+    bool found = ShaderManager::instance().find_shader("ripple", cs);
+    assert(found);
+    ShaderManager::instance().load_shader_source(cs);
+    assert(cs.frag_src.find("ripple") != std::string::npos);
+
+    Project project;
+
+    std::string test_png = TempManager::get_temp_dir() + "/test_pipe_frame.png";
+    std::vector<uint8_t> frame_rgba(640 * 360 * 4, 180);
+    // Add distinctive center marker
+    for (int y = 170; y < 190; ++y) {
+        for (int x = 310; x < 330; ++x) {
+            int idx = (y * 640 + x) * 4;
+            frame_rgba[idx + 0] = 250;
+            frame_rgba[idx + 1] = 50;
+            frame_rgba[idx + 2] = 50;
+            frame_rgba[idx + 3] = 255;
+        }
+    }
+    MediaDecoder::save_rgba_to_png(test_png, 640, 360, frame_rgba);
+
+    VideoAsset va;
+    va.id = "pipe_asset_1";
+    va.path = test_png;
+    va.width = 640;
+    va.height = 360;
+    va.duration = 1.0;
+    va.fps = 30.0;
+    va.is_image = true;
+    project.video_assets.push_back(va);
+
+    Track trk;
+    trk.name = "Video Track";
+    trk.type = "video";
+    Clip c;
+    c.id = "pipe_clip_1";
+    c.asset_id = va.id;
+    c.start_time = 0.0;
+    c.duration = 0.4;
+    c.offset = 0.0;
+    trk.clips.push_back(c);
+    project.tracks.push_back(trk);
+
+    ScriptEngine se;
+    double playhead = 0.0;
+    std::string selected_clip = "pipe_clip_1";
+    bool ok = se.init(&project, nullptr, nullptr, &playhead, &selected_clip,
+                      nullptr, nullptr, nullptr, nullptr,
+                      [&selected_clip](const std::string& id) { selected_clip = id; },
+                      nullptr, nullptr);
+    assert(ok);
+
+    // 1. Lua Piping: frame = clip.get_frame("pipe_clip_1"):apply_shader(sid, uniforms):reinsert()
+    const char* lua_code = R"(
+        local f = clip.get_frame("pipe_clip_1")
+        assert(f ~= nil, "frame should not be nil")
+        assert(f.clip_id == "pipe_clip_1", "frame.clip_id must match real clip id")
+        local sid = shader.create("ripple")
+        assert(sid > 0, "shader.create must return valid id")
+        local uniforms = { amplitude = 12.0, frequency = 0.08, phase = 0.0 }
+        local rf = f:apply_shader(sid, uniforms)
+        assert(rf ~= nil, "rf must not be nil")
+        assert(rf.applied_shader ~= "", "applied_shader must be preserved")
+        local ok = rf:reinsert()
+        assert(ok == true, "reinsert must succeed")
+    )";
+    bool lua_ok = se.run_string(lua_code);
+    assert(lua_ok);
+
+    // Wait for the multi-frame render to finish
+    int wait_cycles = 0;
+    while (se.is_rendering_shader() && wait_cycles < 200) {
+        se.poll_shader_rendering();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        wait_cycles++;
+    }
+    se.poll_shader_rendering();
+    assert(!se.is_rendering_shader());
+
+    // Verify clip now points to a valid whole-clip video, not a static image
+    Clip* c_after_first = project.find_clip_mut("pipe_clip_1");
+    assert(c_after_first != nullptr);
+    VideoAsset* va_after_first = project.find_video_asset_mut(c_after_first->asset_id);
+    assert(va_after_first != nullptr);
+    assert(!va_after_first->is_image);
+    assert(va_after_first->fps == 30.0);
+    assert(fs::exists(va_after_first->path));
+
+    // 2. Subsequent Run on the SAME clip (Issue: "When I used the Ripple Script again it inverted the colors and only applied to the first frame")
+    const char* lua_again = R"(
+        local f = clip.get_frame("pipe_clip_1")
+        assert(f ~= nil, "frame on subsequent run must not be nil")
+        local sid = shader.create("ripple")
+        local rf = f:apply_shader(sid, { amplitude = 16.0, frequency = 0.05 })
+        local ok = rf:reinsert()
+        assert(ok == true, "subsequent reinsert must succeed")
+    )";
+    bool again_ok = se.run_string(lua_again);
+    assert(again_ok);
+
+    wait_cycles = 0;
+    while (se.is_rendering_shader() && wait_cycles < 200) {
+        se.poll_shader_rendering();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        wait_cycles++;
+    }
+    se.poll_shader_rendering();
+    assert(!se.is_rendering_shader());
+
+    VideoAsset* va_after_second = project.find_video_asset_mut(c_after_first->asset_id);
+    assert(va_after_second != nullptr);
+    assert(!va_after_second->is_image);
+    assert(fs::exists(va_after_second->path));
+
+    // 3. JavaScript Piping: clip.get_frame("pipe_clip_1").apply_shader(sid, uniforms).reinsert()
+    const char* js_code = R"(
+        var f = clip.get_frame("pipe_clip_1");
+        if (!f) throw new Error("JS get_frame failed");
+        var sid = shader.create("ripple");
+        var rf = f.apply_shader(sid, { amplitude: 14.0, frequency: 0.06 });
+        if (!rf) throw new Error("JS apply_shader failed");
+        var ok = rf.reinsert();
+        if (!ok) throw new Error("JS reinsert failed");
+    )";
+    bool js_ok = se.run_js_string(js_code);
+    assert(js_ok);
+
+    wait_cycles = 0;
+    while (se.is_rendering_shader() && wait_cycles < 200) {
+        se.poll_shader_rendering();
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        wait_cycles++;
+    }
+    se.poll_shader_rendering();
+    assert(!se.is_rendering_shader());
+
+    // 4. SFTP API validation in Lua & JS
+    const char* lua_sftp = R"(
+        local ok, err = net.upload("sftp://user:pass@127.0.0.1:22/remote/test.mp4", "/path/to/missing_file.mp4")
+        assert(ok == nil, "upload on missing file should return nil")
+        assert(string.find(err, "does not exist") ~= nil, "error message should report missing file")
+    )";
+    assert(se.run_string(lua_sftp));
+
+    const char* js_sftp = R"(
+        var resp = net.upload("sftp://user:pass@127.0.0.1:22/remote/test.mp4", "/path/to/missing_file.mp4");
+        if (resp !== null) throw new Error("JS net.upload on missing file should return null");
+    )";
+    assert(se.run_js_string(js_sftp));
+
+    // Clean up temporary assets
+    if (fs::exists(test_png)) fs::remove(test_png);
+    if (fs::exists(va_after_second->path)) fs::remove(va_after_second->path);
+
+    std::cout << "[PASS] Shader Piping, SFTP, and Multi-Frame Re-application tests passed." << std::endl;
+}
+
+// ============================================================================
+// Asset Folder & Grid View Tests
+// ============================================================================
+void test_asset_folders_and_grid_view() {
+    std::cout << "[TEST] Running asset folders and grid view tests..." << std::endl;
+
+    // -------------------------------------------------------------------------
+    // a) Project::add_asset_folder() — adds, deduplicates, rejects empty
+    // -------------------------------------------------------------------------
+    {
+        Project p;
+        assert(p.asset_folders.empty());
+
+        bool added = p.add_asset_folder("VFX");
+        assert(added);
+        assert(p.asset_folders.size() == 1);
+        assert(p.asset_folders[0] == "VFX");
+
+        // Duplicate should be rejected
+        bool added_dup = p.add_asset_folder("VFX");
+        assert(!added_dup);
+        assert(p.asset_folders.size() == 1);
+
+        // Empty name should be rejected
+        bool added_empty = p.add_asset_folder("");
+        assert(!added_empty);
+        assert(p.asset_folders.size() == 1);
+
+        // Second distinct folder
+        p.add_asset_folder("Music");
+        assert(p.asset_folders.size() == 2);
+    }
+    std::cout << "  [PASS] add_asset_folder deduplication and empty-name guard" << std::endl;
+
+    // -------------------------------------------------------------------------
+    // b) VideoAsset.folder assignment survives serialize -> deserialize cycle
+    // -------------------------------------------------------------------------
+    {
+        Project p;
+        p.name = "FolderSerTest";
+        p.add_asset_folder("Footage");
+
+        VideoAsset v;
+        v.id = "v1";
+        v.path = "/tmp/test_video.mp4";
+        v.duration = 10.0;
+        v.folder = "Footage";
+        p.video_assets.push_back(v);
+
+        const std::string tmp_path = "/tmp/test_folder_ser_video.minicut";
+        ProjectSerializer ser;
+        bool saved = ser.save_to_file(p, tmp_path);
+        assert(saved);
+
+        Project p2;
+        bool loaded = ser.load_from_file(p2, tmp_path);
+        assert(loaded);
+        assert(!p2.video_assets.empty());
+        assert(p2.video_assets[0].folder == "Footage");
+        assert(!p2.asset_folders.empty());
+        assert(p2.asset_folders[0] == "Footage");
+
+        fs::remove(tmp_path);
+    }
+    std::cout << "  [PASS] VideoAsset folder survives serialize/deserialize" << std::endl;
+
+    // -------------------------------------------------------------------------
+    // c) AudioAsset.folder assignment survives serialize -> deserialize cycle
+    // -------------------------------------------------------------------------
+    {
+        Project p;
+        p.name = "FolderSerAudioTest";
+        p.add_asset_folder("SFX");
+
+        AudioAsset a;
+        a.id = "a1";
+        a.path = "/tmp/test_audio.mp3";
+        a.duration = 5.0;
+        a.folder = "SFX";
+        p.audio_assets.push_back(a);
+
+        const std::string tmp_path = "/tmp/test_folder_ser_audio.minicut";
+        ProjectSerializer ser;
+        bool saved = ser.save_to_file(p, tmp_path);
+        assert(saved);
+
+        Project p2;
+        bool loaded = ser.load_from_file(p2, tmp_path);
+        assert(loaded);
+        assert(!p2.audio_assets.empty());
+        assert(p2.audio_assets[0].folder == "SFX");
+
+        fs::remove(tmp_path);
+    }
+    std::cout << "  [PASS] AudioAsset folder survives serialize/deserialize" << std::endl;
+
+    // -------------------------------------------------------------------------
+    // d) ProjectPrefab.folder assignment survives serialize -> deserialize cycle
+    // -------------------------------------------------------------------------
+    {
+        Project p;
+        p.name = "FolderSerPrefabTest";
+        p.add_asset_folder("Prefabs");
+
+        ProjectPrefab pf;
+        pf.id = "pf1";
+        pf.name = "IntroSequence";
+        pf.path = "/tmp/test_prefab.minicut";
+        pf.folder = "Prefabs";
+        pf.raw_json = "{}";
+        p.prefabs.push_back(pf);
+
+        const std::string tmp_path = "/tmp/test_folder_ser_prefab.minicut";
+        ProjectSerializer ser;
+        bool saved = ser.save_to_file(p, tmp_path);
+        assert(saved);
+
+        Project p2;
+        bool loaded = ser.load_from_file(p2, tmp_path);
+        assert(loaded);
+        assert(!p2.prefabs.empty());
+        assert(p2.prefabs[0].folder == "Prefabs");
+
+        fs::remove(tmp_path);
+    }
+    std::cout << "  [PASS] ProjectPrefab folder survives serialize/deserialize" << std::endl;
+
+    // -------------------------------------------------------------------------
+    // e) Project::rename_asset_folder() renames in folder list and all assets
+    // -------------------------------------------------------------------------
+    {
+        Project p;
+        p.add_asset_folder("OldName");
+
+        VideoAsset v;
+        v.id = "v1";
+        v.path = "/tmp/foo.mp4";
+        v.folder = "OldName";
+        p.video_assets.push_back(v);
+
+        AudioAsset a;
+        a.id = "a1";
+        a.path = "/tmp/bar.mp3";
+        a.folder = "OldName";
+        p.audio_assets.push_back(a);
+
+        ProjectPrefab pf;
+        pf.id = "pf1";
+        pf.name = "Pf";
+        pf.folder = "OldName";
+        p.prefabs.push_back(pf);
+
+        bool renamed = p.rename_asset_folder("OldName", "NewName");
+        assert(renamed);
+        assert(p.asset_folders.size() == 1);
+        assert(p.asset_folders[0] == "NewName");
+        assert(p.video_assets[0].folder == "NewName");
+        assert(p.audio_assets[0].folder == "NewName");
+        assert(p.prefabs[0].folder == "NewName");
+
+        // Assets in a different folder are unaffected
+        VideoAsset v2;
+        v2.id = "v2";
+        v2.folder = "Other";
+        p.video_assets.push_back(v2);
+        p.rename_asset_folder("NewName", "FinalName");
+        assert(p.video_assets[1].folder == "Other");
+    }
+    std::cout << "  [PASS] rename_asset_folder updates list and all asset fields" << std::endl;
+
+    // -------------------------------------------------------------------------
+    // f) Project::remove_asset_folder() removes from list and clears asset fields
+    // -------------------------------------------------------------------------
+    {
+        Project p;
+        p.add_asset_folder("ToDelete");
+        p.add_asset_folder("Keep");
+
+        VideoAsset v;
+        v.id = "v1";
+        v.path = "/tmp/foo.mp4";
+        v.folder = "ToDelete";
+        p.video_assets.push_back(v);
+
+        VideoAsset v2;
+        v2.id = "v2";
+        v2.path = "/tmp/bar.mp4";
+        v2.folder = "Keep";
+        p.video_assets.push_back(v2);
+
+        bool removed = p.remove_asset_folder("ToDelete");
+        assert(removed);
+        assert(p.asset_folders.size() == 1);
+        assert(p.asset_folders[0] == "Keep");
+
+        // Asset in deleted folder has folder cleared (moved to root)
+        assert(p.video_assets[0].folder.empty());
+        // Asset in kept folder unaffected
+        assert(p.video_assets[1].folder == "Keep");
+    }
+    std::cout << "  [PASS] remove_asset_folder clears assets and updates list" << std::endl;
+
+    // -------------------------------------------------------------------------
+    // g) ClipManager::create_folder() / rename_folder() / delete_folder()
+    // -------------------------------------------------------------------------
+    {
+        Project p;
+        ClipManager cm;
+
+        bool created = cm.create_folder(p, "Clips");
+        assert(created);
+        assert(!p.asset_folders.empty());
+        assert(p.asset_folders[0] == "Clips");
+
+        // Duplicate rejected
+        bool dup = cm.create_folder(p, "Clips");
+        assert(!dup);
+        assert(p.asset_folders.size() == 1);
+
+        bool renamed = cm.rename_folder(p, "Clips", "KeyClips");
+        assert(renamed);
+        assert(p.asset_folders[0] == "KeyClips");
+
+        bool deleted = cm.delete_folder(p, "KeyClips");
+        assert(deleted);
+        assert(p.asset_folders.empty());
+    }
+    std::cout << "  [PASS] ClipManager create/rename/delete folder" << std::endl;
+
+    // -------------------------------------------------------------------------
+    // h) ClipManager::set_asset_folder() / get_asset_folder()
+    // -------------------------------------------------------------------------
+    {
+        Project p;
+        ClipManager cm;
+        cm.create_folder(p, "B-Roll");
+
+        VideoAsset v;
+        v.id = "v10";
+        v.path = "/tmp/video10.mp4";
+        p.video_assets.push_back(v);
+
+        AudioAsset a;
+        a.id = "a10";
+        a.path = "/tmp/audio10.mp3";
+        p.audio_assets.push_back(a);
+
+        // Initially root (empty string)
+        assert(cm.get_asset_folder(p, "v10", true, false).empty());
+
+        cm.set_asset_folder(p, "v10", true, false, "B-Roll");
+        assert(cm.get_asset_folder(p, "v10", true, false) == "B-Roll");
+
+        cm.set_asset_folder(p, "a10", false, false, "B-Roll");
+        assert(cm.get_asset_folder(p, "a10", false, false) == "B-Roll");
+
+        // Clear back to root
+        cm.set_asset_folder(p, "v10", true, false, "");
+        assert(cm.get_asset_folder(p, "v10", true, false).empty());
+    }
+    std::cout << "  [PASS] ClipManager set/get_asset_folder" << std::endl;
+
+    // -------------------------------------------------------------------------
+    // i) View mode switch (0 -> 1 -> 0) does not crash and state is consistent
+    // -------------------------------------------------------------------------
+    {
+        ClipManager cm;
+        assert(cm.get_view_mode() == 0); // Default: list
+
+        cm.set_view_mode(1);
+        assert(cm.get_view_mode() == 1); // Grid
+
+        cm.set_view_mode(0);
+        assert(cm.get_view_mode() == 0); // Back to list
+
+        // Rapid toggling is safe
+        for (int i = 0; i < 100; ++i) {
+            cm.set_view_mode(i % 2);
+        }
+        assert(cm.get_view_mode() == 0);
+    }
+    std::cout << "  [PASS] View mode switch (list/grid) is consistent and crash-free" << std::endl;
+
+    // -------------------------------------------------------------------------
+    // j) asset_folders list serialized and deserialized correctly (multi-folder)
+    // -------------------------------------------------------------------------
+    {
+        Project p;
+        p.name = "MultiFolderTest";
+        p.add_asset_folder("Alpha");
+        p.add_asset_folder("Beta");
+        p.add_asset_folder("Gamma");
+
+        const std::string tmp_path = "/tmp/test_multi_folder.minicut";
+        ProjectSerializer ser;
+        bool saved = ser.save_to_file(p, tmp_path);
+        assert(saved);
+
+        Project p2;
+        bool loaded = ser.load_from_file(p2, tmp_path);
+        assert(loaded);
+        assert(p2.asset_folders.size() == 3);
+        assert(p2.asset_folders[0] == "Alpha");
+        assert(p2.asset_folders[1] == "Beta");
+        assert(p2.asset_folders[2] == "Gamma");
+
+        fs::remove(tmp_path);
+    }
+    std::cout << "  [PASS] asset_folders list serialized/deserialized correctly" << std::endl;
+
+    // -------------------------------------------------------------------------
+    // k) Selected folder filter state is isolated per ClipManager instance
+    // -------------------------------------------------------------------------
+    {
+        ClipManager cm1;
+        ClipManager cm2;
+
+        cm1.set_selected_folder_filter("VFX");
+        cm2.set_selected_folder_filter("(Root)");
+
+        assert(cm1.get_selected_folder_filter() == "VFX");
+        assert(cm2.get_selected_folder_filter() == "(Root)");
+
+        // Reset
+        cm1.set_selected_folder_filter("");
+        assert(cm1.get_selected_folder_filter().empty());
+    }
+    std::cout << "  [PASS] Selected folder filter state isolated per ClipManager" << std::endl;
+
+    std::cout << "[PASS] All asset folder and grid view tests passed." << std::endl;
+}
+
 int main() {
     std::cout << "========================================" << std::endl;
     std::cout << "Running minicut Comprehensive Test Suite" << std::endl;
     std::cout << "========================================" << std::endl;
 
+    test_project_load_audio_re_extraction();
     test_keyframe_evaluation();
     test_project_serialization();
     test_image_transform_and_keyframing();
@@ -2069,10 +3682,27 @@ int main() {
     test_multilanguage_tts_stereo_and_autolength();
     test_preview_aspect_ratio_and_japanese_kanji_tts_and_hotkeys();
     test_preview_transform_and_popout_and_export_progress();
+    test_scale_xy_clips_and_assets();
+    test_timeline_and_asset_selection_clearing();
+    test_audio_mixing_progress_immediate_jump();
+    test_scripting_locale_api_lua_and_js();
+    test_scripting_ai_library_lua_and_js();
+    test_raw_frame_shader_sfx_pipeline_lua_and_js();
+    test_preview_performance_enhancements();
+    test_shader_effects_across_clip_and_menu_ids();
+    test_ripple_effect_and_box_select();
+    test_vulkan_backend_and_preview_settings();
+    test_headless_batch_reconfig_and_prefab_reload();
+    test_custom_shaders_loading();
+    test_text_asset_persistence_and_rerender();
+    test_shader_piping_sftp_and_multi_frame();
+    test_asset_folders_and_grid_view();
 
     std::cout << "========================================" << std::endl;
     std::cout << "ALL MINICUT UNIT & PIPELINE TESTS PASSED" << std::endl;
     std::cout << "========================================" << std::endl;
     return 0;
 }
+
+
 

@@ -1,4 +1,4 @@
-# minicut
+# minicut (v1.5.0)
 
 [English](README.md) | [العربية](docs/README_ar.md) | [日本語](docs/README_ja.md) | [한국어](docs/README_ko.md) | [Українська](docs/README_uk.md)
 
@@ -8,13 +8,38 @@
 
 ---
 
+## What's New in Version 1.5.0
+
+- 🚀 **Next-Gen Vulkan Rendering Backend**:
+  - Full hardware-accelerated Vulkan 1.2+ pipeline with surface swapchains and automatic fallback to OpenGL 3.3.
+- ⚡ **Headless CLI Video Rendering (`--render`)**:
+  - Render projects directly from the terminal or in CI/CD environments without opening a GUI window:
+    `minicut --render my_project.minicut --output output.mp4 --fps 60`
+- 📋 **Batch Processing Export Queue**:
+  - Second tab in the Export dialog dedicated to managing, adding, editing, and sequentially rendering queues of `.minicut` projects.
+- 🔄 **Collaborative Prefab Hot-Reloading**:
+  - `.minicut` files used as prefabs in master projects now automatically hot-reload when modified on disk, with a configurable polling interval under Settings.
+- 🗂️ **Asset Browser Grid & List Views**:
+  - Toggle between visual thumbnail grid cards and compact tabular list rows with asset metadata.
+- 🎛️ **Modifiers Menu Organization**:
+  - Reorganized top-level menu housing AI Assistant Tools, GLSL Shader Effects, and whole-clip transformations.
+- 🛠️ **Settings Factory Reset (`--reconfig`)**:
+  - Instant settings recovery CLI switch `minicut --reconfig` to safely restore default configurations.
+- 🎨 **Preview Canvas Customization & Accessibility**:
+  - Configurable preview window padding and background color/checkerboard.
+  - Menu font size slider under Accessibility, expanded menu bar padding, and styled Settings button with icon and label.
+- 🔊 **Audio Re-extraction & Stream Integrity**:
+  - Probes and extracts audio streams automatically upon loading saved project files, ensuring timeline audio clips and waveforms are never lost.
+
+---
+
 ## The Story: How It Was Made (Vibe Coded)
 
 `minicut` was conceived and developed through an interactive "vibe coding" journey with **Google DeepMind Antigravity**, an advanced AI pair programming assistant.
 
 Starting from an initial architectural idea, the application was engineered from scratch in modern **C++20**:
-- **Rendering & UI**: Hardware-accelerated OpenGL 3.3 backend coupled with **Dear ImGui**, customized with a KDE Plasma Breeze Dark theme.
-- **Media Engine**: Native **FFmpeg** pipeline for high-performance frame decoding, audio resampling, and multi-threaded video encoding (H.264/AAC, OGG/Theora).
+- **Rendering & UI**: Dual Vulkan 1.2+ and OpenGL 3.3 backends coupled with **Dear ImGui**, customized with a KDE Plasma Breeze Dark theme.
+- **Media Engine**: Native **FFmpeg** pipeline for high-performance frame decoding, audio resampling, and multi-threaded video encoding (H.264/AAC, OGG/Theora, WebP, GIF).
 - **Typography & Localization**: Vector glyph rendering via **FreeType 2** with native cursive BiDi shaping for Arabic and complete CJK coverage for Japanese and Korean.
 - **Dual Embedded Scripting**: Fully sandboxed **LuaJIT** and **Duktape JavaScript** runtimes empowering users to script timeline actions and build custom interactive dockable tool panels.
 
@@ -75,13 +100,29 @@ minicut
 minicut my_project.minicut
 ```
 
-### 2. Basic Editing Workflow
+### 2. Command Line Arguments
+
+| Command Option | Description |
+|---|---|
+| `minicut [project.minicut]` | Launches graphical application opening the specified project file. |
+| `minicut --render <project.minicut>` | Headless mode: Renders project to video without GUI. |
+| `--output <file>` | Output file path for headless rendering (e.g. `final_cut.mp4`). |
+| `--format <mp4\|webp\|gif>` | Target container format (defaults to extension or `mp4`). |
+| `--width <w> --height <h>` | Target render dimensions (defaults to project settings or `1920x1080`). |
+| `--fps <fps>` | Target render framerate (defaults to `30`). |
+| `--bitrate <bps>` | Target video bitrate (defaults to `4000000`). |
+| `--srt` | Generate matching `.srt` subtitle file during headless export. |
+| `minicut --reconfig` | Resets all user preferences and UI state to factory defaults. |
+| `minicut --version` / `-v` | Displays version and build info. |
+| `minicut --help` / `-h` | Displays complete help manual. |
+
+### 3. Basic Editing Workflow
 
 1. **Import Assets**:
-   - Use **Project > Import Video / Audio / Image** or drag-and-drop media files directly into the window.
-   - Assets appear in the **Clips & Assets** browser.
+   - Use **Asset Browser > Import** or drag-and-drop media files directly into the window.
+   - Switch between **Grid View** and **List View** to organize media.
 2. **Add Text & Subtitles**:
-   - Click the **Add Text** button in the asset browser or **Project > Add Text**.
+   - Click the **Add Text** button in the asset browser or **Assets > Add Text Asset**.
    - Customize font, size, colors, outlines, and alignment, then place directly onto the timeline.
 3. **Assemble the Timeline**:
    - Drag or click to place clips onto video and audio tracks. Drag clips across compatible tracks.
@@ -99,9 +140,14 @@ minicut my_project.minicut
    - Browse additional tools in the **Scripts** menu or add your own in `~/.config/minicut/scripts/`.
 7. **Export Your Finished Media**:
    - Render to MP4 video, animated GIF, or animated WebP with optional `.srt` sidecars.
+   - Use the **Batch Processing** tab to render multiple projects back-to-back.
 
 ---
 
-## Documentation & Help
+## Documentation & Scripting Manuals
 
-Comprehensive localized API reference manuals for both **Lua** and **JavaScript** are bundled in the `docs/` folder and accessible directly within the application via **Help > Lua Script API** or **Help > JavaScript API**.
+Comprehensive API reference manuals for both **Lua** and **JavaScript** are bundled in the `docs/` folder:
+- 📘 [Lua Scripting API Reference](docs/LUA_API.md) (`minicut_lua_api.pdf`)
+- 📒 [JavaScript Scripting API Reference](docs/JAVASCRIPT_API.md) (`minicut_js_api.pdf`)
+
+Also accessible directly within the application via **Help > Lua Script API** or **Help > JavaScript API**.

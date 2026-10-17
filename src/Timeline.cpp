@@ -601,6 +601,8 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                          const std::function<void(const std::string& prefab_id, double insert_time)>& on_add_prefab) {
     if (!selected_clip_id.empty()) {
         m_drag_clip_id = selected_clip_id;
+    } else if (m_selected_clip_ids.empty()) {
+        m_drag_clip_id.clear();
     }
 
     // Toolbar header
@@ -923,7 +925,7 @@ void Timeline::render_ui(Project& project, double& playhead_time,
 
         draw_list->PopClipRect();
 
-        bool is_timeline_window_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
+        bool is_timeline_window_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
 
         // Header click, double-click (rename), and right-click (context menu)
         bool in_header = (is_timeline_window_hovered &&
@@ -932,6 +934,12 @@ void Timeline::render_ui(Project& project, double& playhead_time,
         if (in_header) {
             if (ImGui::IsMouseClicked(0)) {
                 m_active_track_idx = static_cast<int>(t);
+                clear_selection();
+                if (on_select_clip) on_select_clip("");
+                if (track.type == "audio") {
+                    std::string hdr_ctx = "TrackHdrCtx_" + std::to_string(t);
+                    ImGui::OpenPopup(hdr_ctx.c_str());
+                }
             }
             if (ImGui::IsMouseDoubleClicked(0)) {
                 m_rename_track_idx = static_cast<int>(t);
@@ -951,6 +959,9 @@ void Timeline::render_ui(Project& project, double& playhead_time,
         if (ImGui::BeginPopup(hdr_ctx_id.c_str())) {
             ImGui::TextDisabled("%s", display_name.c_str());
             ImGui::Separator();
+
+
+
             if (ImGui::MenuItem(_TR("timeline_rename_track"))) {
                 m_rename_track_idx = static_cast<int>(t);
                 strncpy(m_rename_track_buf, track.name.c_str(), sizeof(m_rename_track_buf) - 1);
@@ -979,10 +990,10 @@ void Timeline::render_ui(Project& project, double& playhead_time,
             m_hovered_track_idx = static_cast<int>(t);
         }
 
-        // Invisible button over track lane for Drag-Drop target
+        // Invisible button over track lane for Drag-Drop target (MouseButtonRight so left click drag passes through)
         ImGui::SetCursorScreenPos(ImVec2(content_x, track_y));
         std::string lane_btn = "##lane_" + std::to_string(t);
-        ImGui::InvisibleButton(lane_btn.c_str(), ImVec2(content_w, track_h));
+        ImGui::InvisibleButton(lane_btn.c_str(), ImVec2(content_w, track_h), ImGuiButtonFlags_MouseButtonRight);
 
         if (ImGui::BeginDragDropTarget()) {
             if (track.type == "video") {
@@ -1001,6 +1012,7 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                         c.duration = dur;
                         c.offset = 0.0;
                         track.clips.push_back(c);
+                        select_clip(c.id, false, false);
                         clip_to_select = c.id;
 
                         // Separate audio onto first audio track if video has audio
@@ -1044,6 +1056,7 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                         c.duration = aa->duration > 0 ? aa->duration : 5.0;
                         c.offset = 0.0;
                         track.clips.push_back(c);
+                        select_clip(c.id, false, false);
                         clip_to_select = c.id;
                         if (on_project_changed) on_project_changed();
                     }
@@ -1058,6 +1071,7 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                         c.duration = va->duration > 0 ? va->duration : 5.0;
                         c.offset = 0.0;
                         track.clips.push_back(c);
+                        select_clip(c.id, false, false);
                         clip_to_select = c.id;
                         if (on_project_changed) on_project_changed();
                     }
@@ -1112,6 +1126,7 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                     if (on_project_changed) on_project_changed();
                 }
             }
+
             ImGui::Separator();
             if (ImGui::MenuItem("+ Add Subtitle Clip Here")) {
                 std::string new_id = add_subtitle_clip(project, click_time, 3.0, "New Subtitle");
@@ -1276,11 +1291,14 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                 if (ImGui::MenuItem(del_label.c_str(), "Del")) {
                     delete_selected_clips(project);
                     clip_to_select = "";
+                    if (on_select_clip) on_select_clip("");
                     if (on_project_changed) on_project_changed();
                 }
                 ImGui::Separator();
                 if (ImGui::MenuItem(_TR("timeline_reset_transforms"))) {
-                    clip.pos_x = 0; clip.pos_y = 0; clip.rotation = 0; clip.scale = 1.0; clip.opacity = 1.0;
+                    clip.pos_x = 0; clip.pos_y = 0; clip.rotation = 0;
+                    clip.scale = 1.0; clip.scale_x = 1.0; clip.scale_y = 1.0;
+                    clip.opacity = 1.0;
                     project.remove_clip_keyframes(clip.id);
                     if (on_project_changed) on_project_changed();
                 }
@@ -1307,7 +1325,9 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                                 [&](const Keyframe& k) { return k.clip_id == cid; });
                             project.keyframes.erase(kit, project.keyframes.end());
                         }
+                        clear_selection();
                         clip_to_select = "";
+                        if (on_select_clip) on_select_clip("");
                         if (on_project_changed) on_project_changed();
                     }
                     if (ImGui::MenuItem(_TR("timeline_dissolve_prefab"))) {
@@ -1334,6 +1354,7 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                 if (near_left) {
                     ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
                     if (ImGui::IsMouseClicked(0)) {
+                        select_clip(clip.id, false, false);
                         m_drag_mode = DragMode::TrimLeft;
                         m_drag_clip_id = clip.id;
                         m_drag_track_idx = static_cast<int>(t);
@@ -1346,6 +1367,7 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                 } else if (near_right) {
                     ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
                     if (ImGui::IsMouseClicked(0)) {
+                        select_clip(clip.id, false, false);
                         m_drag_mode = DragMode::TrimRight;
                         m_drag_clip_id = clip.id;
                         m_drag_track_idx = static_cast<int>(t);
@@ -1355,12 +1377,13 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                     }
                 } else {
                     if (ImGui::IsMouseClicked(0)) {
+                        m_active_track_idx = static_cast<int>(t);
                         if (io.KeyCtrl) {
                             select_clip(clip.id, true, false);
                         } else if (io.KeyShift) {
                             select_clip(clip.id, false, true);
                         } else {
-                            if (!is_clip_selected(clip.id)) {
+                            if (!is_clip_selected(clip.id) || m_selected_clip_ids.size() <= 1) {
                                 select_clip(clip.id, false, false);
                             }
                         }
@@ -1387,23 +1410,33 @@ void Timeline::render_ui(Project& project, double& playhead_time,
 
     draw_list->PopClipRect();
 
-    // Box Selection on empty area
+    // Box Selection & Empty Space Click on timeline
     float canvas_right = canvas_pos.x + canvas_size.x;
     float canvas_top = canvas_pos.y + ruler_h;
-    float canvas_bottom = tracks_bottom_y;
-    bool is_timeline_window_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows);
+    float canvas_bottom = canvas_pos.y + canvas_size.y - scrollbar_h;
+    bool is_timeline_window_hovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_RootAndChildWindows | ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
+    bool in_timeline_empty_area = is_timeline_window_hovered &&
+                                  (mouse_pos.x >= canvas_pos.x && mouse_pos.x <= canvas_right &&
+                                   mouse_pos.y >= canvas_top && mouse_pos.y <= canvas_bottom);
     bool in_timeline_content = is_timeline_window_hovered &&
                                (mouse_pos.x >= content_x && mouse_pos.x <= canvas_right &&
                                 mouse_pos.y >= canvas_top && mouse_pos.y <= canvas_bottom);
 
-
-    if (in_timeline_content && ImGui::IsMouseClicked(0) && m_drag_mode == DragMode::None) {
+    if (in_timeline_empty_area && ImGui::IsMouseClicked(0) && m_drag_mode == DragMode::None) {
+        int clicked_track = static_cast<int>(std::floor((mouse_pos.y - start_track_y) / track_h));
+        if (clicked_track >= 0 && clicked_track < static_cast<int>(project.tracks.size())) {
+            m_active_track_idx = clicked_track;
+        }
         if (!io.KeyCtrl && !io.KeyShift) {
             clear_selection();
+            if (on_select_clip) on_select_clip("");
         }
-        m_drag_mode = DragMode::BoxSelect;
-        m_box_select_start = mouse_pos;
-        m_box_select_cur = mouse_pos;
+        if (in_timeline_content) {
+            m_drag_mode = DragMode::BoxSelect;
+            m_box_select_start = mouse_pos;
+            m_box_select_cur = mouse_pos;
+            m_box_select_initial_selection = (io.KeyCtrl || io.KeyShift) ? m_selected_clip_ids : std::vector<std::string>{};
+        }
     }
 
 
@@ -1436,6 +1469,41 @@ void Timeline::render_ui(Project& project, double& playhead_time,
 
             draw_list->AddRectFilled(ImVec2(bx0, by0), ImVec2(bx1, by1), IM_COL32(61, 174, 233, 40));
             draw_list->AddRect(ImVec2(bx0, by0), ImVec2(bx1, by1), IM_COL32(61, 174, 233, 200), 0.0f, 0, 1.5f);
+
+            // Real-time selection update while holding and dragging
+            if (std::abs(bx1 - bx0) > 3.0f || std::abs(by1 - by0) > 3.0f) {
+                float start_trk_y = canvas_pos.y + ruler_h - m_scroll_track_y;
+                std::vector<std::string> intersected;
+                for (size_t t = 0; t < project.tracks.size(); ++t) {
+                    float ty0 = start_trk_y + (t * track_h);
+                    float ty1 = ty0 + track_h;
+                    if (ty1 < by0 || ty0 > by1) continue;
+
+                    for (const auto& c : project.tracks[t].clips) {
+                        float cx0 = time_to_screen_x(c.start_time);
+                        float cx1 = time_to_screen_x(c.end_time());
+                        if (cx1 >= bx0 && cx0 <= bx1) {
+                            if (std::find(intersected.begin(), intersected.end(), c.id) == intersected.end()) {
+                                intersected.push_back(c.id);
+                            }
+                        }
+                    }
+                }
+                std::vector<std::string> current_sel = m_box_select_initial_selection;
+                for (const auto& id : intersected) {
+                    if (std::find(current_sel.begin(), current_sel.end(), id) == current_sel.end()) {
+                        current_sel.push_back(id);
+                    }
+                }
+                m_selected_clip_ids = current_sel;
+                if (!m_selected_clip_ids.empty()) {
+                    m_drag_clip_id = m_selected_clip_ids.front();
+                    if (on_select_clip) on_select_clip(m_drag_clip_id);
+                } else {
+                    m_drag_clip_id.clear();
+                    if (on_select_clip) on_select_clip("");
+                }
+            }
         } else {
             Clip* target_clip = project.find_clip_mut(m_drag_clip_id);
             if (target_clip) {
@@ -1509,8 +1577,9 @@ void Timeline::render_ui(Project& project, double& playhead_time,
             float by0 = std::min(m_box_select_start.y, m_box_select_cur.y);
             float by1 = std::max(m_box_select_start.y, m_box_select_cur.y);
 
-            if (std::abs(bx1 - bx0) > 4.0f || std::abs(by1 - by0) > 4.0f) {
+            if (std::abs(bx1 - bx0) > 3.0f || std::abs(by1 - by0) > 3.0f) {
                 float start_trk_y = canvas_pos.y + ruler_h - m_scroll_track_y;
+                std::vector<std::string> intersected;
                 for (size_t t = 0; t < project.tracks.size(); ++t) {
                     float ty0 = start_trk_y + (t * track_h);
                     float ty1 = ty0 + track_h;
@@ -1520,17 +1589,28 @@ void Timeline::render_ui(Project& project, double& playhead_time,
                         float cx0 = time_to_screen_x(c.start_time);
                         float cx1 = time_to_screen_x(c.end_time());
                         if (cx1 >= bx0 && cx0 <= bx1) {
-                            if (std::find(m_selected_clip_ids.begin(), m_selected_clip_ids.end(), c.id) == m_selected_clip_ids.end()) {
-                                m_selected_clip_ids.push_back(c.id);
+                            if (std::find(intersected.begin(), intersected.end(), c.id) == intersected.end()) {
+                                intersected.push_back(c.id);
                             }
                         }
                     }
                 }
+                std::vector<std::string> final_sel = m_box_select_initial_selection;
+                for (const auto& id : intersected) {
+                    if (std::find(final_sel.begin(), final_sel.end(), id) == final_sel.end()) {
+                        final_sel.push_back(id);
+                    }
+                }
+                m_selected_clip_ids = final_sel;
                 if (!m_selected_clip_ids.empty()) {
                     m_drag_clip_id = m_selected_clip_ids.front();
                     if (on_select_clip) on_select_clip(m_drag_clip_id);
+                } else {
+                    m_drag_clip_id.clear();
+                    if (on_select_clip) on_select_clip("");
                 }
             }
+            m_box_select_initial_selection.clear();
         }
         m_drag_mode = DragMode::None;
     }
@@ -1627,3 +1707,4 @@ void Timeline::render_rename_modal(Project& project, const std::function<void()>
         ImGui::EndPopup();
     }
 }
+

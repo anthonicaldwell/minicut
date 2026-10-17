@@ -207,7 +207,17 @@ def generate_lua_en_html():
     <tr>
         <td><code>~/.config/minicut/scripts/</code></td>
         <td>Menu Click / On Demand</td>
-        <td>Scripts appear in the top-level <strong>Scripts</strong> menu on the main menu bar. Clicking runs the script and opens its tool panel.</td>
+        <td>Scripts appear directly in the top-level <strong>Modifiers</strong> menu on the main menu bar. Clicking runs the script and opens its tool panel.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/gl/</code></td>
+        <td>Custom GL Shaders</td>
+        <td>User OpenGL vertex (<code>.vert</code>) and fragment (<code>.frag</code>) shaders loaded by name via <code>shader.create("name")</code>.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/vulkan/</code></td>
+        <td>Custom Vulkan Shaders</td>
+        <td>User Vulkan GLSL vertex and fragment shaders compiled for the Vulkan rendering backend.</td>
     </tr>
     <tr>
         <td><code>~/.config/minicut/icons/</code></td>
@@ -273,8 +283,8 @@ end</pre>
 <tbody>
     <tr><td><code>net.get(url)</code></td><td><code>table</code></td><td>HTTP GET request. Returns <code>{{status, body, ok, headers}}</code>.</td></tr>
     <tr><td><code>net.post(url, body)</code></td><td><code>table</code></td><td>HTTP POST request with string or JSON payload.</td></tr>
-    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>Downloads remote asset directly to local disk.</td></tr>
-    <tr><td><code>net.upload(url, path)</code></td><td><code>table</code></td><td>HTTP POST/upload local file binary stream.</td></tr>
+    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean, string</code></td><td>Downloads remote asset directly to local disk (supports HTTP, HTTPS, FTP, SFTP).</td></tr>
+    <tr><td><code>net.upload(url, path)</code></td><td><code>table, string</code></td><td>Uploads local file binary stream (supports HTTP multipart, FTP, and secure SFTP).</td></tr>
 </tbody>
 </table>
 
@@ -319,6 +329,8 @@ end</pre>
     <tr><td><code>clip.get_transform(clip_id)</code></td><td><code>table</code></td><td>Gets transform table <code>{{x, y, scale, rotation}}</code>.</td></tr>
     <tr><td><code>clip.set_transform(clip_id, x, y, s, r)</code></td><td><code>void</code></td><td>Sets translation X, Y, scale, and rotation simultaneously.</td></tr>
     <tr><td><code>clip.reset_transform(clip_id)</code></td><td><code>void</code></td><td>Resets transform to origin (x=0, y=0, scale=1.0, rotation=0).</td></tr>
+    <tr><td><code>clip.get_frame(clip_id, [t, w, h])</code></td><td><code>table</code></td><td>Extracts raw RGBA frame object. Pass <code>"active"</code> for selected clip. Supports fluent chaining (<code>:apply_shader():reinsert()</code>).</td></tr>
+    <tr><td><code>clip.set_frame(clip_id, frame, [t])</code></td><td><code>boolean</code></td><td>Reinserts modified RGBA pixel frame into clip media. Triggers full-clip rendering if shader attached.</td></tr>
 </tbody>
 </table>
 
@@ -374,8 +386,32 @@ end</pre>
 </tbody>
 </table>
 
+<h3>3.8. Custom GLSL Shader Pipeline (<code>shader</code>)</h3>
+<p>
+    Loads custom shaders from <code>~/.config/minicut/shaders/gl/</code> and <code>~/.config/minicut/shaders/vulkan/</code> by name (e.g. <code>"ripple"</code>, <code>"grayscale"</code>, <code>"invert"</code>, <code>"vignette"</code>), or compiles custom GLSL fragment source strings.
+    When applied to a clip, the shader processes the <strong>entire clip frame-by-frame</strong> in the background using FFmpeg without blocking UI responsiveness.
+</p>
+<table>
+<thead>
+    <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
+</thead>
+<tbody>
+    <tr><td><code>shader.create(name_or_src)</code></td><td><code>integer</code></td><td>Loads shader by name from shaders directory or compiles in-memory GLSL source.</td></tr>
+    <tr><td><code>shader.set_uniform(id, name, val)</code></td><td><code>void</code></td><td>Sets float, int, or table vector uniform (matches with or without <code>u_</code> prefix).</td></tr>
+    <tr><td><code>shader.get_uniform(id, name)</code></td><td><code>number / table</code></td><td>Returns current uniform parameter value.</td></tr>
+    <tr><td><code>shader.apply(id, target, [uniforms])</code></td><td><code>boolean / table</code></td><td>Renders shader across all video frames of clip (or transforms single frame buffer).</td></tr>
+</tbody>
+</table>
+
+<h4>Frame Buffer Fluent Piping</h4>
+<pre>-- Fluent method chaining across entire clip
+clip.get_frame("active"):apply_shader("ripple", {{ amplitude = 12.0, frequency = 0.08 }}):reinsert()
+
+-- Or synthesize a brand-new clip on track 0
+clip.get_frame("active"):apply_shader("ripple"):create_clip(0, 0.0, 5.0, "Ripple Wave")</pre>
+
 <div class="footer">
-    minicut v1.2.0 • Lightweight Linux Multi-track Video Editor • Generated Documentation
+    minicut v1.5.0 • Lightweight Linux Multi-track Video Editor • Generated Documentation
 </div>
 </body>
 </html>"""
@@ -421,7 +457,17 @@ def generate_lua_ja_html():
     <tr>
         <td><code>~/.config/minicut/scripts/</code></td>
         <td>メニュークリック時</td>
-        <td>メニューバーの「スクリプト」メニューに表示され、クリック時に実行されます。</td>
+        <td>メニューバーの「モディファイア (Modifiers)」メニューに表示され、クリック時に実行されます。</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/gl/</code></td>
+        <td>カスタムGLシェーダー</td>
+        <td>名前で読み込まれるOpenGL頂点 (<code>.vert</code>) およびフラグメント (<code>.frag</code>) シェーダー。</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/vulkan/</code></td>
+        <td>カスタムVulkanシェーダー</td>
+        <td>Vulkanバックエンド用GLSLシェーダー。</td>
     </tr>
     <tr>
         <td><code>~/.config/minicut/icons/</code></td>
@@ -553,7 +599,7 @@ end</pre>
 </table>
 
 <div class="footer">
-    minicut v1.2.0 • 軽量マルチトラック動画編集エディタ • ドキュメント自動生成
+    minicut v1.5.0 • 軽量マルチトラック動画編集エディタ • ドキュメント自動生成
 </div>
 </body>
 </html>"""
@@ -599,7 +645,17 @@ def generate_lua_ko_html():
     <tr>
         <td><code>~/.config/minicut/scripts/</code></td>
         <td>메뉴 클릭 시</td>
-        <td>메뉴 표시줄의 <strong>스크립트</strong> 메뉴에 표시되며 클릭 시 실행됩니다.</td>
+        <td>메뉴 표시줄의 <strong>수정자 (Modifiers)</strong> 메뉴에 표시되며 클릭 시 실행됩니다.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/gl/</code></td>
+        <td>커스텀 GL 셰이더</td>
+        <td>이름으로 로드되는 OpenGL 버텍스(<code>.vert</code>) 및 프래그먼트(<code>.frag</code>) 셰이더.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/vulkan/</code></td>
+        <td>커스텀 Vulkan 셰이더</td>
+        <td>Vulkan 렌더링 백엔드용 GLSL 셰이더.</td>
     </tr>
     <tr>
         <td><code>~/.config/minicut/icons/</code></td>
@@ -733,7 +789,7 @@ end</pre>
 </table>
 
 <div class="footer">
-    minicut v1.2.0 • 가벼운 리눅스 멀티트랙 비디오 편집기 • 자동 생성 문서
+    minicut v1.5.0 • 가벼운 리눅스 멀티트랙 비디오 편집기 • 자동 생성 문서
 </div>
 </body>
 </html>"""
@@ -779,7 +835,17 @@ def generate_lua_uk_html():
     <tr>
         <td><code>~/.config/minicut/scripts/</code></td>
         <td>Вибір у меню</td>
-        <td>Скрипти з'являються в меню <strong>Скрипти</strong> головного меню і запускаються за запитом користувача.</td>
+        <td>Скрипти з'являються безпосередньо в меню <strong>Модифікатори (Modifiers)</strong> головного меню і запускаються за запитом користувача.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/gl/</code></td>
+        <td>Користувацькі GL шейдери</td>
+        <td>Вершинні (<code>.vert</code>) та фрагментні (<code>.frag</code>) шейдери OpenGL, що завантажуються за іменем.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/vulkan/</code></td>
+        <td>Користувацькі Vulkan шейдери</td>
+        <td>GLSL шейдери для бекенду Vulkan.</td>
     </tr>
     <tr>
         <td><code>~/.config/minicut/icons/</code></td>
@@ -913,7 +979,7 @@ end</pre>
 </table>
 
 <div class="footer">
-    minicut v1.2.0 • Легкий мультитрековий відеоредактор для Linux • Автоматична документація
+    minicut v1.5.0 • Легкий мультитрековий відеоредактор для Linux • Автоматична документація
 </div>
 </body>
 </html>"""
@@ -959,7 +1025,17 @@ def generate_lua_ar_html():
     <tr>
         <td><code>~/.config/minicut/scripts/</code></td>
         <td>النقر في شريط القوائم</td>
-        <td>تظهر السكربتات في قائمة <strong>البرمجيات (Scripts)</strong> ويتم تشغيلها عند اختيارها من قبل المستخدم.</td>
+        <td>تظهر السكربتات مباشرة في قائمة <strong>المعدِّلات (Modifiers)</strong> ويتم تشغيلها عند اختيارها من قبل المستخدم.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/gl/</code></td>
+        <td>مظللات GL المخصصة</td>
+        <td>مظللات الرؤوس (<code>.vert</code>) والبكسلات (<code>.frag</code>) لـ OpenGL المحملة بالاسم.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/vulkan/</code></td>
+        <td>مظللات Vulkan المخصصة</td>
+        <td>مظللات GLSL لمحرك التصيير Vulkan.</td>
     </tr>
     <tr>
         <td><code>~/.config/minicut/icons/</code></td>
@@ -1093,7 +1169,7 @@ end</pre>
 </table>
 
 <div class="footer">
-    minicut v1.2.0 • محرر فيديو خفيف ومتعدد المسارات لنظام لينكس • تم إنشاء الدليل تلقائياً
+    minicut v1.5.0 • محرر فيديو خفيف ومتعدد المسارات لنظام لينكس • تم إنشاء الدليل تلقائياً
 </div>
 </body>
 </html>"""
@@ -1139,7 +1215,17 @@ def generate_js_en_html():
     <tr>
         <td><code>~/.config/minicut/scripts/</code></td>
         <td>Menu Click / On Demand</td>
-        <td><code>.js</code> files appear in the top-level <strong>Scripts</strong> menu on the main menu bar.</td>
+        <td><code>.js</code> files appear directly in the top-level <strong>Modifiers</strong> menu on the main menu bar.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/gl/</code></td>
+        <td>Custom GL Shaders</td>
+        <td>User OpenGL vertex (<code>.vert</code>) and fragment (<code>.frag</code>) shaders loaded by name via <code>shader.create("name")</code>.</td>
+    </tr>
+    <tr>
+        <td><code>~/.config/minicut/shaders/vulkan/</code></td>
+        <td>Custom Vulkan Shaders</td>
+        <td>User Vulkan GLSL vertex and fragment shaders compiled for the Vulkan rendering backend.</td>
     </tr>
     <tr>
         <td><code>~/.config/minicut/icons/</code></td>
@@ -1207,7 +1293,8 @@ plugin.init_panel = function() {{
 <tbody>
     <tr><td><code>net.get(url)</code></td><td><code>object</code></td><td>HTTP GET request returning <code>{{status, body, ok, headers}}</code>.</td></tr>
     <tr><td><code>net.post(url, body)</code></td><td><code>object</code></td><td>HTTP POST request.</td></tr>
-    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>Downloads remote asset directly to file.</td></tr>
+    <tr><td><code>net.download(url, dest)</code></td><td><code>boolean</code></td><td>Downloads remote asset directly to file (supports HTTP, HTTPS, FTP, SFTP).</td></tr>
+    <tr><td><code>net.upload(url, path)</code></td><td><code>object</code></td><td>Uploads local file binary stream (supports HTTP multipart, FTP, and secure SFTP).</td></tr>
 </tbody>
 </table>
 
@@ -1242,6 +1329,8 @@ plugin.init_panel = function() {{
     <tr><td><code>clip.get_transform(id)</code></td><td><code>object</code></td><td>Gets transform object <code>{{x, y, scale, rotation}}</code>.</td></tr>
     <tr><td><code>clip.set_transform(id, x, y, s, r)</code></td><td><code>void</code></td><td>Sets translation X, Y, scale, and rotation simultaneously.</td></tr>
     <tr><td><code>clip.reset_transform(id)</code></td><td><code>void</code></td><td>Resets clip transform to origin (x=0, y=0, scale=1.0, rotation=0).</td></tr>
+    <tr><td><code>clip.get_frame(id, [t, w, h])</code></td><td><code>object</code></td><td>Extracts raw RGBA frame object. Pass <code>"active"</code> for selected clip. Supports fluent chaining (<code>.apply_shader().reinsert()</code>).</td></tr>
+    <tr><td><code>clip.set_frame(id, frame, [t])</code></td><td><code>boolean</code></td><td>Reinserts modified RGBA pixel frame into clip media. Triggers full-clip rendering if shader attached.</td></tr>
 </tbody>
 </table>
 
@@ -1276,8 +1365,32 @@ plugin.init_panel = function() {{
 </tbody>
 </table>
 
+<h3>3.7. Custom GLSL Shader Pipeline (<code>shader</code>)</h3>
+<p>
+    Loads custom shaders from <code>~/.config/minicut/shaders/gl/</code> and <code>~/.config/minicut/shaders/vulkan/</code> by name (e.g. <code>"ripple"</code>, <code>"grayscale"</code>, <code>"invert"</code>, <code>"vignette"</code>), or compiles custom GLSL fragment source strings.
+    When applied to a clip, the shader processes the <strong>entire clip frame-by-frame</strong> in the background using FFmpeg without blocking UI responsiveness.
+</p>
+<table>
+<thead>
+    <tr><th style="width: 38%;">Function</th><th style="width: 22%;">Returns</th><th style="width: 40%;">Description</th></tr>
+</thead>
+<tbody>
+    <tr><td><code>shader.create(name_or_src)</code></td><td><code>number</code></td><td>Loads shader by name from shaders directory or compiles in-memory GLSL source.</td></tr>
+    <tr><td><code>shader.set_uniform(id, name, val)</code></td><td><code>void</code></td><td>Sets float, int, or object vector uniform (matches with or without <code>u_</code> prefix).</td></tr>
+    <tr><td><code>shader.get_uniform(id, name)</code></td><td><code>number / object</code></td><td>Returns current uniform parameter value.</td></tr>
+    <tr><td><code>shader.apply(id, target, [uniforms])</code></td><td><code>boolean / object</code></td><td>Renders shader across all video frames of clip (or transforms single frame buffer).</td></tr>
+</tbody>
+</table>
+
+<h4>Frame Buffer Fluent Piping</h4>
+<pre>// Fluent method chaining across entire clip
+clip.get_frame("active").apply_shader("ripple", {{ amplitude: 12.0, frequency: 0.08 }}).reinsert();
+
+// Or synthesize a brand-new clip on track 0
+clip.get_frame("active").apply_shader("ripple").create_clip(0, 0.0, 5.0, "Ripple Wave");</pre>
+
 <div class="footer">
-    minicut v1.2.0 • Lightweight Linux Multi-track Video Editor • Generated Documentation
+    minicut v1.5.0 • Lightweight Linux Multi-track Video Editor • Generated Documentation
 </div>
 </body>
 </html>"""
@@ -1314,7 +1427,9 @@ def generate_js_ja_html():
 <thead><tr><th style="width: 32%;">配置場所</th><th style="width: 28%;">役割</th><th style="width: 40%;">説明</th></tr></thead>
 <tbody>
     <tr><td><code>~/.config/minicut/autorun/</code></td><td>起動時自動実行</td><td><code>.js</code> ファイルは起動時に自動読み込みされ、「ドック」にアイコンが追加されます。</td></tr>
-    <tr><td><code>~/.config/minicut/scripts/</code></td><td>メニュー実行</td><td><code>.js</code> ファイルは「スクリプト」メニューに表示されます。</td></tr>
+    <tr><td><code>~/.config/minicut/scripts/</code></td><td>メニュー実行</td><td><code>.js</code> ファイルは「モディファイア (Modifiers)」メニューに表示されます。</td></tr>
+    <tr><td><code>~/.config/minicut/shaders/gl/</code></td><td>カスタムGLシェーダー</td><td>OpenGL頂点/フラグメントシェーダー。</td></tr>
+    <tr><td><code>~/.config/minicut/shaders/vulkan/</code></td><td>カスタムVulkanシェーダー</td><td>Vulkan用GLSLシェーダー。</td></tr>
     <tr><td><code>~/.config/minicut/icons/</code></td><td>ドックアイコン</td><td>スクリプト名と一致するPNGアイコン画像です。</td></tr>
 </tbody>
 </table>
@@ -1407,7 +1522,7 @@ plugin.init_panel = function() {{
 </table>
 
 <div class="footer">
-    minicut v1.2.0 • 軽量マルチトラック動画編集エディタ • ドキュメント自動生成
+    minicut v1.5.0 • 軽量マルチトラック動画編集エディタ • ドキュメント自動生成
 </div>
 </body>
 </html>"""
@@ -1444,7 +1559,9 @@ def generate_js_ko_html():
 <thead><tr><th style="width: 32%;">경로</th><th style="width: 28%;">실행 시점</th><th style="width: 40%;">설명</th></tr></thead>
 <tbody>
     <tr><td><code>~/.config/minicut/autorun/</code></td><td>시작 시 자동 실행</td><td><code>.js</code> 파일은 시작 시 로드되어 도크에 아이콘이 생성됩니다.</td></tr>
-    <tr><td><code>~/.config/minicut/scripts/</code></td><td>메뉴 클릭 시</td><td><code>.js</code> 파일은 상단 '스크립트' 메뉴에 등록됩니다.</td></tr>
+    <tr><td><code>~/.config/minicut/scripts/</code></td><td>메뉴 클릭 시</td><td><code>.js</code> 파일은 상단 '수정자 (Modifiers)' 메뉴에 등록됩니다.</td></tr>
+    <tr><td><code>~/.config/minicut/shaders/gl/</code></td><td>커스텀 GL 셰이더</td><td>OpenGL 버텍스/프래그먼트 셰이더.</td></tr>
+    <tr><td><code>~/.config/minicut/shaders/vulkan/</code></td><td>커스텀 Vulkan 셰이더</td><td>Vulkan용 GLSL 셰이더.</td></tr>
     <tr><td><code>~/.config/minicut/icons/</code></td><td>아이콘 이미지</td><td>스크립트명과 일치하는 PNG 아이콘 파일입니다.</td></tr>
 </tbody>
 </table>
@@ -1537,7 +1654,7 @@ plugin.init_panel = function() {{
 </table>
 
 <div class="footer">
-    minicut v1.2.0 • 가벼운 리눅스 멀티트랙 비디오 편집기 • 자동 생성 문서
+    minicut v1.5.0 • 가벼운 리눅스 멀티트랙 비디오 편집기 • 자동 생성 문서
 </div>
 </body>
 </html>"""
@@ -1574,7 +1691,9 @@ def generate_js_uk_html():
 <thead><tr><th style="width: 32%;">Розташування</th><th style="width: 28%;">Роль</th><th style="width: 40%;">Опис</th></tr></thead>
 <tbody>
     <tr><td><code>~/.config/minicut/autorun/</code></td><td>Автозапуск при старті</td><td>Скрипти <code>.js</code> виконуються під час запуску та додають кнопку на панель Доку.</td></tr>
-    <tr><td><code>~/.config/minicut/scripts/</code></td><td>Запуск з меню</td><td>Скрипти <code>.js</code> відображаються в меню <strong>Скрипти</strong>.</td></tr>
+    <tr><td><code>~/.config/minicut/scripts/</code></td><td>Запуск з меню</td><td>Скрипти <code>.js</code> відображаються в меню <strong>Модифікатори (Modifiers)</strong>.</td></tr>
+    <tr><td><code>~/.config/minicut/shaders/gl/</code></td><td>Користувацькі GL шейдери</td><td>Вершинні та фрагментні шейдери OpenGL.</td></tr>
+    <tr><td><code>~/.config/minicut/shaders/vulkan/</code></td><td>Користувацькі Vulkan шейдери</td><td>Шейдери GLSL для Vulkan.</td></tr>
     <tr><td><code>~/.config/minicut/icons/</code></td><td>Іконки Доку</td><td>PNG файли іконок, що відповідають іменам скриптів.</td></tr>
 </tbody>
 </table>
@@ -1667,7 +1786,7 @@ plugin.init_panel = function() {{
 </table>
 
 <div class="footer">
-    minicut v1.2.0 • Легкий мультитрековий відеоредактор для Linux • Автоматична документація
+    minicut v1.5.0 • Легкий мультитрековий відеоредактор для Linux • Автоматична документація
 </div>
 </body>
 </html>"""
@@ -1704,7 +1823,9 @@ def generate_js_ar_html():
 <thead><tr><th style="width: 32%;">المسار</th><th style="width: 28%;">الدور</th><th style="width: 40%;">الوصف</th></tr></thead>
 <tbody>
     <tr><td><code>~/.config/minicut/autorun/</code></td><td>التشغيل التلقائي</td><td>يتم تشغيل ملفات <code>.js</code> عند بدء التطبيق وتظهر أيقوناتها في منصة الأدوات (Dock).</td></tr>
-    <tr><td><code>~/.config/minicut/scripts/</code></td><td>التشغيل عند الطلب</td><td>تظهر ملفات <code>.js</code> في قائمة <strong>البرمجيات (Scripts)</strong>.</td></tr>
+    <tr><td><code>~/.config/minicut/scripts/</code></td><td>التشغيل عند الطلب</td><td>تظهر ملفات <code>.js</code> مباشرة في قائمة <strong>المعدِّلات (Modifiers)</strong>.</td></tr>
+    <tr><td><code>~/.config/minicut/shaders/gl/</code></td><td>مظللات GL المخصصة</td><td>مظللات الرؤوس والبكسلات لـ OpenGL.</td></tr>
+    <tr><td><code>~/.config/minicut/shaders/vulkan/</code></td><td>مظللات Vulkan المخصصة</td><td>مظللات GLSL لمحرك Vulkan.</td></tr>
     <tr><td><code>~/.config/minicut/icons/</code></td><td>أيقونات الأدوات</td><td>ملفات أيقونات PNG مطابقة لاسم السكربت.</td></tr>
 </tbody>
 </table>
@@ -1797,7 +1918,7 @@ plugin.init_panel = function() {{
 </table>
 
 <div class="footer">
-    minicut v1.2.0 • محرر فيديو خفيف ومتعدد المسارات لنظام لينكس • تم إنشاء الدليل تلقائياً
+    minicut v1.5.0 • محرر فيديو خفيف ومتعدد المسارات لنظام لينكس • تم إنشاء الدليل تلقائياً
 </div>
 </body>
 </html>"""

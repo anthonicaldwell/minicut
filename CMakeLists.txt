@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(minicut VERSION 1.4.1 LANGUAGES CXX C)
+project(minicut VERSION 1.5.0 LANGUAGES CXX C)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -99,6 +99,13 @@ message(STATUS "Found libcurl: ${CURL_LIB}")
 # Duktape setup
 set(DUKTAPE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/duktape")
 
+# Vulkan setup
+set(VULKAN_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vulkan-headers/include")
+find_library(VULKAN_LIB NAMES vulkan libvulkan.so.1 libvulkan PATHS "${CMAKE_CURRENT_SOURCE_DIR}/third_party/vulkan-headers/lib" /usr/lib/x86_64-linux-gnu /usr/lib)
+if(VULKAN_LIB)
+    message(STATUS "Found Vulkan library: ${VULKAN_LIB}")
+endif()
+
 # Dear ImGui sources
 set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui.cpp
@@ -107,6 +114,7 @@ set(IMGUI_SOURCES
     ${IMGUI_DIR}/imgui_widgets.cpp
     ${IMGUI_DIR}/backends/imgui_impl_sdl2.cpp
     ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
+    ${IMGUI_DIR}/backends/imgui_impl_vulkan.cpp
 )
 
 # minicut sources
@@ -139,6 +147,7 @@ set(MINICUT_SOURCES
     src/render/RenderSystem.cpp
     src/SwapManager.cpp
     src/JapaneseTransliteration.cpp
+    src/ShaderManager.cpp
     ${DUKTAPE_DIR}/duktape.c
     ${IMGUI_SOURCES}
 )
@@ -159,6 +168,7 @@ target_include_directories(minicut PRIVATE
     ${CURL_INCLUDE_DIR}
     ${FREETYPE_INCLUDE_DIRS}
     ${LIBPNG_INCLUDE_DIRS}
+    ${VULKAN_INCLUDE_DIR}
 )
 
 if(NLOHMANN_JSON_INCLUDE_DIR)
@@ -184,6 +194,7 @@ target_link_libraries(minicut PRIVATE
     ${AVUTIL_LIB}
     ${LUAJIT_LIB}
     ${CURL_LIB}
+    ${VULKAN_LIB}
     dl
     pthread
     m
@@ -221,6 +232,7 @@ add_executable(test_minicut
     src/render/RenderSystem.cpp
     src/SwapManager.cpp
     src/JapaneseTransliteration.cpp
+    src/ShaderManager.cpp
     ${DUKTAPE_DIR}/duktape.c
     ${IMGUI_SOURCES}
 )
@@ -239,6 +251,7 @@ target_include_directories(test_minicut PRIVATE
     ${CURL_INCLUDE_DIR}
     ${FREETYPE_INCLUDE_DIRS}
     ${LIBPNG_INCLUDE_DIRS}
+    ${VULKAN_INCLUDE_DIR}
 )
 
 if(NLOHMANN_JSON_INCLUDE_DIR)
@@ -264,6 +277,7 @@ target_link_libraries(test_minicut PRIVATE
     ${AVUTIL_LIB}
     ${LUAJIT_LIB}
     ${CURL_LIB}
+    ${VULKAN_LIB}
     dl
     pthread
     m

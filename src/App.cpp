@@ -13,6 +13,7 @@
 #include <iomanip>
 #include <filesystem>
 #include <algorithm>
+#include <csignal>
 
 namespace fs = std::filesystem;
 
@@ -43,6 +44,7 @@ App::~App() {
 }
 
 bool App::init(int argc, char* argv[]) {
+    std::signal(SIGPIPE, SIG_IGN);
     SwapManager::instance().init();
     SDL_SetHint(SDL_HINT_APP_NAME, "minicut");
 
@@ -216,6 +218,9 @@ bool App::init(int argc, char* argv[]) {
 
     // Generate Preview Toolbar Icons
     generate_preview_toolbar_icons();
+
+    // Initialize ShaderManager (ensures ~/.config/minicut/shaders/gl and vulkan exist with starter shaders)
+    ShaderManager::instance().init();
 
     // Init Audio Engine
     m_audio_engine.init();
@@ -422,18 +427,21 @@ void App::apply_kde_plasma_theme() {
 void App::set_playhead_time(double t) {
     m_playhead_time = std::max(0.0, t);
     m_audio_engine.set_playhead_time(m_playhead_time);
+    m_last_requested_playhead = m_playhead_time;
     m_media_decoder.request_frame(m_playhead_time, m_project);
 }
 
 void App::on_project_modified() {
     update_window_title();
     m_audio_engine.update_project_snapshot(m_project);
+    m_last_requested_playhead = m_playhead_time;
     m_media_decoder.request_frame(m_playhead_time, m_project);
 }
 
 void App::set_selected_clip_id(const std::string& id) {
     m_selected_clip_id = id;
     m_keyframe_editor.set_selected_clip(id);
+    m_timeline.select_clip(id, false, false);
 }
 
 Clip* App::find_selected_clip() {
@@ -460,6 +468,51 @@ void App::set_status_notification(const std::string& msg, double duration) {
     m_status_notification_timer = duration;
 }
 
+void App::set_status_message(const std::string& msg, double duration) {
+    set_status_notification(msg, duration);
+}
+
+void App::apply_custom_shader(const CustomShader& shader) {
+    Clip* clip = find_selected_clip();
+    if (!clip) {
+        // If no clip is explicitly selected, find first visual clip on timeline
+        for (auto& track : m_project.tracks) {
+            if (track.type == "video" && !track.clips.empty()) {
+                clip = &track.clips.front();
+                break;
+            }
+        }
+    }
+
+    if (!clip) {
+        set_status_notification("No clip selected to apply shader '" + shader.name + "'", 3.0);
+        return;
+    }
+
+    std::unordered_map<std::string, float> uniforms;
+    uniforms["time"] = static_cast<float>(m_playhead_time);
+    uniforms["u_time"] = static_cast<float>(m_playhead_time);
+    uniforms["frequency"] = 30.0f;
+    uniforms["u_frequency"] = 30.0f;
+    uniforms["amplitude"] = 0.02f;
+    uniforms["u_amplitude"] = 0.02f;
+
+    std::string out_clip_id;
+    std::string shader_src = shader.frag_src.empty() ? shader.name : shader.frag_src;
+    if (m_script_engine.render_shader_across_clip(clip, shader_src, uniforms, false, 0, 0.0, out_clip_id)) {
+        set_status_notification("Applied " + shader.type + " shader '" + shader.name + "' to clip", 3.0);
+        m_last_requested_playhead = m_playhead_time;
+        m_media_decoder.request_frame(m_playhead_time, m_project);
+    } else {
+        set_status_notification("Failed to apply shader '" + shader.name + "'", 3.0);
+    }
+}
+
+void ShaderManager::render_shaders_menu(App& app) {
+    render_shaders_menu([&app](const CustomShader& cs) { app.apply_custom_shader(cs); },
+                        [&app](const std::string& msg) { app.set_status_message(msg); });
+}
+
 void App::push_undo_state() {
     m_undo_stack.push_back(m_project);
     m_redo_stack.clear();
@@ -475,6 +528,7 @@ void App::undo() {
         m_undo_stack.pop_back();
         update_window_title();
         m_audio_engine.update_project_snapshot(m_project);
+        m_last_requested_playhead = m_playhead_time;
         m_media_decoder.request_frame(m_playhead_time, m_project);
     }
 }
@@ -486,6 +540,7 @@ void App::redo() {
         m_redo_stack.pop_back();
         update_window_title();
         m_audio_engine.update_project_snapshot(m_project);
+        m_last_requested_playhead = m_playhead_time;
         m_media_decoder.request_frame(m_playhead_time, m_project);
     }
 }
@@ -496,6 +551,8 @@ void App::new_project() {
     m_project.name = "";
     m_playhead_time = 0.0;
     m_selected_clip_id.clear();
+    m_timeline.clear_selection();
+    m_clip_manager.clear_selection();
 
     Track v1; v1.type = "video"; v1.name = "Video 1"; v1.id = "track_v1";
     Track v2; v2.type = "video"; v2.name = "Video 2"; v2.id = "track_v2";
@@ -508,6 +565,7 @@ void App::new_project() {
 
     update_window_title();
     m_audio_engine.update_project_snapshot(m_project);
+    m_last_requested_playhead = m_playhead_time;
     m_media_decoder.request_frame(m_playhead_time, m_project);
 }
 
@@ -522,16 +580,157 @@ void App::toggle_playback() {
 }
 
 void App::open_project(const std::string& path) {
-    Project p;
-    if (ProjectSerializer::load_from_file(p, path)) {
-        push_undo_state();
-        m_project = p;
-        m_playhead_time = 0.0;
-        m_selected_clip_id.clear();
-        update_window_title();
-        m_audio_engine.update_project_snapshot(m_project);
-        m_audio_engine.ensure_project_assets_loaded(m_project);
-        m_media_decoder.request_frame(m_playhead_time, m_project);
+    if (m_project_load_state.active.load()) {
+        return;
+    }
+
+    if (m_project_load_state.worker_thread) {
+        if (m_project_load_state.worker_thread->joinable()) {
+            m_project_load_state.worker_thread->join();
+        }
+        delete m_project_load_state.worker_thread;
+        m_project_load_state.worker_thread = nullptr;
+    }
+
+    m_project_load_state.project_filename = fs::path(path).filename().string();
+    m_project_load_state.success = false;
+    m_project_load_state.worker_done.store(false);
+    m_project_load_state.active.store(true);
+    m_project_load_state.set(0.05f, "Parsing project file...", m_project_load_state.project_filename);
+
+    m_project_load_state.worker_thread = new std::thread([this, path]() {
+        Project p;
+        if (!ProjectSerializer::load_from_file(p, path)) {
+            m_project_load_state.set(1.0f, "Failed to load project file", m_project_load_state.project_filename);
+            m_project_load_state.success = false;
+            m_project_load_state.worker_done.store(true);
+            return;
+        }
+
+        m_project_load_state.set(0.15f, "Loading clips and media assets...", "");
+
+        int total_items = static_cast<int>(p.video_assets.size() + p.audio_assets.size());
+        if (total_items == 0) total_items = 1;
+        int current_idx = 0;
+
+        // Process and re-extract audio for video assets
+        for (auto& va : p.video_assets) {
+            current_idx++;
+            float prog = 0.15f + 0.70f * (static_cast<float>(current_idx) / static_cast<float>(total_items));
+            std::string item_name = fs::path(va.path).filename().string();
+            if (item_name.empty()) item_name = va.id;
+
+            m_project_load_state.set(prog, "Loading clips...", item_name);
+
+            if (!va.is_image && !va.path.empty() && fs::exists(va.path)) {
+                if (!va.has_audio || va.width <= 0) {
+                    VideoAsset probed;
+                    if (MediaDecoder::probe_video_file(va.path, probed)) {
+                        va.has_audio = probed.has_audio;
+                        if (va.width <= 0) va.width = probed.width;
+                        if (va.height <= 0) va.height = probed.height;
+                        if (va.fps <= 0.0) va.fps = probed.fps;
+                        if (va.duration <= 0.0) va.duration = probed.duration;
+                    }
+                }
+                if (va.has_audio) {
+                    m_project_load_state.set(prog, "Re-extracting audio stream...", item_name);
+                    m_audio_engine.preload_asset_audio(va.path);
+                }
+            }
+        }
+
+        // Process audio assets
+        for (const auto& aa : p.audio_assets) {
+            current_idx++;
+            float prog = 0.15f + 0.70f * (static_cast<float>(current_idx) / static_cast<float>(total_items));
+            std::string item_name = fs::path(aa.path).filename().string();
+            if (item_name.empty()) item_name = aa.id;
+
+            m_project_load_state.set(prog, "Re-extracting audio stream...", item_name);
+            if (!aa.path.empty() && fs::exists(aa.path)) {
+                m_audio_engine.preload_asset_audio(aa.path);
+            }
+        }
+
+        m_project_load_state.set(0.95f, "Finalizing project timeline...", "");
+        m_project_load_state.loaded_project = std::move(p);
+        m_project_load_state.success = true;
+        m_project_load_state.set(1.0f, "Project loaded successfully", "");
+        m_project_load_state.worker_done.store(true);
+    });
+}
+
+void App::poll_project_loading() {
+    if (m_project_load_state.active.load() && m_project_load_state.worker_done.load()) {
+        if (m_project_load_state.worker_thread) {
+            if (m_project_load_state.worker_thread->joinable()) {
+                m_project_load_state.worker_thread->join();
+            }
+            delete m_project_load_state.worker_thread;
+            m_project_load_state.worker_thread = nullptr;
+        }
+
+        if (m_project_load_state.success) {
+            push_undo_state();
+            m_project = std::move(m_project_load_state.loaded_project);
+            m_playhead_time = 0.0;
+            m_selected_clip_id.clear();
+            m_timeline.clear_selection();
+            m_clip_manager.clear_selection();
+            update_window_title();
+
+            // Create OpenGL thumbnail textures on the main thread
+            for (auto& va : m_project.video_assets) {
+                if (va.thumbnail_texture == 0 && !va.path.empty() && fs::exists(va.path)) {
+                    va.thumbnail_texture = MediaDecoder::create_thumbnail_texture(va.path, va.is_image ? 0.0 : std::min(1.0, va.duration * 0.2));
+                }
+            }
+
+            m_audio_engine.update_project_snapshot(m_project);
+            m_audio_engine.ensure_project_assets_loaded(m_project);
+            m_last_requested_playhead = m_playhead_time;
+            m_media_decoder.request_frame(m_playhead_time, m_project);
+            set_status_notification("Project loaded: " + m_project.name, 3.5);
+        } else {
+            set_status_notification("Failed to load project: " + m_project_load_state.project_filename, 4.0);
+        }
+
+        m_project_load_state.active.store(false);
+        m_project_load_state.worker_done.store(false);
+    }
+}
+
+void App::render_project_load_modal() {
+    if (!m_project_load_state.active.load()) return;
+
+    ImGui::OpenPopup("Loading Project###ProjectLoadProgressModal");
+    ImGui::SetNextWindowSize(ImVec2(460, 150), ImGuiCond_Always);
+    float total_w = static_cast<float>(m_window_width);
+    float total_h = static_cast<float>(m_window_height);
+    ImGui::SetNextWindowPos(ImVec2(total_w * 0.5f, total_h * 0.5f), ImGuiCond_Always, ImVec2(0.5f, 0.5f));
+
+    if (ImGui::BeginPopupModal("Loading Project###ProjectLoadProgressModal", nullptr,
+                               ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Spacing();
+        ImGui::Text("Project: %s", m_project_load_state.project_filename.c_str());
+        ImGui::Spacing();
+
+        float p = m_project_load_state.progress.load();
+        std::string pct = std::to_string(static_cast<int>(p * 100.0f)) + "%";
+        ImGui::ProgressBar(p, ImVec2(-1, 24), pct.c_str());
+        ImGui::Spacing();
+
+        std::string stage, item;
+        m_project_load_state.get(stage, item);
+        ImGui::TextColored(ImVec4(0.24f, 0.68f, 0.91f, 1.0f), "%s", stage.c_str());
+        if (!item.empty()) {
+            ImGui::TextDisabled("Item: %s", item.c_str());
+        } else {
+            ImGui::Spacing();
+        }
+
+        ImGui::EndPopup();
     }
 }
 
@@ -578,8 +777,7 @@ void App::add_asset_to_timeline(const std::string& asset_id, bool is_video, doub
         vc.duration = dur;
         vc.offset = 0.0;
         v_track->clips.push_back(vc);
-        m_selected_clip_id = vc.id;
-        m_keyframe_editor.set_selected_clip(vc.id);
+        set_selected_clip_id(vc.id);
 
         // 2. If video contains audio and is not a static image, put separated audio on audio track!
         if (va->has_audio && !va->is_image) {
@@ -635,12 +833,12 @@ void App::add_asset_to_timeline(const std::string& asset_id, bool is_video, doub
         ac.duration = dur;
         ac.offset = 0.0;
         a_track->clips.push_back(ac);
-        m_selected_clip_id = ac.id;
-        m_keyframe_editor.set_selected_clip(ac.id);
+        set_selected_clip_id(ac.id);
     }
 
     m_audio_engine.update_project_snapshot(m_project);
     m_audio_engine.ensure_project_assets_loaded(m_project);
+    m_last_requested_playhead = m_playhead_time;
     m_media_decoder.request_frame(m_playhead_time, m_project);
 }
 
@@ -819,6 +1017,21 @@ void App::import_prefab_browser() {
     );
 }
 
+void App::generate_demo_media() {
+    std::string test_v = "tests/assets/demo_colorbars.mp4";
+    std::string test_a = "tests/assets/demo_tone.mp3";
+    if (!fs::exists("tests/assets")) {
+        test_v = "demo_colorbars.mp4";
+        test_a = "demo_tone.mp3";
+    }
+    if (MediaDecoder::generate_test_media(test_v, test_a)) {
+        push_undo_state();
+        m_clip_manager.import_video(m_project, test_v);
+        m_clip_manager.import_audio(m_project, test_a);
+        m_audio_engine.update_project_snapshot(m_project);
+    }
+}
+
 void App::export_path_browser() {
     std::string default_file = "minicut_export.mp4";
     if (!m_export_manager.get_output_path().empty()) {
@@ -971,6 +1184,18 @@ void App::update(double delta_time) {
     NativeFileDialog::poll_callbacks();
     m_script_engine.update(delta_time);
 
+    // Prefab Hot-Reload check on disk
+    if (m_settings_logic.get_prefab_hot_reload() && !m_project.prefabs.empty()) {
+        m_prefab_poll_timer += static_cast<float>(delta_time);
+        if (m_prefab_poll_timer >= m_settings_logic.get_prefab_reload_interval()) {
+            m_prefab_poll_timer = 0.0f;
+            m_clip_manager.check_and_reload_modified_prefabs(m_project, [this]() {
+                on_project_modified();
+                m_media_decoder.request_frame(m_playhead_time, m_project);
+            });
+        }
+    }
+
     ImGuiIO& io = ImGui::GetIO();
 
     // Synchronize SDL text input state with Dear ImGui's text input focus.
@@ -992,6 +1217,13 @@ void App::update(double delta_time) {
     // Only ignored if user is actively typing in a text field
     // ------------------------------------------------------------------------
     if (!io.WantTextInput) {
+        // Escape: Clear all timeline and asset selections
+        if (ImGui::IsKeyPressed(ImGuiKey_Escape, false) && !is_any_dialog_open()) {
+            m_timeline.clear_selection();
+            set_selected_clip_id("");
+            m_clip_manager.clear_selection();
+        }
+
         // Spacebar: Play / Pause
         if (ImGui::IsKeyPressed(ImGuiKey_Space, false)) {
             toggle_playback();
@@ -1001,11 +1233,13 @@ void App::update(double delta_time) {
         if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow, true)) {
             m_playhead_time = std::max(0.0, m_playhead_time - 1.0 / 30.0);
             m_audio_engine.set_playhead_time(m_playhead_time);
+            m_last_requested_playhead = m_playhead_time;
             m_media_decoder.request_frame(m_playhead_time, m_project);
         }
         if (ImGui::IsKeyPressed(ImGuiKey_RightArrow, true)) {
             m_playhead_time = m_playhead_time + 1.0 / 30.0;
             m_audio_engine.set_playhead_time(m_playhead_time);
+            m_last_requested_playhead = m_playhead_time;
             m_media_decoder.request_frame(m_playhead_time, m_project);
         }
 
@@ -1013,11 +1247,13 @@ void App::update(double delta_time) {
         if (ImGui::IsKeyPressed(ImGuiKey_Home, false)) {
             m_playhead_time = 0.0;
             m_audio_engine.set_playhead_time(0.0);
+            m_last_requested_playhead = 0.0;
             m_media_decoder.request_frame(0.0, m_project);
         }
         if (ImGui::IsKeyPressed(ImGuiKey_End, false)) {
             m_playhead_time = m_project.get_total_duration();
             m_audio_engine.set_playhead_time(m_playhead_time);
+            m_last_requested_playhead = m_playhead_time;
             m_media_decoder.request_frame(m_playhead_time, m_project);
         }
 
@@ -1032,6 +1268,7 @@ void App::update(double delta_time) {
         if (ImGui::IsKeyPressed(ImGuiKey_S, false) && !io.KeyCtrl) {
             push_undo_state();
             m_timeline.split_selected_clip(m_project, m_playhead_time);
+            m_last_requested_playhead = m_playhead_time;
             m_media_decoder.request_frame(m_playhead_time, m_project);
         }
 
@@ -1040,8 +1277,8 @@ void App::update(double delta_time) {
             if (!m_timeline.get_selected_clip_ids().empty() || !m_selected_clip_id.empty()) {
                 push_undo_state();
                 m_timeline.delete_selected_clips(m_project);
-                m_selected_clip_id.clear();
-                m_keyframe_editor.set_selected_clip("");
+                set_selected_clip_id("");
+                m_last_requested_playhead = m_playhead_time;
                 m_media_decoder.request_frame(m_playhead_time, m_project);
             }
         }
@@ -1071,8 +1308,7 @@ void App::update(double delta_time) {
         if (io.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_X, false)) {
             push_undo_state();
             m_timeline.cut_selected_clips(m_project);
-            m_selected_clip_id.clear();
-            m_keyframe_editor.set_selected_clip("");
+            set_selected_clip_id("");
         }
 
         // Ctrl + V: Paste
@@ -1081,6 +1317,7 @@ void App::update(double delta_time) {
             double paste_t = m_timeline.get_mouse_hover_time();
             if (paste_t <= 0.0) paste_t = m_playhead_time;
             m_timeline.paste_clip(m_project, paste_t);
+            m_last_requested_playhead = m_playhead_time;
             m_media_decoder.request_frame(m_playhead_time, m_project);
         }
 
@@ -1132,14 +1369,27 @@ void App::update(double delta_time) {
                 m_audio_engine.set_playing(false);
             }
         }
-        m_media_decoder.request_frame(m_playhead_time, m_project);
+        if (std::abs(m_playhead_time - m_last_requested_playhead) > 1e-5) {
+            m_last_requested_playhead = m_playhead_time;
+            m_media_decoder.request_frame(m_playhead_time, m_project);
+        }
     }
 
     m_media_decoder.update_preview_texture(m_preview_texture, m_preview_tex_w, m_preview_tex_h, m_preview_tex_time);
+    poll_project_loading();
 }
 
 void App::render_menu_bar() {
+    float menu_font = SettingsLogic::instance().get_menu_font_size();
+    float font_scale = (menu_font > 0.0f) ? (menu_font / 15.0f) : 1.0f;
+
+    // More padding around menu area
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(10.0f, 7.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(14.0f, 8.0f));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(12.0f, 6.0f));
+
     if (ImGui::BeginMainMenuBar()) {
+        ImGui::SetWindowFontScale(font_scale);
         m_menu_bar_height = ImGui::GetWindowSize().y;
         if (ImGui::BeginMenu(_TR("menu_file"))) {
             if (ImGui::MenuItem(_TR("file_new"), "Ctrl+N")) { new_project(); }
@@ -1202,6 +1452,10 @@ void App::render_menu_bar() {
             if (ImGui::MenuItem(_TR("project_import_image"))) { import_image_browser(); }
             if (ImGui::MenuItem(_TR("project_import_prefab"))) { import_prefab_browser(); }
             ImGui::Separator();
+            if (ImGui::MenuItem(_TR("project_generate_demo"))) {
+                generate_demo_media();
+            }
+            ImGui::Separator();
             if (ImGui::MenuItem(_TR("text_add_asset"))) { open_text_dialog(); }
             if (ImGui::MenuItem("Add Text-to-Speech...")) { open_tts_dialog(); }
             ImGui::Separator();
@@ -1213,34 +1467,12 @@ void App::render_menu_bar() {
             ImGui::EndMenu();
         }
 
-        if (ImGui::BeginMenu(_TR("menu_project"))) {
+        if (ImGui::BeginMenu(_TR("menu_modifiers"))) {
             if (ImGui::BeginMenu("AI Tools")) {
                 if (ImGui::MenuItem("AI Script Generator...")) { open_ai_dialog(); }
                 ImGui::EndMenu();
             }
             ImGui::Separator();
-            if (ImGui::MenuItem(_TR("project_generate_demo"))) {
-                std::string test_v = "tests/assets/demo_colorbars.mp4";
-                std::string test_a = "tests/assets/demo_tone.mp3";
-                if (!fs::exists("tests/assets")) {
-                    test_v = "demo_colorbars.mp4";
-                    test_a = "demo_tone.mp3";
-                }
-                if (MediaDecoder::generate_test_media(test_v, test_a)) {
-                    push_undo_state();
-                    m_clip_manager.import_video(m_project, test_v);
-                    m_clip_manager.import_audio(m_project, test_a);
-                    m_audio_engine.update_project_snapshot(m_project);
-                }
-            }
-            ImGui::Separator();
-            if (ImGui::MenuItem(_TR("project_cleanup_temp"))) {
-                cleanup_temp_files();
-            }
-            ImGui::EndMenu();
-        }
-
-        if (ImGui::BeginMenu(_TR("menu_scripts"))) {
             m_script_engine.render_scripts_menu();
             ImGui::EndMenu();
         }
@@ -1297,69 +1529,97 @@ void App::render_menu_bar() {
         }
 
         // Right-aligned notifications & status indicators
-        if (!m_status_notification.empty()) {
-            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - ImGui::CalcTextSize(m_status_notification.c_str()).x - 260.0f);
-            ImGui::TextColored(ImVec4(0.2f, 0.85f, 0.45f, 1.0f), "%s", m_status_notification.c_str());
-        }
+        float win_w = ImGui::GetWindowWidth();
 
-        float avail = ImGui::GetContentRegionAvail().x;
-        if (avail > 260.0f) {
-            std::string status = "Project: " + m_project.name + " | Time: " + format_timecode(m_playhead_time);
-            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - ImGui::CalcTextSize(status.c_str()).x - 55.0f);
+        std::string settings_btn_text = _TR("menu_settings");
+        if (settings_btn_text.empty()) settings_btn_text = "Settings";
+
+        float text_w = ImGui::CalcTextSize(settings_btn_text.c_str()).x;
+        float settings_btn_h = std::max(24.0f, m_menu_bar_height * 0.72f);
+        float icon_sz = (m_settings_icon_texture != 0) ? std::min(15.0f, settings_btn_h - 6.0f) : 0.0f;
+        float icon_gap = (m_settings_icon_texture != 0) ? 9.0f : 0.0f;
+        float settings_btn_w = 12.0f + icon_sz + icon_gap + text_w + 12.0f;
+        float right_x = win_w - settings_btn_w - 12.0f;
+        float settings_y = std::max(0.0f, (m_menu_bar_height - settings_btn_h) * 0.5f);
+
+        // Reserved space for shader progress bar to the right of project name and time
+        float shader_bar_w = 130.0f;
+        float shader_bar_h = 16.0f;
+        float shader_bar_x = right_x - shader_bar_w - 12.0f;
+
+        std::string status = "Project: " + m_project.name + " | Time: " + format_timecode(m_playhead_time);
+        float status_w = ImGui::CalcTextSize(status.c_str()).x;
+        float status_x = shader_bar_x - status_w - 14.0f;
+
+        if (status_x > 320.0f) {
+            // Notifications to the left of Project Name & Time
+            if (!m_status_notification.empty()) {
+                float notif_w = ImGui::CalcTextSize(m_status_notification.c_str()).x;
+                float notif_x = status_x - notif_w - 18.0f;
+                if (notif_x > 320.0f) {
+                    ImGui::SetCursorPosX(notif_x);
+                    ImGui::TextColored(ImVec4(0.2f, 0.85f, 0.45f, 1.0f), "%s", m_status_notification.c_str());
+                }
+            }
+
+            // Project Name & Time
+            ImGui::SetCursorPosX(status_x);
             ImGui::TextDisabled("%s", status.c_str());
         }
 
-        // Far-right Gear icon button to open SettingsDialog
-        float gear_btn_w = 28.0f;
-        float gear_btn_h = 24.0f;
-        float right_x = ImGui::GetWindowWidth() - gear_btn_w - 8.0f;
-        if (right_x > ImGui::GetCursorPosX()) {
-            ImGui::SetCursorPosX(right_x);
+        // Automatic shader progress bar to the right of project name and time
+        // Remains hidden until used, permanently preserving its layout space
+        if (m_script_engine.is_rendering_shader() && shader_bar_x > 320.0f) {
+            float bar_y = std::max(0.0f, (m_menu_bar_height - shader_bar_h) * 0.5f);
+            ImGui::SetCursorPos(ImVec2(shader_bar_x, bar_y));
+            float p = m_script_engine.get_shader_progress();
+            char bar_text[32];
+            snprintf(bar_text, sizeof(bar_text), "Shader %d%%", static_cast<int>(p * 100.0f));
+            ImGui::PushStyleColor(ImGuiCol_PlotHistogram, ImVec4(0.24f, 0.68f, 0.91f, 1.0f));
+            ImGui::PushStyleColor(ImGuiCol_FrameBg, ImVec4(0.12f, 0.14f, 0.18f, 0.8f));
+            ImGui::ProgressBar(p, ImVec2(shader_bar_w, shader_bar_h), bar_text);
+            ImGui::PopStyleColor(2);
+            ImGui::SameLine();
         }
 
+        // Far-right Settings button with text and dark blue background
+        ImGui::SetCursorPos(ImVec2(right_x, settings_y));
         ImVec2 p_min = ImGui::GetCursorScreenPos();
-        ImVec2 p_max = ImVec2(p_min.x + gear_btn_w, p_min.y + gear_btn_h);
+        ImVec2 p_max = ImVec2(p_min.x + settings_btn_w, p_min.y + settings_btn_h);
 
-        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0, 0, 0, 0));
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.24f, 0.68f, 0.91f, 0.35f));
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.24f, 0.68f, 0.91f, 0.60f));
-        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(3, 2));
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.08f, 0.22f, 0.48f, 1.0f));         // Dark blue background
+        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.14f, 0.35f, 0.68f, 1.0f));  // Lighter blue on hover
+        ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.20f, 0.45f, 0.82f, 1.0f));   // Bright blue when clicked
+        ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.95f, 0.95f, 0.98f, 1.0f));           // Clear white text
+        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 4.0f);
+        ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(8.0f, 3.0f));
 
-        bool clicked = false;
+        bool clicked = ImGui::Button("##SettingsBtn", ImVec2(settings_btn_w, settings_btn_h));
+        ImDrawList* dl = ImGui::GetWindowDrawList();
+        float cur_x = p_min.x + 12.0f;
         if (m_settings_icon_texture != 0) {
-            clicked = ImGui::ImageButton("##GearSettingsBtn",
-                                         (ImTextureID)(intptr_t)m_settings_icon_texture,
-                                         ImVec2(18, 18),
-                                         ImVec2(0, 0), ImVec2(1, 1),
-                                         ImVec4(0, 0, 0, 0),
-                                         ImVec4(0.92f, 0.94f, 0.96f, 1.0f));
-        } else {
-            clicked = ImGui::Button("##GearSettingsFallback", ImVec2(gear_btn_w, gear_btn_h));
-            ImDrawList* dl = ImGui::GetWindowDrawList();
-            ImVec2 center = ImVec2((p_min.x + p_max.x) * 0.5f, (p_min.y + p_max.y) * 0.5f);
-            ImU32 icon_col = ImGui::IsItemHovered() ? IM_COL32(61, 174, 233, 255) : IM_COL32(230, 235, 240, 240);
-            dl->AddCircle(center, 6.0f, icon_col, 16, 2.0f);
-            dl->AddCircleFilled(center, 2.5f, icon_col);
-            for (int i = 0; i < 8; ++i) {
-                float a = i * (3.14159265f / 4.0f);
-                ImVec2 t1 = ImVec2(center.x + std::cos(a) * 6.0f, center.y + std::sin(a) * 6.0f);
-                ImVec2 t2 = ImVec2(center.x + std::cos(a) * 9.0f, center.y + std::sin(a) * 9.0f);
-                dl->AddLine(t1, t2, icon_col, 2.0f);
-            }
+            float icon_y = p_min.y + (settings_btn_h - icon_sz) * 0.5f;
+            dl->AddImage((ImTextureID)(intptr_t)m_settings_icon_texture,
+                         ImVec2(cur_x, icon_y),
+                         ImVec2(cur_x + icon_sz, icon_y + icon_sz));
+            cur_x += icon_sz + icon_gap;
         }
+        float text_y = p_min.y + (settings_btn_h - ImGui::GetFontSize()) * 0.5f;
+        dl->AddText(ImVec2(cur_x, text_y), IM_COL32(245, 245, 250, 255), settings_btn_text.c_str());
 
-        ImGui::PopStyleVar();
-        ImGui::PopStyleColor(3);
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor(4);
 
         if (clicked) {
             open_settings_dialog();
         }
         if (ImGui::IsItemHovered()) {
-            ImGui::SetTooltip("%s", _TR("menu_settings"));
+            ImGui::SetTooltip("%s", settings_btn_text.c_str());
         }
 
         ImGui::EndMainMenuBar();
     }
+    ImGui::PopStyleVar(3);
 }
 
 void App::render_shelf_dock() {
@@ -1413,6 +1673,10 @@ void App::render_clip_panel() {
         // On add tts
         [this]() {
             open_tts_dialog();
+        },
+        // On generate demo
+        [this]() {
+            generate_demo_media();
         }
     );
 
@@ -1552,12 +1816,20 @@ void App::render_preview_toolbar(bool is_detached) {
             clip->pos_x = 0.0;
             clip->pos_y = 0.0;
             clip->scale = 1.0;
+            clip->scale_x = 1.0;
+            clip->scale_y = 1.0;
             clip->rotation = 0.0;
             if (!m_project.get_clip_keyframes(clip->id, "pos_x").empty()) {
                 m_project.set_or_add_keyframe(clip->id, "pos_x", r_t, 0.0);
             }
             if (!m_project.get_clip_keyframes(clip->id, "pos_y").empty()) {
                 m_project.set_or_add_keyframe(clip->id, "pos_y", r_t, 0.0);
+            }
+            if (!m_project.get_clip_keyframes(clip->id, "scale_x").empty()) {
+                m_project.set_or_add_keyframe(clip->id, "scale_x", r_t, 1.0);
+            }
+            if (!m_project.get_clip_keyframes(clip->id, "scale_y").empty()) {
+                m_project.set_or_add_keyframe(clip->id, "scale_y", r_t, 1.0);
             }
             if (!m_project.get_clip_keyframes(clip->id, "scale").empty()) {
                 m_project.set_or_add_keyframe(clip->id, "scale", r_t, 1.0);
@@ -1566,11 +1838,10 @@ void App::render_preview_toolbar(bool is_detached) {
                 m_project.set_or_add_keyframe(clip->id, "rotation", r_t, 0.0);
             }
             on_project_modified();
-            m_media_decoder.request_frame(m_playhead_time, m_project);
         }
     }
     if (ImGui::IsItemHovered()) {
-        ImGui::SetTooltip("Reset Transform\nCenter and reset scale (1.0) & rotation (0°).");
+        ImGui::SetTooltip("Reset Transform\nCenter and reset scale X/Y (1.0) & rotation (0°).");
     }
 
     ImGui::SameLine();
@@ -1582,19 +1853,21 @@ void App::render_preview_toolbar(bool is_detached) {
     bool is_visual = sel_clip && is_selected_clip_visual();
     if (is_visual) {
         double rel_time = sel_clip->clip_relative_time(m_playhead_time);
-        double cur_pos_x = m_project.get_clip_param(*sel_clip, "pos_x", rel_time);
-        double cur_pos_y = m_project.get_clip_param(*sel_clip, "pos_y", rel_time);
-        double cur_scale = m_project.get_clip_param(*sel_clip, "scale", rel_time);
-        double cur_rot   = m_project.get_clip_param(*sel_clip, "rotation", rel_time);
+        double cur_pos_x   = m_project.get_clip_param(*sel_clip, "pos_x", rel_time);
+        double cur_pos_y   = m_project.get_clip_param(*sel_clip, "pos_y", rel_time);
+        double cur_scale_x = m_project.get_clip_param(*sel_clip, "scale_x", rel_time);
+        double cur_scale_y = m_project.get_clip_param(*sel_clip, "scale_y", rel_time);
+        double cur_rot     = m_project.get_clip_param(*sel_clip, "rotation", rel_time);
 
         float px = static_cast<float>(cur_pos_x);
         float py = static_cast<float>(cur_pos_y);
-        float sc = static_cast<float>(cur_scale);
+        float sx = static_cast<float>(cur_scale_x);
+        float sy = static_cast<float>(cur_scale_y);
         float rot = static_cast<float>(cur_rot);
 
         ImGui::Text("X:");
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(60.0f);
+        ImGui::SetNextItemWidth(55.0f);
         if (ImGui::DragFloat("##tx", &px, 1.0f, -4000.0f, 4000.0f, "%.0f")) {
             push_undo_state();
             sel_clip->pos_x = px;
@@ -1602,12 +1875,11 @@ void App::render_preview_toolbar(bool is_detached) {
                 m_project.set_or_add_keyframe(sel_clip->id, "pos_x", rel_time, px);
             }
             on_project_modified();
-            m_media_decoder.request_frame(m_playhead_time, m_project);
         }
         ImGui::SameLine();
         ImGui::Text("Y:");
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(60.0f);
+        ImGui::SetNextItemWidth(55.0f);
         if (ImGui::DragFloat("##ty", &py, 1.0f, -4000.0f, 4000.0f, "%.0f")) {
             push_undo_state();
             sel_clip->pos_y = py;
@@ -1615,25 +1887,39 @@ void App::render_preview_toolbar(bool is_detached) {
                 m_project.set_or_add_keyframe(sel_clip->id, "pos_y", rel_time, py);
             }
             on_project_modified();
-            m_media_decoder.request_frame(m_playhead_time, m_project);
         }
         ImGui::SameLine();
-        ImGui::Text("S:");
+        ImGui::Text("SX:");
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(55.0f);
-        if (ImGui::DragFloat("##ts", &sc, 0.01f, 0.05f, 10.0f, "%.2f")) {
+        ImGui::SetNextItemWidth(50.0f);
+        if (ImGui::DragFloat("##tsx", &sx, 0.01f, 0.05f, 10.0f, "%.2f")) {
             push_undo_state();
-            sel_clip->scale = std::max(0.01f, sc);
+            sel_clip->scale_x = std::max(0.01f, sx);
+            sel_clip->scale = sel_clip->scale_x;
+            if (!m_project.get_clip_keyframes(sel_clip->id, "scale_x").empty()) {
+                m_project.set_or_add_keyframe(sel_clip->id, "scale_x", rel_time, sel_clip->scale_x);
+            }
             if (!m_project.get_clip_keyframes(sel_clip->id, "scale").empty()) {
-                m_project.set_or_add_keyframe(sel_clip->id, "scale", rel_time, sel_clip->scale);
+                m_project.set_or_add_keyframe(sel_clip->id, "scale", rel_time, sel_clip->scale_x);
             }
             on_project_modified();
-            m_media_decoder.request_frame(m_playhead_time, m_project);
+        }
+        ImGui::SameLine();
+        ImGui::Text("SY:");
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(50.0f);
+        if (ImGui::DragFloat("##tsy", &sy, 0.01f, 0.05f, 10.0f, "%.2f")) {
+            push_undo_state();
+            sel_clip->scale_y = std::max(0.01f, sy);
+            if (!m_project.get_clip_keyframes(sel_clip->id, "scale_y").empty()) {
+                m_project.set_or_add_keyframe(sel_clip->id, "scale_y", rel_time, sel_clip->scale_y);
+            }
+            on_project_modified();
         }
         ImGui::SameLine();
         ImGui::Text("R:");
         ImGui::SameLine();
-        ImGui::SetNextItemWidth(55.0f);
+        ImGui::SetNextItemWidth(52.0f);
         if (ImGui::DragFloat("##tr", &rot, 0.5f, -360.0f, 360.0f, "%.1f°")) {
             push_undo_state();
             sel_clip->rotation = rot;
@@ -1641,7 +1927,6 @@ void App::render_preview_toolbar(bool is_detached) {
                 m_project.set_or_add_keyframe(sel_clip->id, "rotation", rel_time, rot);
             }
             on_project_modified();
-            m_media_decoder.request_frame(m_playhead_time, m_project);
         }
     } else {
         ImGui::TextDisabled("No visual clip selected");
@@ -1675,6 +1960,14 @@ void App::render_preview_viewport() {
     float video_area_h = avail.y - transport_h - 4.0f;
     if (video_area_h < 80.0f) video_area_h = 80.0f;
 
+    ImVec2 vp_screen_pos = ImGui::GetCursorScreenPos();
+    ImVec2 vp_screen_end = ImVec2(vp_screen_pos.x + avail.x, vp_screen_pos.y + video_area_h);
+
+    // Padding area settings
+    float pad = SettingsLogic::instance().get_preview_padding();
+    float usable_w = std::max(40.0f, avail.x - 2.0f * pad);
+    float usable_h = std::max(40.0f, video_area_h - 2.0f * pad);
+
     float aspect = 16.0f / 9.0f;
     switch (m_preview_aspect_idx) {
         case 0: aspect = static_cast<float>(m_project.get_largest_asset_aspect_ratio()); break;
@@ -1688,19 +1981,54 @@ void App::render_preview_viewport() {
     }
     if (aspect <= 0.05f) aspect = 16.0f / 9.0f;
 
-    float disp_w = avail.x;
+    float disp_w = usable_w;
     float disp_h = disp_w / aspect;
 
-    if (disp_h > video_area_h) {
-        disp_h = video_area_h;
+    if (disp_h > usable_h) {
+        disp_h = usable_h;
         disp_w = disp_h * aspect;
     }
 
-    float offset_x = (avail.x - disp_w) * 0.5f;
-    float offset_y = (video_area_h - disp_h) * 0.5f;
-    ImVec2 img_screen_pos = ImGui::GetCursorScreenPos();
-    img_screen_pos.x += offset_x;
-    img_screen_pos.y += offset_y;
+    float offset_x = pad + (usable_w - disp_w) * 0.5f;
+    float offset_y = pad + (usable_h - disp_h) * 0.5f;
+
+    // Draw preview window background padding area
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    int bg_mode = SettingsLogic::instance().get_preview_bg_mode();
+    ImU32 bg_color = IM_COL32(20, 22, 26, 255); // Default dark
+    if (bg_mode == 1) {
+        bg_color = IM_COL32(0, 0, 0, 255); // Solid black
+    } else if (bg_mode == 2) {
+        bg_color = IM_COL32(13, 19, 32, 255); // Deep navy
+    } else if (bg_mode == 3) {
+        bg_color = IM_COL32(64, 64, 64, 255); // Neutral Gray
+    } else if (bg_mode == 5) {
+        const float* c = SettingsLogic::instance().get_preview_bg_custom_color();
+        bg_color = ImGui::ColorConvertFloat4ToU32(ImVec4(c[0], c[1], c[2], c[3]));
+    }
+
+    if (bg_mode == 4) {
+        // Checkerboard / transparency pattern
+        dl->AddRectFilled(vp_screen_pos, vp_screen_end, IM_COL32(32, 32, 36, 255), 4.0f);
+        float check_sz = 16.0f;
+        ImU32 check_col1 = IM_COL32(48, 48, 54, 255);
+        for (float y = vp_screen_pos.y; y < vp_screen_end.y; y += check_sz) {
+            for (float x = vp_screen_pos.x; x < vp_screen_end.x; x += check_sz) {
+                int ix = static_cast<int>((x - vp_screen_pos.x) / check_sz);
+                int iy = static_cast<int>((y - vp_screen_pos.y) / check_sz);
+                if ((ix + iy) % 2 == 1) {
+                    ImVec2 p1(x, y);
+                    ImVec2 p2(std::min(x + check_sz, vp_screen_end.x), std::min(y + check_sz, vp_screen_end.y));
+                    dl->AddRectFilled(p1, p2, check_col1);
+                }
+            }
+        }
+    } else {
+        dl->AddRectFilled(vp_screen_pos, vp_screen_end, bg_color, 4.0f);
+    }
+    dl->AddRect(vp_screen_pos, vp_screen_end, IM_COL32(45, 50, 60, 200), 4.0f);
+
+    ImVec2 img_screen_pos = ImVec2(vp_screen_pos.x + offset_x, vp_screen_pos.y + offset_y);
 
     ImGui::SetCursorPos(ImVec2(ImGui::GetCursorPosX() + offset_x, ImGui::GetCursorPosY() + offset_y));
     ImGui::Image((ImTextureID)(intptr_t)m_preview_texture, ImVec2(disp_w, disp_h));
@@ -1730,22 +2058,29 @@ void App::render_preview_viewport() {
     bool is_visual = sel_clip && is_selected_clip_visual();
     if (m_preview_transform_enabled && is_visual && sel_clip->contains_time(m_playhead_time)) {
         double rel_time = sel_clip->clip_relative_time(m_playhead_time);
-        double cur_pos_x = m_project.get_clip_param(*sel_clip, "pos_x", rel_time);
-        double cur_pos_y = m_project.get_clip_param(*sel_clip, "pos_y", rel_time);
-        double cur_scale = m_project.get_clip_param(*sel_clip, "scale", rel_time);
-        double cur_rot   = m_project.get_clip_param(*sel_clip, "rotation", rel_time);
+        double cur_pos_x   = m_project.get_clip_param(*sel_clip, "pos_x", rel_time);
+        double cur_pos_y   = m_project.get_clip_param(*sel_clip, "pos_y", rel_time);
+        double cur_scale_x = m_project.get_clip_param(*sel_clip, "scale_x", rel_time);
+        double cur_scale_y = m_project.get_clip_param(*sel_clip, "scale_y", rel_time);
+        double cur_rot     = m_project.get_clip_param(*sel_clip, "rotation", rel_time);
 
         int src_w = 1280, src_h = 720;
+        double asset_sx = 1.0, asset_sy = 1.0;
         const VideoAsset* va = m_project.find_video_asset(sel_clip->asset_id);
-        if (va && va->width > 0 && va->height > 0) {
-            src_w = va->width;
-            src_h = va->height;
+        if (va) {
+            if (va->width > 0 && va->height > 0) {
+                src_w = va->width;
+                src_h = va->height;
+            }
+            asset_sx = va->scale_x;
+            asset_sy = va->scale_y;
         }
 
         double base_scale = std::min(1280.0 / src_w, 720.0 / src_h);
-        double total_scale = base_scale * cur_scale;
-        double half_w = (src_w * total_scale) * 0.5;
-        double half_h = (src_h * total_scale) * 0.5;
+        double total_scale_x = base_scale * cur_scale_x * asset_sx;
+        double total_scale_y = base_scale * cur_scale_y * asset_sy;
+        double half_w = (src_w * total_scale_x) * 0.5;
+        double half_h = (src_h * total_scale_y) * 0.5;
 
         double f_rad = cur_rot * (3.14159265358979323846 / 180.0);
         double cos_f = std::cos(f_rad);
@@ -1819,7 +2154,9 @@ void App::render_preview_viewport() {
                 m_gizmo_drag_corner = hovered_corner;
                 m_gizmo_drag_start_mouse = mouse_pos;
                 m_gizmo_drag_mode = GizmoDragMode::ScaleCorner;
-                m_gizmo_orig_scale = cur_scale;
+                m_gizmo_orig_scale = cur_scale_x;
+                m_gizmo_orig_scale_x = cur_scale_x;
+                m_gizmo_orig_scale_y = cur_scale_y;
                 m_gizmo_orig_dist = std::max(1.0f, std::hypot(mouse_pos.x - screen_center.x, mouse_pos.y - screen_center.y));
                 push_undo_state();
             } else if (inside_quad) {
@@ -1848,18 +2185,25 @@ void App::render_preview_viewport() {
                         m_project.set_or_add_keyframe(sel_clip->id, "pos_y", rel_time, new_y);
                     }
                     on_project_modified();
-                    m_media_decoder.request_frame(m_playhead_time, m_project);
                     ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeAll);
                 } else if (m_gizmo_drag_mode == GizmoDragMode::ScaleCorner) {
                     float cur_dist = std::hypot(mouse_pos.x - screen_center.x, mouse_pos.y - screen_center.y);
                     double ratio = cur_dist / m_gizmo_orig_dist;
-                    double new_scale = std::max(0.01, m_gizmo_orig_scale * ratio);
-                    sel_clip->scale = new_scale;
+                    double new_scale_x = std::max(0.01, m_gizmo_orig_scale_x * ratio);
+                    double new_scale_y = std::max(0.01, m_gizmo_orig_scale_y * ratio);
+                    sel_clip->scale = new_scale_x;
+                    sel_clip->scale_x = new_scale_x;
+                    sel_clip->scale_y = new_scale_y;
+                    if (!m_project.get_clip_keyframes(sel_clip->id, "scale_x").empty()) {
+                        m_project.set_or_add_keyframe(sel_clip->id, "scale_x", rel_time, new_scale_x);
+                    }
+                    if (!m_project.get_clip_keyframes(sel_clip->id, "scale_y").empty()) {
+                        m_project.set_or_add_keyframe(sel_clip->id, "scale_y", rel_time, new_scale_y);
+                    }
                     if (!m_project.get_clip_keyframes(sel_clip->id, "scale").empty()) {
-                        m_project.set_or_add_keyframe(sel_clip->id, "scale", rel_time, new_scale);
+                        m_project.set_or_add_keyframe(sel_clip->id, "scale", rel_time, new_scale_x);
                     }
                     on_project_modified();
-                    m_media_decoder.request_frame(m_playhead_time, m_project);
                     ImGui::SetMouseCursor((m_gizmo_drag_corner == 0 || m_gizmo_drag_corner == 2) ? ImGuiMouseCursor_ResizeNWSE : ImGuiMouseCursor_ResizeNESW);
                 } else if (m_gizmo_drag_mode == GizmoDragMode::RotateCorner) {
                     double cur_angle = std::atan2(mouse_pos.y - screen_center.y, mouse_pos.x - screen_center.x) * (180.0 / 3.141592653589793);
@@ -1870,7 +2214,6 @@ void App::render_preview_viewport() {
                         m_project.set_or_add_keyframe(sel_clip->id, "rotation", rel_time, new_rot);
                     }
                     on_project_modified();
-                    m_media_decoder.request_frame(m_playhead_time, m_project);
                     ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
                 }
             } else {
@@ -1928,12 +2271,14 @@ void App::render_preview_transport() {
     if (ImGui::Button("|<<", ImVec2(32, 24))) {
         m_playhead_time = 0.0;
         m_audio_engine.set_playhead_time(0.0);
+        m_last_requested_playhead = 0.0;
         m_media_decoder.request_frame(0.0, m_project);
     }
     ImGui::SameLine();
     if (ImGui::Button("<|", ImVec2(30, 24))) {
         m_playhead_time = std::max(0.0, m_playhead_time - 1.0 / 30.0);
         m_audio_engine.set_playhead_time(m_playhead_time);
+        m_last_requested_playhead = m_playhead_time;
         m_media_decoder.request_frame(m_playhead_time, m_project);
     }
     ImGui::SameLine();
@@ -1944,12 +2289,14 @@ void App::render_preview_transport() {
     if (ImGui::Button("|>", ImVec2(30, 24))) {
         m_playhead_time = m_playhead_time + 1.0 / 30.0;
         m_audio_engine.set_playhead_time(m_playhead_time);
+        m_last_requested_playhead = m_playhead_time;
         m_media_decoder.request_frame(m_playhead_time, m_project);
     }
     ImGui::SameLine();
     if (ImGui::Button(">>|", ImVec2(32, 24))) {
         m_playhead_time = m_project.get_total_duration();
         m_audio_engine.set_playhead_time(m_playhead_time);
+        m_last_requested_playhead = m_playhead_time;
         m_media_decoder.request_frame(m_playhead_time, m_project);
     }
     ImGui::SameLine();
@@ -1988,6 +2335,7 @@ void App::render_preview_transport() {
         if (ImGui::SliderFloat("##scrub", &t_val, 0.0f, static_cast<float>(m_project.get_total_duration()), "")) {
             m_playhead_time = t_val;
             m_audio_engine.set_playhead_time(m_playhead_time);
+            m_last_requested_playhead = m_playhead_time;
             m_media_decoder.request_frame(m_playhead_time, m_project);
         }
     }
@@ -2019,28 +2367,37 @@ void App::render_preview_contents(bool is_detached) {
 
 void App::render_timeline_panel() {
     std::string title = std::string(_TR("panel_timeline")) + "###TimelinePanel";
-    ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus);
+    ImGui::Begin(title.c_str(), nullptr, ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoBringToFrontOnFocus | ImGuiWindowFlags_NoMove);
 
     m_timeline.render_ui(
         m_project, m_playhead_time, m_selected_clip_id,
         [this](const std::string& clip_id) {
             m_selected_clip_id = clip_id;
             m_keyframe_editor.set_selected_clip(clip_id);
+            if (clip_id.empty()) {
+                m_timeline.clear_selection();
+            } else if (!m_timeline.is_clip_selected(clip_id)) {
+                m_timeline.select_clip(clip_id, false, false);
+            }
         },
         [this](double new_t) {
             m_playhead_time = new_t;
             m_audio_engine.set_playhead_time(m_playhead_time);
+            m_last_requested_playhead = m_playhead_time;
             m_media_decoder.request_frame(m_playhead_time, m_project);
         },
         [this]() {
             push_undo_state();
             m_audio_engine.update_project_snapshot(m_project);
+            m_last_requested_playhead = m_playhead_time;
             m_media_decoder.request_frame(m_playhead_time, m_project);
         },
         [this](const std::string& prefab_id, double insert_time) {
             push_undo_state();
+            set_selected_clip_id("");
             m_clip_manager.instantiate_prefab_on_timeline(m_project, prefab_id, insert_time);
             m_audio_engine.update_project_snapshot(m_project);
+            m_last_requested_playhead = m_playhead_time;
             m_media_decoder.request_frame(m_playhead_time, m_project);
         }
     );
@@ -2137,7 +2494,8 @@ bool App::is_any_dialog_open() const {
     return m_show_about || m_show_text_dialog || m_file_browser.is_open() ||
            m_export_manager.is_dialog_open() || m_export_manager.is_exporting() ||
            m_timeline.is_rename_modal_open() || m_clip_manager.is_importing() ||
-           m_settings_dialog.is_open() || m_tts_dialog.is_open() || m_ai_dialog.is_open();
+           m_settings_dialog.is_open() || m_tts_dialog.is_open() || m_ai_dialog.is_open() ||
+           m_project_load_state.active.load();
 }
 
 void App::update_window_title() {
@@ -2233,15 +2591,14 @@ void App::cleanup_temp_files() {
 }
 
 void App::render_splitters() {
-    // Suppress splitters if any modal, popup, file browser, or dialog is currently open
-    if (is_any_dialog_open()) {
+    // Suppress splitters if any modal, popup, file browser, context menu, or dialog is currently open
+    bool any_popup = ImGui::IsPopupOpen(nullptr, ImGuiPopupFlags_AnyPopupId);
+    if (is_any_dialog_open() || any_popup) {
         m_dragging_split_h = false;
         m_dragging_split_top_v = false;
         m_dragging_split_bottom_v = false;
-        return;
     }
 
-    ImDrawList* fg_draw = ImGui::GetForegroundDrawList();
     ImVec2 mouse_pos = ImGui::GetMousePos();
     bool mouse_down = ImGui::IsMouseDown(0);
 
@@ -2259,7 +2616,8 @@ void App::render_splitters() {
 
     // 1. Horizontal Splitter (between Top Row and Bottom Row)
     float split_y = content_y + top_h;
-    bool hover_h = (mouse_pos.x >= 0.0f && mouse_pos.x <= total_w &&
+    bool hover_h = !is_any_dialog_open() && !any_popup &&
+                   (mouse_pos.x >= 0.0f && mouse_pos.x <= total_w &&
                     mouse_pos.y >= (split_y - thickness * 0.5f) && mouse_pos.y <= (split_y + thickness * 0.5f));
     if (m_dragging_split_h) {
         if (!mouse_down) {
@@ -2276,11 +2634,11 @@ void App::render_splitters() {
         ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeNS);
     }
     ImU32 col_h = m_dragging_split_h ? IM_COL32(61, 174, 233, 255) : (hover_h ? IM_COL32(61, 174, 233, 180) : IM_COL32(35, 40, 48, 200));
-    fg_draw->AddLine(ImVec2(0.0f, split_y), ImVec2(total_w, split_y), col_h, (hover_h || m_dragging_split_h) ? 3.0f : 1.5f);
 
     // 2. Vertical Splitter Top (between Clips & Assets and Preview)
     float split_top_x = left_top_w;
-    bool hover_vt = (mouse_pos.x >= (split_top_x - thickness * 0.5f) && mouse_pos.x <= (split_top_x + thickness * 0.5f) &&
+    bool hover_vt = !is_any_dialog_open() && !any_popup &&
+                    (mouse_pos.x >= (split_top_x - thickness * 0.5f) && mouse_pos.x <= (split_top_x + thickness * 0.5f) &&
                      mouse_pos.y >= content_y && mouse_pos.y <= split_y);
     if (m_dragging_split_top_v) {
         if (!mouse_down) {
@@ -2297,11 +2655,11 @@ void App::render_splitters() {
         ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
     }
     ImU32 col_vt = m_dragging_split_top_v ? IM_COL32(61, 174, 233, 255) : (hover_vt ? IM_COL32(61, 174, 233, 180) : IM_COL32(35, 40, 48, 200));
-    fg_draw->AddLine(ImVec2(split_top_x, content_y), ImVec2(split_top_x, split_y), col_vt, (hover_vt || m_dragging_split_top_v) ? 3.0f : 1.5f);
 
     // 3. Vertical Splitter Bottom (between Timeline and Context Inspector)
     float split_bottom_x = left_bottom_w;
-    bool hover_vb = (mouse_pos.x >= (split_bottom_x - thickness * 0.5f) && mouse_pos.x <= (split_bottom_x + thickness * 0.5f) &&
+    bool hover_vb = !is_any_dialog_open() && !any_popup &&
+                    (mouse_pos.x >= (split_bottom_x - thickness * 0.5f) && mouse_pos.x <= (split_bottom_x + thickness * 0.5f) &&
                      mouse_pos.y >= split_y && mouse_pos.y <= (content_y + total_h));
     if (m_dragging_split_bottom_v) {
         if (!mouse_down) {
@@ -2318,7 +2676,26 @@ void App::render_splitters() {
         ImGui::SetMouseCursor(ImGuiMouseCursor_ResizeEW);
     }
     ImU32 col_vb = m_dragging_split_bottom_v ? IM_COL32(61, 174, 233, 255) : (hover_vb ? IM_COL32(61, 174, 233, 180) : IM_COL32(35, 40, 48, 200));
-    fg_draw->AddLine(ImVec2(split_bottom_x, split_y), ImVec2(split_bottom_x, content_y + total_h), col_vb, (hover_vb || m_dragging_split_bottom_v) ? 3.0f : 1.5f);
+
+    // Render splitters in a transparent background overlay window below all popups and context menus
+    ImGui::SetNextWindowPos(ImVec2(0, content_y));
+    ImGui::SetNextWindowSize(ImVec2(total_w, total_h));
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0, 0, 0, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
+    ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                             ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoScrollbar |
+                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs |
+                             ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoBringToFrontOnFocus;
+    if (ImGui::Begin("##SplittersOverlay", nullptr, flags)) {
+        ImDrawList* draw_list = ImGui::GetWindowDrawList();
+        draw_list->AddLine(ImVec2(0.0f, split_y), ImVec2(total_w, split_y), col_h, (hover_h || m_dragging_split_h) ? 3.0f : 1.5f);
+        draw_list->AddLine(ImVec2(split_top_x, content_y), ImVec2(split_top_x, split_y), col_vt, (hover_vt || m_dragging_split_top_v) ? 3.0f : 1.5f);
+        draw_list->AddLine(ImVec2(split_bottom_x, split_y), ImVec2(split_bottom_x, content_y + total_h), col_vb, (hover_vb || m_dragging_split_bottom_v) ? 3.0f : 1.5f);
+    }
+    ImGui::End();
+    ImGui::PopStyleVar(2);
+    ImGui::PopStyleColor();
 }
 
 void App::render() {
@@ -2395,6 +2772,9 @@ void App::render() {
             ImGui::End();
         }
     }
+
+    // Project Load Progress Modal
+    render_project_load_modal();
 
     // Text Asset Dialog
     render_text_dialog();
@@ -2522,6 +2902,14 @@ void App::run() {
 }
 
 void App::cleanup() {
+    if (m_project_load_state.worker_thread) {
+        if (m_project_load_state.worker_thread->joinable()) {
+            m_project_load_state.worker_thread->join();
+        }
+        delete m_project_load_state.worker_thread;
+        m_project_load_state.worker_thread = nullptr;
+    }
+
     m_audio_engine.shutdown();
     SwapManager::instance().shutdown();
 

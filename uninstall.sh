@@ -23,10 +23,26 @@ if [ -L "./minicut" ] || [ -f "./minicut" ]; then
     rm -f "./minicut" 2>/dev/null || true
 fi
 
-if [ -f "$HOME/.local/share/applications/minicut.desktop" ]; then
-    echo "Removing $HOME/.local/share/applications/minicut.desktop..."
-    rm -f "$HOME/.local/share/applications/minicut.desktop"
-    REMOVED_ANY=true
+for dname in "minicut.desktop" "org.minicut.desktop"; do
+    if [ -f "$HOME/.local/share/applications/$dname" ]; then
+        echo "Removing $HOME/.local/share/applications/$dname..."
+        rm -f "$HOME/.local/share/applications/$dname"
+        REMOVED_ANY=true
+    fi
+done
+
+if [ -f "$HOME/.local/bin/minicut.desktop" ]; then
+    rm -f "$HOME/.local/bin/minicut.desktop"
+fi
+
+if [ -f "/usr/share/applications/org.minicut.desktop" ]; then
+    echo "Masking system desktop launcher /usr/share/applications/org.minicut.desktop..."
+    cat << 'EOF' > "$HOME/.local/share/applications/org.minicut.desktop"
+[Desktop Entry]
+Type=Application
+Name=minicut
+NoDisplay=true
+EOF
 fi
 
 for size in 256x256 128x128 64x64 48x48 32x32; do

@@ -6,6 +6,8 @@
 #include <atomic>
 #include <mutex>
 #include <vector>
+#include <map>
+#include <filesystem>
 
 class AudioEngine;
 
@@ -82,7 +84,8 @@ public:
                    const std::function<void()>& on_import_audio,
                    const std::function<void()>& on_import_prefab,
                    const std::function<void()>& on_add_text = nullptr,
-                   const std::function<void()>& on_add_tts = nullptr);
+                   const std::function<void()>& on_add_tts = nullptr,
+                   const std::function<void()>& on_generate_demo = nullptr);
 
     const std::string& get_selected_asset_id() const { return m_selected_asset_id; }
     bool is_selected_video() const { return m_selected_is_video; }
@@ -92,14 +95,46 @@ public:
         m_selected_is_video = is_video;
         m_selected_is_prefab = is_prefab;
     }
+    void clear_selection() {
+        m_selected_asset_id.clear();
+        m_selected_is_prefab = false;
+    }
+
+    int get_view_mode() const { return m_view_mode; }
+    void set_view_mode(int mode) { m_view_mode = mode; }
+
+    void check_and_reload_modified_prefabs(Project& project, const std::function<void()>& on_project_changed = nullptr);
+
+    // Folder management
+    bool create_folder(Project& project, const std::string& folder_name);
+    bool rename_folder(Project& project, const std::string& old_name, const std::string& new_name);
+    bool delete_folder(Project& project, const std::string& folder_name);
+    void set_asset_folder(Project& project, const std::string& asset_id, bool is_video, bool is_prefab, const std::string& folder_name);
+    std::string get_asset_folder(const Project& project, const std::string& asset_id, bool is_video, bool is_prefab) const;
+    const std::string& get_selected_folder_filter() const { return m_selected_folder_filter; }
+    void set_selected_folder_filter(const std::string& folder) { m_selected_folder_filter = folder; }
 
 private:
     std::string m_selected_asset_id;
     bool m_selected_is_video = true;
     bool m_selected_is_prefab = false;
     int m_filter_type = 0; // 0 = All, 1 = Videos, 2 = Images, 3 = Audio, 4 = Prefabs
+    int m_view_mode = 0;   // 0 = List, 1 = Grid
     char m_search_filter[64] = "";
     AudioEngine* m_audio_engine = nullptr;
+
+    // Folder organization state
+    std::string m_selected_folder_filter; // "" = All Folders, "(Root)" = Root / No folder, otherwise folder name
+    bool m_show_new_folder_dialog = false;
+    bool m_show_rename_folder_dialog = false;
+    char m_folder_input_buf[128] = "";
+    std::string m_context_folder_name;
+    std::string m_folder_target_asset_id;
+    bool m_folder_target_is_video = true;
+    bool m_folder_target_is_prefab = false;
+
+    // Prefab hot reload tracking
+    std::map<std::string, std::filesystem::file_time_type> m_prefab_write_times;
 
     // Progress and async worker
     ImportProgressState m_import_progress;

@@ -52,8 +52,21 @@ void SettingsLogic::load_from_disk() {
             m_use_system_file_dialog = j.value("use_system_file_dialog", true);
             m_language = j.value("language", "en");
             m_render_backend = j.value("render_backend", "OpenGL3");
+            m_prefab_hot_reload = j.value("prefab_hot_reload", true);
+            m_prefab_reload_interval = std::clamp(j.value("prefab_reload_interval", 3.0f), 0.5f, 60.0f);
             m_light_theme = j.value("light_theme", false);
             m_colorblind_mode = j.value("colorblind_mode", 0);
+            m_menu_font_size = std::clamp(j.value("menu_font_size", 15.0f), 10.0f, 32.0f);
+            m_preview_bg_mode = std::clamp(j.value("preview_bg_mode", 0), 0, 5);
+            m_preview_padding = std::clamp(j.value("preview_padding", 8.0f), 0.0f, 60.0f);
+            if (j.contains("preview_bg_color") && j["preview_bg_color"].is_array() && j["preview_bg_color"].size() >= 3) {
+                m_preview_bg_color[0] = j["preview_bg_color"][0];
+                m_preview_bg_color[1] = j["preview_bg_color"][1];
+                m_preview_bg_color[2] = j["preview_bg_color"][2];
+                if (j["preview_bg_color"].size() >= 4) {
+                    m_preview_bg_color[3] = j["preview_bg_color"][3];
+                }
+            }
 
             m_split_h = std::clamp(j.value("split_h", 0.46f), 0.15f, 0.85f);
             m_split_top_v = std::clamp(j.value("split_top_v", 0.28f), 0.15f, 0.75f);
@@ -94,8 +107,14 @@ void SettingsLogic::save_to_disk() {
     j["use_system_file_dialog"] = m_use_system_file_dialog;
     j["language"] = m_language;
     j["render_backend"] = m_render_backend;
+    j["prefab_hot_reload"] = m_prefab_hot_reload;
+    j["prefab_reload_interval"] = m_prefab_reload_interval;
     j["light_theme"] = m_light_theme;
     j["colorblind_mode"] = m_colorblind_mode;
+    j["menu_font_size"] = m_menu_font_size;
+    j["preview_bg_mode"] = m_preview_bg_mode;
+    j["preview_padding"] = m_preview_padding;
+    j["preview_bg_color"] = { m_preview_bg_color[0], m_preview_bg_color[1], m_preview_bg_color[2], m_preview_bg_color[3] };
 
     j["split_h"] = m_split_h;
     j["split_top_v"] = m_split_top_v;
@@ -122,6 +141,48 @@ void SettingsLogic::save_to_disk() {
     } catch (const std::exception& e) {
         std::cerr << "SettingsLogic: Error saving settings: " << e.what() << std::endl;
     }
+}
+
+void SettingsLogic::reset_to_defaults() {
+    m_use_system_file_dialog = true;
+    m_language = "en";
+    m_render_backend = "OpenGL3";
+    m_prefab_hot_reload = true;
+    m_prefab_reload_interval = 3.0f;
+    m_light_theme = false;
+    m_colorblind_mode = 0;
+    m_menu_font_size = 15.0f;
+    m_preview_bg_mode = 0;
+    m_preview_bg_color[0] = 0.10f;
+    m_preview_bg_color[1] = 0.10f;
+    m_preview_bg_color[2] = 0.12f;
+    m_preview_bg_color[3] = 1.0f;
+    m_preview_padding = 8.0f;
+    m_split_h = 0.46f;
+    m_split_top_v = 0.28f;
+    m_split_bottom_v = 0.65f;
+    m_track_header_w = 145.0f;
+    m_ai_enabled = false;
+    {
+        std::lock_guard<std::mutex> lock(m_auth_mutex);
+        m_gemini_api_key.clear();
+        m_auth_status.store(AuthStatus::Idle);
+        m_auth_message.clear();
+    }
+    m_tts_provider = "system";
+    m_tts_voice = "default";
+    m_tts_rate = 1.0f;
+    m_tts_pitch = 1.0f;
+    m_preview_volume_db = 0.0f;
+
+    const char* home = std::getenv("HOME");
+    if (home) {
+        fs::path cfg_dir = fs::path(home) / ".config" / "minicut";
+        std::error_code ec;
+        fs::remove(cfg_dir / "settings.json", ec);
+        fs::remove(cfg_dir / "imgui.ini", ec);
+    }
+    save_to_disk();
 }
 
 static size_t curl_discard_write(void* ptr, size_t size, size_t nmemb, void* userdata) {

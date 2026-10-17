@@ -421,6 +421,8 @@ bool ClipManager::import_project_as_prefab(Project& project, const std::string& 
         }
     }
 
+    std::error_code ec;
+    m_prefab_write_times[filepath] = fs::last_write_time(filepath, ec);
     project.prefabs.push_back(pf);
     return true;
 }
@@ -646,6 +648,98 @@ void ClipManager::remove_prefab(Project& project, const std::string& prefab_id, 
     }
 }
 
+void ClipManager::check_and_reload_modified_prefabs(Project& project, const std::function<void()>& on_project_changed) {
+    bool any_reloaded = false;
+    for (auto& pf : project.prefabs) {
+        if (pf.path.empty()) continue;
+        std::error_code ec;
+        if (!fs::exists(pf.path, ec)) continue;
+
+        auto cur_mtime = fs::last_write_time(pf.path, ec);
+        if (ec) continue;
+
+        auto it = m_prefab_write_times.find(pf.path);
+        if (it == m_prefab_write_times.end()) {
+            m_prefab_write_times[pf.path] = cur_mtime;
+            continue;
+        }
+
+        if (cur_mtime > it->second) {
+            it->second = cur_mtime;
+
+            std::ifstream ifs(pf.path);
+            if (!ifs.is_open()) continue;
+            std::string json_str((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+
+            Project sub_p;
+            if (!ProjectSerializer::deserialize_json(sub_p, json_str)) {
+                continue;
+            }
+
+            pf.raw_json = json_str;
+            pf.name = (sub_p.name.empty() || sub_p.name == "Untitled Project")
+                ? fs::path(pf.path).stem().string()
+                : sub_p.name;
+            pf.duration = sub_p.get_total_duration();
+            pf.video_tracks = 0;
+            pf.audio_tracks = 0;
+            pf.total_clips = 0;
+            for (const auto& t : sub_p.tracks) {
+                if (t.type == "video") pf.video_tracks++;
+                else pf.audio_tracks++;
+                pf.total_clips += static_cast<int>(t.clips.size());
+            }
+
+            // Find all instances of this prefab on timeline
+            double earliest_start = -1.0;
+            for (const auto& t : project.tracks) {
+                for (const auto& c : t.clips) {
+                    if (c.prefab_id == pf.id) {
+                        if (earliest_start < 0.0 || c.start_time < earliest_start) {
+                            earliest_start = c.start_time;
+                        }
+                    }
+                }
+            }
+
+            if (earliest_start >= 0.0) {
+                // Collect clip IDs to delete keyframes
+                std::vector<std::string> to_remove_clip_ids;
+                for (auto& t : project.tracks) {
+                    for (const auto& c : t.clips) {
+                        if (c.prefab_id == pf.id) {
+                            to_remove_clip_ids.push_back(c.id);
+                        }
+                    }
+                    t.clips.erase(
+                        std::remove_if(t.clips.begin(), t.clips.end(),
+                                       [&](const Clip& c) { return c.prefab_id == pf.id; }),
+                        t.clips.end()
+                    );
+                }
+
+                project.keyframes.erase(
+                    std::remove_if(project.keyframes.begin(), project.keyframes.end(),
+                                   [&](const Keyframe& kf) {
+                                       return std::find(to_remove_clip_ids.begin(), to_remove_clip_ids.end(), kf.clip_id) != to_remove_clip_ids.end();
+                                   }),
+                    project.keyframes.end()
+                );
+
+                // Re-instantiate prefab at earliest_start
+                instantiate_prefab_on_timeline(project, pf.id, earliest_start);
+            }
+
+            any_reloaded = true;
+            std::cout << "Prefab hot-reloaded from disk: " << pf.path << " (ID: " << pf.id << ")" << std::endl;
+        }
+    }
+
+    if (any_reloaded && on_project_changed) {
+        on_project_changed();
+    }
+}
+
 int ClipManager::get_asset_usage_count(const Project& project, const std::string& asset_id) {
     int count = 0;
     for (const auto& track : project.tracks) {
@@ -735,7 +829,8 @@ void ClipManager::render_ui(Project& project, double playhead_time,
                             const std::function<void()>& on_import_audio,
                             const std::function<void()>& on_import_prefab,
                             const std::function<void()>& on_add_text,
-                            const std::function<void()>& on_add_tts) {
+                            const std::function<void()>& on_add_tts,
+                            const std::function<void()>& on_generate_demo) {
     poll_async_imports(project);
 
     // Keyboard shortcut deletion and enter-to-add
@@ -783,6 +878,12 @@ void ClipManager::render_ui(Project& project, double playhead_time,
     if (ImGui::Button("+ Speech...")) {
         if (on_add_tts) on_add_tts();
     }
+    ImGui::SameLine();
+    if (ImGui::Button("+ Folder...")) {
+        m_show_new_folder_dialog = true;
+        std::memset(m_folder_input_buf, 0, sizeof(m_folder_input_buf));
+        m_folder_target_asset_id.clear();
+    }
 
     // Active Import Progress Banner
     if (m_import_progress.active.load()) {
@@ -812,12 +913,57 @@ void ClipManager::render_ui(Project& project, double playhead_time,
     ImGui::SameLine();
     ImGui::RadioButton("Prefabs", &m_filter_type, 4);
 
+    ImGui::SameLine(0.0f, 12.0f);
+    ImGui::TextDisabled("| View:");
+    ImGui::SameLine();
+    bool is_list_active = (m_view_mode == 0);
+    if (is_list_active) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.45f, 0.75f, 1.0f));
+    }
+    if (ImGui::SmallButton("List")) {
+        m_view_mode = 0;
+    }
+    if (is_list_active) {
+        ImGui::PopStyleColor();
+    }
+    ImGui::SameLine();
+    bool is_grid_active = (m_view_mode == 1);
+    if (is_grid_active) {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.22f, 0.45f, 0.75f, 1.0f));
+    }
+    if (ImGui::SmallButton("Grid")) {
+        m_view_mode = 1;
+    }
+    if (is_grid_active) {
+        ImGui::PopStyleColor();
+    }
+
+    ImGui::SameLine(0.0f, 12.0f);
+    ImGui::TextDisabled("| Folder:");
+    ImGui::SameLine();
+    std::string folder_preview = m_selected_folder_filter.empty() ? "All Folders" : m_selected_folder_filter;
+    ImGui::SetNextItemWidth(110.0f);
+    if (ImGui::BeginCombo("##folder_filter", folder_preview.c_str())) {
+        if (ImGui::Selectable("All Folders", m_selected_folder_filter.empty())) {
+            m_selected_folder_filter.clear();
+        }
+        if (ImGui::Selectable("(Root)", m_selected_folder_filter == "(Root)")) {
+            m_selected_folder_filter = "(Root)";
+        }
+        for (const auto& fld : project.asset_folders) {
+            if (ImGui::Selectable(fld.c_str(), m_selected_folder_filter == fld)) {
+                m_selected_folder_filter = fld;
+            }
+        }
+        ImGui::EndCombo();
+    }
+
     ImGui::InputTextWithHint("##search", "Search assets...", m_search_filter, sizeof(m_search_filter));
 
     ImGui::PopStyleVar();
     ImGui::Separator();
 
-    // Table of assets
+    // Assets display (List or Grid)
     static ImGuiTableFlags table_flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg |
                                          ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable;
 
@@ -826,231 +972,610 @@ void ClipManager::render_ui(Project& project, double playhead_time,
 
     bool item_was_right_clicked = false;
 
-    if (ImGui::BeginTable("AssetTable", 5, table_flags, ImVec2(0, table_height))) {
-        ImGui::TableSetupColumn("Thumb", ImGuiTableColumnFlags_WidthFixed, 48.0f);
-        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 36.0f);
-        ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
-        ImGui::TableSetupColumn("Duration", ImGuiTableColumnFlags_WidthFixed, 70.0f);
-        ImGui::TableSetupColumn("Specs", ImGuiTableColumnFlags_WidthFixed, 95.0f);
-        ImGui::TableHeadersRow();
+    // Group assets by virtual folder
+    struct FolderGroup {
+        std::string name;
+        bool is_root = false;
+        std::vector<const VideoAsset*> videos;
+        std::vector<const AudioAsset*> audios;
+        std::vector<const ProjectPrefab*> prefabs;
+        size_t total_items() const { return videos.size() + audios.size() + prefabs.size(); }
+    };
 
-        std::string search_str = m_search_filter;
-        std::transform(search_str.begin(), search_str.end(), search_str.begin(), ::tolower);
+    std::vector<FolderGroup> groups;
+    auto get_or_create_group = [&](const std::string& name, bool is_root) -> FolderGroup& {
+        for (auto& g : groups) {
+            if (g.is_root == is_root && (is_root || g.name == name)) return g;
+        }
+        groups.push_back({name, is_root, {}, {}, {}});
+        return groups.back();
+    };
 
-        // 1. Videos & Images
-        if (m_filter_type == 0 || m_filter_type == 1 || m_filter_type == 2) {
-            for (const auto& v : project.video_assets) {
-                if (m_filter_type == 1 && v.is_image) continue;
-                if (m_filter_type == 2 && !v.is_image) continue;
+    if (project.asset_folders.empty()) {
+        get_or_create_group("", true);
+    } else {
+        if (m_selected_folder_filter.empty()) {
+            for (const auto& f : project.asset_folders) {
+                get_or_create_group(f, false);
+            }
+            get_or_create_group("(Root)", true);
+        } else if (m_selected_folder_filter == "(Root)") {
+            get_or_create_group("(Root)", true);
+        } else {
+            get_or_create_group(m_selected_folder_filter, false);
+        }
+    }
 
-                std::string filename = fs::path(v.path).filename().string();
-                std::string filename_lower = filename;
-                std::transform(filename_lower.begin(), filename_lower.end(), filename_lower.begin(), ::tolower);
-                if (!search_str.empty() && filename_lower.find(search_str) == std::string::npos) {
+    std::string search_str = m_search_filter;
+    std::transform(search_str.begin(), search_str.end(), search_str.begin(), ::tolower);
+
+    // 1. Classify Videos & Images
+    if (m_filter_type == 0 || m_filter_type == 1 || m_filter_type == 2) {
+        for (const auto& v : project.video_assets) {
+            if (m_filter_type == 1 && v.is_image) continue;
+            if (m_filter_type == 2 && !v.is_image) continue;
+
+            std::string filename = fs::path(v.path).filename().string();
+            std::string filename_lower = filename;
+            std::transform(filename_lower.begin(), filename_lower.end(), filename_lower.begin(), ::tolower);
+            if (!search_str.empty() && filename_lower.find(search_str) == std::string::npos &&
+                v.id.find(search_str) == std::string::npos) {
+                continue;
+            }
+
+            bool is_root = v.folder.empty();
+            if (project.asset_folders.empty()) {
+                groups[0].videos.push_back(&v);
+            } else {
+                if (m_selected_folder_filter.empty()) {
+                    auto& g = get_or_create_group(is_root ? "(Root)" : v.folder, is_root);
+                    g.videos.push_back(&v);
+                } else if (m_selected_folder_filter == "(Root)" && is_root) {
+                    groups[0].videos.push_back(&v);
+                } else if (m_selected_folder_filter == v.folder) {
+                    groups[0].videos.push_back(&v);
+                }
+            }
+        }
+    }
+
+    // 2. Classify Audio
+    if (m_filter_type == 0 || m_filter_type == 3) {
+        for (const auto& a : project.audio_assets) {
+            std::string filename = fs::path(a.path).filename().string();
+            std::string filename_lower = filename;
+            std::transform(filename_lower.begin(), filename_lower.end(), filename_lower.begin(), ::tolower);
+            if (!search_str.empty() && filename_lower.find(search_str) == std::string::npos &&
+                a.id.find(search_str) == std::string::npos) {
+                continue;
+            }
+
+            bool is_root = a.folder.empty();
+            if (project.asset_folders.empty()) {
+                groups[0].audios.push_back(&a);
+            } else {
+                if (m_selected_folder_filter.empty()) {
+                    auto& g = get_or_create_group(is_root ? "(Root)" : a.folder, is_root);
+                    g.audios.push_back(&a);
+                } else if (m_selected_folder_filter == "(Root)" && is_root) {
+                    groups[0].audios.push_back(&a);
+                } else if (m_selected_folder_filter == a.folder) {
+                    groups[0].audios.push_back(&a);
+                }
+            }
+        }
+    }
+
+    // 3. Classify Prefabs
+    if (m_filter_type == 0 || m_filter_type == 4) {
+        for (const auto& pf : project.prefabs) {
+            std::string pf_name_lower = pf.name;
+            std::transform(pf_name_lower.begin(), pf_name_lower.end(), pf_name_lower.begin(), ::tolower);
+            if (!search_str.empty() && pf_name_lower.find(search_str) == std::string::npos &&
+                pf.id.find(search_str) == std::string::npos) {
+                continue;
+            }
+
+            bool is_root = pf.folder.empty();
+            if (project.asset_folders.empty()) {
+                groups[0].prefabs.push_back(&pf);
+            } else {
+                if (m_selected_folder_filter.empty()) {
+                    auto& g = get_or_create_group(is_root ? "(Root)" : pf.folder, is_root);
+                    g.prefabs.push_back(&pf);
+                } else if (m_selected_folder_filter == "(Root)" && is_root) {
+                    groups[0].prefabs.push_back(&pf);
+                } else if (m_selected_folder_filter == pf.folder) {
+                    groups[0].prefabs.push_back(&pf);
+                }
+            }
+        }
+    }
+
+    auto handle_folder_drop_target = [&](const std::string& target_folder, bool target_is_root) {
+        if (ImGui::BeginDragDropTarget()) {
+            std::string dest_folder = target_is_root ? "" : target_folder;
+            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("MINICUT_ASSET_VIDEO")) {
+                std::string aid((const char*)p->Data);
+                set_asset_folder(project, aid, true, false, dest_folder);
+                if (on_project_changed) on_project_changed();
+            }
+            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("MINICUT_ASSET_AUDIO")) {
+                std::string aid((const char*)p->Data);
+                set_asset_folder(project, aid, false, false, dest_folder);
+                if (on_project_changed) on_project_changed();
+            }
+            if (const ImGuiPayload* p = ImGui::AcceptDragDropPayload("MINICUT_ASSET_PREFAB")) {
+                std::string aid((const char*)p->Data);
+                set_asset_folder(project, aid, true, true, dest_folder);
+                if (on_project_changed) on_project_changed();
+            }
+            ImGui::EndDragDropTarget();
+        }
+    };
+
+    if (m_view_mode == 0) {
+        if (ImGui::BeginTable("AssetTable", 5, table_flags, ImVec2(0, table_height))) {
+            ImGui::TableSetupColumn("Thumb", ImGuiTableColumnFlags_WidthFixed, 48.0f);
+            ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 36.0f);
+            ImGui::TableSetupColumn("Name", ImGuiTableColumnFlags_WidthStretch);
+            ImGui::TableSetupColumn("Duration", ImGuiTableColumnFlags_WidthFixed, 70.0f);
+            ImGui::TableSetupColumn("Specs", ImGuiTableColumnFlags_WidthFixed, 95.0f);
+            ImGui::TableHeadersRow();
+
+            bool show_headers = !project.asset_folders.empty();
+
+            for (const auto& grp : groups) {
+                if (grp.is_root && grp.total_items() == 0 && show_headers && m_selected_folder_filter.empty()) {
                     continue;
                 }
 
-                const float row_height = 36.0f;
-                ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
-                bool is_selected = (m_selected_asset_id == v.id && m_selected_is_video && !m_selected_is_prefab);
-
-                ImGui::TableSetColumnIndex(0);
-                std::string sel_id = "##sel_v_" + v.id;
-                if (ImGui::Selectable(sel_id.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap, ImVec2(0, row_height))) {
-                    m_selected_asset_id = v.id;
-                    m_selected_is_video = true;
-                    m_selected_is_prefab = false;
+                bool open = true;
+                if (show_headers) {
+                    ImGui::TableNextRow(ImGuiTableRowFlags_Headers);
+                    ImGui::TableSetColumnIndex(0);
+                    std::string tree_id = "##folder_tree_" + (grp.is_root ? std::string("__root__") : grp.name);
+                    std::string header_title = (grp.is_root ? "📁 (Root)" : ("📁 " + grp.name)) + " (" + std::to_string(grp.total_items()) + ")";
+                    open = ImGui::TreeNodeEx(tree_id.c_str(), ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_SpanFullWidth, "%s", header_title.c_str());
+                    if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !grp.is_root) {
+                        m_context_folder_name = grp.name;
+                        ImGui::OpenPopup("FolderHeaderContextMenu");
+                    }
+                    handle_folder_drop_target(grp.name, grp.is_root);
                 }
 
-                // Handle double-click and right-click
-                if (ImGui::IsItemHovered()) {
-                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                        m_selected_asset_id = v.id;
-                        m_selected_is_video = true;
-                        m_selected_is_prefab = false;
-                        if (on_add_to_timeline) {
-                            on_add_to_timeline(v.id, true);
+                if (open) {
+                    // Videos & Images
+                    for (const auto* vp : grp.videos) {
+                        const auto& v = *vp;
+                        std::string filename = fs::path(v.path).filename().string();
+                        const float row_height = 36.0f;
+                        ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
+                        bool is_selected = (m_selected_asset_id == v.id && m_selected_is_video && !m_selected_is_prefab);
+
+                        ImGui::TableSetColumnIndex(0);
+                        std::string sel_id = "##sel_v_" + v.id;
+                        if (ImGui::Selectable(sel_id.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap, ImVec2(0, row_height))) {
+                            m_selected_asset_id = v.id;
+                            m_selected_is_video = true;
+                            m_selected_is_prefab = false;
                         }
+                        if (ImGui::IsItemHovered()) {
+                            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                                select_asset(v.id, true, false);
+                                if (on_add_to_timeline) on_add_to_timeline(v.id, true);
+                            }
+                            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                                select_asset(v.id, true, false);
+                                m_context_asset_id = v.id;
+                                m_context_is_video = true;
+                                m_context_is_prefab = false;
+                                m_open_asset_context = true;
+                                item_was_right_clicked = true;
+                            }
+                        }
+                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                            ImGui::SetDragDropPayload("MINICUT_ASSET_VIDEO", v.id.c_str(), v.id.size() + 1);
+                            ImGui::Text("Add video %s to timeline", filename.c_str());
+                            ImGui::EndDragDropSource();
+                        }
+
+                        ImGui::SameLine(0.0f, 4.0f);
+                        if (v.thumbnail_texture) {
+                            ImGui::Image((ImTextureID)(intptr_t)v.thumbnail_texture, ImVec2(40, 24));
+                        } else if (v.is_image) {
+                            ImGui::TextColored(ImVec4(0.9f, 0.65f, 0.2f, 1.0f), "[IMG]");
+                        } else {
+                            ImGui::TextColored(ImVec4(0.3f, 0.7f, 1.0f, 1.0f), "[VID]");
+                        }
+
+                        ImGui::TableSetColumnIndex(1);
+                        ImGui::Text("%s", v.id.c_str());
+
+                        ImGui::TableSetColumnIndex(2);
+                        ImGui::TextUnformatted(filename.c_str());
+
+                        ImGui::TableSetColumnIndex(3);
+                        ImGui::Text("%s", format_timecode(v.duration, false).c_str());
+
+                        ImGui::TableSetColumnIndex(4);
+                        ImGui::Text("%dx%d", v.width, v.height);
                     }
-                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-                        m_selected_asset_id = v.id;
-                        m_selected_is_video = true;
-                        m_selected_is_prefab = false;
-                        m_context_asset_id = v.id;
-                        m_context_is_video = true;
-                        m_context_is_prefab = false;
-                        m_open_asset_context = true;
-                        item_was_right_clicked = true;
+
+                    // Audio
+                    for (const auto* ap : grp.audios) {
+                        const auto& a = *ap;
+                        std::string filename = fs::path(a.path).filename().string();
+                        const float row_height = 36.0f;
+                        ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
+                        bool is_selected = (m_selected_asset_id == a.id && !m_selected_is_video && !m_selected_is_prefab);
+
+                        ImGui::TableSetColumnIndex(0);
+                        std::string sel_id = "##sel_a_" + a.id;
+                        if (ImGui::Selectable(sel_id.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap, ImVec2(0, row_height))) {
+                            m_selected_asset_id = a.id;
+                            m_selected_is_video = false;
+                            m_selected_is_prefab = false;
+                        }
+                        if (ImGui::IsItemHovered()) {
+                            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                                select_asset(a.id, false, false);
+                                if (on_add_to_timeline) on_add_to_timeline(a.id, false);
+                            }
+                            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                                select_asset(a.id, false, false);
+                                m_context_asset_id = a.id;
+                                m_context_is_video = false;
+                                m_context_is_prefab = false;
+                                m_open_asset_context = true;
+                                item_was_right_clicked = true;
+                            }
+                        }
+                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                            ImGui::SetDragDropPayload("MINICUT_ASSET_AUDIO", a.id.c_str(), a.id.size() + 1);
+                            ImGui::Text("Add audio %s to timeline", filename.c_str());
+                            ImGui::EndDragDropSource();
+                        }
+
+                        ImGui::SameLine(0.0f, 4.0f);
+                        ImGui::TextColored(ImVec4(0.2f, 0.85f, 0.5f, 1.0f), "[AUD]");
+
+                        ImGui::TableSetColumnIndex(1);
+                        ImGui::Text("%s", a.id.c_str());
+
+                        ImGui::TableSetColumnIndex(2);
+                        ImGui::TextUnformatted(filename.c_str());
+
+                        ImGui::TableSetColumnIndex(3);
+                        ImGui::Text("%s", format_timecode(a.duration, false).c_str());
+
+                        ImGui::TableSetColumnIndex(4);
+                        ImGui::Text("%dHz %dch", a.sample_rate, a.channels);
+                    }
+
+                    // Prefabs
+                    for (const auto* pfp : grp.prefabs) {
+                        const auto& pf = *pfp;
+                        const float row_height = 36.0f;
+                        ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
+                        bool is_selected = (m_selected_asset_id == pf.id && m_selected_is_prefab);
+
+                        ImGui::TableSetColumnIndex(0);
+                        std::string sel_id = "##sel_pf_" + pf.id;
+                        if (ImGui::Selectable(sel_id.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap, ImVec2(0, row_height))) {
+                            m_selected_asset_id = pf.id;
+                            m_selected_is_prefab = true;
+                        }
+                        if (ImGui::IsItemHovered()) {
+                            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                                select_asset(pf.id, true, true);
+                                if (on_add_prefab_to_timeline) on_add_prefab_to_timeline(pf.id, playhead_time);
+                            }
+                            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                                select_asset(pf.id, true, true);
+                                m_context_asset_id = pf.id;
+                                m_context_is_video = true;
+                                m_context_is_prefab = true;
+                                m_open_asset_context = true;
+                                item_was_right_clicked = true;
+                            }
+                        }
+                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                            ImGui::SetDragDropPayload("MINICUT_ASSET_PREFAB", pf.id.c_str(), pf.id.size() + 1);
+                            ImGui::Text("Insert prefab %s at playhead", pf.name.c_str());
+                            ImGui::EndDragDropSource();
+                        }
+
+                        ImGui::SameLine(0.0f, 4.0f);
+                        if (pf.thumbnail_texture) {
+                            ImGui::Image((ImTextureID)(intptr_t)pf.thumbnail_texture, ImVec2(40, 24));
+                        } else {
+                            ImGui::TextColored(ImVec4(0.85f, 0.45f, 1.0f, 1.0f), "[PF]");
+                        }
+
+                        ImGui::TableSetColumnIndex(1);
+                        ImGui::Text("%s", pf.id.c_str());
+
+                        ImGui::TableSetColumnIndex(2);
+                        std::string display_name = "[Prefab] " + pf.name;
+                        ImGui::TextUnformatted(display_name.c_str());
+
+                        ImGui::TableSetColumnIndex(3);
+                        ImGui::Text("%s", format_timecode(pf.duration, false).c_str());
+
+                        ImGui::TableSetColumnIndex(4);
+                        ImGui::Text("%dV %dA (%dc)", pf.video_tracks, pf.audio_tracks, pf.total_clips);
+                    }
+
+                    if (show_headers) {
+                        ImGui::TreePop();
                     }
                 }
-
-                // Drag & Drop Source
-                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
-                    ImGui::SetDragDropPayload("MINICUT_ASSET_VIDEO", v.id.c_str(), v.id.size() + 1);
-                    ImGui::Text("Add video %s to timeline", filename.c_str());
-                    ImGui::EndDragDropSource();
-                }
-
-                ImGui::SameLine(0.0f, 4.0f);
-                if (v.thumbnail_texture) {
-                    ImGui::Image((ImTextureID)(intptr_t)v.thumbnail_texture, ImVec2(40, 24));
-                } else if (v.is_image) {
-                    ImGui::TextColored(ImVec4(0.9f, 0.65f, 0.2f, 1.0f), "[IMG]");
-                } else {
-                    ImGui::TextColored(ImVec4(0.3f, 0.7f, 1.0f, 1.0f), "[VID]");
-                }
-
-                ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%s", v.id.c_str());
-
-                ImGui::TableSetColumnIndex(2);
-                ImGui::TextUnformatted(filename.c_str());
-
-                ImGui::TableSetColumnIndex(3);
-                ImGui::Text("%s", format_timecode(v.duration, false).c_str());
-
-                ImGui::TableSetColumnIndex(4);
-                ImGui::Text("%dx%d", v.width, v.height);
             }
-        }
 
-        // 2. Audio
-        if (m_filter_type == 0 || m_filter_type == 3) {
-            for (const auto& a : project.audio_assets) {
-                std::string filename = fs::path(a.path).filename().string();
-                std::string filename_lower = filename;
-                std::transform(filename_lower.begin(), filename_lower.end(), filename_lower.begin(), ::tolower);
-                if (!search_str.empty() && filename_lower.find(search_str) == std::string::npos) {
+            ImGui::EndTable();
+        }
+    } else {
+        // Grid View
+        if (ImGui::BeginChild("AssetGridRegion", ImVec2(0, table_height), true, ImGuiWindowFlags_AlwaysVerticalScrollbar)) {
+            float avail_w = ImGui::GetContentRegionAvail().x;
+            float card_w = 104.0f;
+            float card_h = 105.0f;
+            float card_pad = 8.0f;
+            int cols = std::max(1, static_cast<int>(avail_w / (card_w + card_pad)));
+
+            bool show_headers = !project.asset_folders.empty();
+
+            for (const auto& grp : groups) {
+                if (grp.is_root && grp.total_items() == 0 && show_headers && m_selected_folder_filter.empty()) {
                     continue;
                 }
 
-                const float row_height = 36.0f;
-                ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
-                bool is_selected = (m_selected_asset_id == a.id && !m_selected_is_video && !m_selected_is_prefab);
-
-                ImGui::TableSetColumnIndex(0);
-                std::string sel_id = "##sel_a_" + a.id;
-                if (ImGui::Selectable(sel_id.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap, ImVec2(0, row_height))) {
-                    m_selected_asset_id = a.id;
-                    m_selected_is_video = false;
-                    m_selected_is_prefab = false;
+                bool open = true;
+                if (show_headers) {
+                    std::string header_title = (grp.is_root ? "📁 (Root)" : ("📁 " + grp.name)) + " (" + std::to_string(grp.total_items()) + ")";
+                    std::string header_id = header_title + "###fld_hdr_" + (grp.is_root ? std::string("__root__") : grp.name);
+                    open = ImGui::CollapsingHeader(header_id.c_str(), ImGuiTreeNodeFlags_DefaultOpen);
+                    if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && !grp.is_root) {
+                        m_context_folder_name = grp.name;
+                        ImGui::OpenPopup("FolderHeaderContextMenu");
+                    }
+                    handle_folder_drop_target(grp.name, grp.is_root);
                 }
 
-                // Handle double-click and right-click
-                if (ImGui::IsItemHovered()) {
-                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                        m_selected_asset_id = a.id;
-                        m_selected_is_video = false;
-                        m_selected_is_prefab = false;
-                        if (on_add_to_timeline) {
-                            on_add_to_timeline(a.id, false);
+                if (open) {
+                    int col_idx = 0;
+
+                    if (grp.total_items() == 0 && show_headers) {
+                        ImGui::TextDisabled("  (Empty folder - drag assets here)");
+                    }
+
+                    // Videos & Images
+                    for (const auto* vp : grp.videos) {
+                        const auto& v = *vp;
+                        std::string filename = fs::path(v.path).filename().string();
+                        if (col_idx > 0) ImGui::SameLine(0.0f, card_pad);
+
+                        ImGui::PushID(v.id.c_str());
+                        ImVec2 p_min = ImGui::GetCursorScreenPos();
+                        ImVec2 p_max = ImVec2(p_min.x + card_w, p_min.y + card_h);
+                        bool is_sel = (m_selected_asset_id == v.id && m_selected_is_video && !m_selected_is_prefab);
+
+                        std::string sel_id = "##grid_v_" + v.id;
+                        if (ImGui::Selectable(sel_id.c_str(), is_sel, ImGuiSelectableFlags_AllowItemOverlap, ImVec2(card_w, card_h))) {
+                            select_asset(v.id, true, false);
                         }
+                        bool hovered = ImGui::IsItemHovered();
+                        std::string dur_str = v.is_image ? "Image" : format_timecode(v.duration, false);
+
+                        if (hovered) {
+                            ImGui::SetTooltip("%s\nID: %s\n%s\n%dx%d", filename.c_str(), v.id.c_str(), dur_str.c_str(), v.width, v.height);
+                            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                                select_asset(v.id, true, false);
+                                if (on_add_to_timeline) on_add_to_timeline(v.id, true);
+                            }
+                            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                                select_asset(v.id, true, false);
+                                m_context_asset_id = v.id;
+                                m_context_is_video = true;
+                                m_context_is_prefab = false;
+                                m_open_asset_context = true;
+                                item_was_right_clicked = true;
+                            }
+                        }
+
+                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                            ImGui::SetDragDropPayload("MINICUT_ASSET_VIDEO", v.id.c_str(), v.id.size() + 1);
+                            ImGui::Text("Add video %s to timeline", filename.c_str());
+                            ImGui::EndDragDropSource();
+                        }
+
+                        ImDrawList* dl = ImGui::GetWindowDrawList();
+                        if (is_sel) {
+                            dl->AddRect(p_min, p_max, IM_COL32(66, 150, 250, 255), 4.0f, 0, 2.0f);
+                        } else if (hovered) {
+                            dl->AddRect(p_min, p_max, IM_COL32(110, 110, 110, 200), 4.0f, 0, 1.0f);
+                        } else {
+                            dl->AddRect(p_min, p_max, IM_COL32(45, 45, 50, 160), 4.0f, 0, 1.0f);
+                        }
+
+                        ImVec2 thumb_pos = ImVec2(p_min.x + 2.0f, p_min.y + 2.0f);
+                        ImVec2 thumb_size = ImVec2(card_w - 4.0f, 54.0f);
+                        if (v.thumbnail_texture) {
+                            dl->AddImage((ImTextureID)(intptr_t)v.thumbnail_texture, thumb_pos, ImVec2(thumb_pos.x + thumb_size.x, thumb_pos.y + thumb_size.y));
+                        } else {
+                            ImU32 bg_col = v.is_image ? IM_COL32(64, 72, 51, 255) : IM_COL32(46, 56, 71, 255);
+                            dl->AddRectFilled(thumb_pos, ImVec2(thumb_pos.x + thumb_size.x, thumb_pos.y + thumb_size.y), bg_col, 2.0f);
+                            const char* placeholder = v.is_image ? "[Image]" : "[Video]";
+                            ImVec2 txt_sz = ImGui::CalcTextSize(placeholder);
+                            dl->AddText(ImVec2(thumb_pos.x + (thumb_size.x - txt_sz.x) * 0.5f, thumb_pos.y + (thumb_size.y - txt_sz.y) * 0.5f), IM_COL32(200, 200, 200, 255), placeholder);
+                        }
+
+                        ImU32 tag_col = v.is_image ? IM_COL32(230, 166, 51, 255) : IM_COL32(77, 179, 255, 255);
+                        std::string id_tag = "[" + v.id + "]";
+                        dl->AddText(ImVec2(p_min.x + 4.0f, p_min.y + 58.0f), tag_col, id_tag.c_str());
+
+                        ImVec2 dur_sz = ImGui::CalcTextSize(dur_str.c_str());
+                        dl->AddText(ImVec2(p_max.x - dur_sz.x - 4.0f, p_min.y + 58.0f), IM_COL32(150, 150, 150, 255), dur_str.c_str());
+
+                        std::string short_name = filename;
+                        if (short_name.length() > 12) short_name = short_name.substr(0, 10) + "..";
+                        dl->AddText(ImVec2(p_min.x + 4.0f, p_min.y + 74.0f), IM_COL32(230, 230, 230, 255), short_name.c_str());
+
+                        ImGui::PopID();
+                        col_idx++;
+                        if (col_idx >= cols) col_idx = 0;
                     }
-                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-                        m_selected_asset_id = a.id;
-                        m_selected_is_video = false;
-                        m_selected_is_prefab = false;
-                        m_context_asset_id = a.id;
-                        m_context_is_video = false;
-                        m_context_is_prefab = false;
-                        m_open_asset_context = true;
-                        item_was_right_clicked = true;
+
+                    // Audio
+                    for (const auto* ap : grp.audios) {
+                        const auto& a = *ap;
+                        std::string filename = fs::path(a.path).filename().string();
+                        if (col_idx > 0) ImGui::SameLine(0.0f, card_pad);
+
+                        ImGui::PushID(a.id.c_str());
+                        ImVec2 p_min = ImGui::GetCursorScreenPos();
+                        ImVec2 p_max = ImVec2(p_min.x + card_w, p_min.y + card_h);
+                        bool is_sel = (m_selected_asset_id == a.id && !m_selected_is_video && !m_selected_is_prefab);
+
+                        std::string sel_id = "##grid_a_" + a.id;
+                        if (ImGui::Selectable(sel_id.c_str(), is_sel, ImGuiSelectableFlags_AllowItemOverlap, ImVec2(card_w, card_h))) {
+                            select_asset(a.id, false, false);
+                        }
+                        bool hovered = ImGui::IsItemHovered();
+                        std::string dur_str = format_timecode(a.duration, false);
+
+                        if (hovered) {
+                            ImGui::SetTooltip("%s\nID: %s\n%s\n%dHz %dch", filename.c_str(), a.id.c_str(), dur_str.c_str(), a.sample_rate, a.channels);
+                            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                                select_asset(a.id, false, false);
+                                if (on_add_to_timeline) on_add_to_timeline(a.id, false);
+                            }
+                            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                                select_asset(a.id, false, false);
+                                m_context_asset_id = a.id;
+                                m_context_is_video = false;
+                                m_context_is_prefab = false;
+                                m_open_asset_context = true;
+                                item_was_right_clicked = true;
+                            }
+                        }
+
+                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                            ImGui::SetDragDropPayload("MINICUT_ASSET_AUDIO", a.id.c_str(), a.id.size() + 1);
+                            ImGui::Text("Add audio %s to timeline", filename.c_str());
+                            ImGui::EndDragDropSource();
+                        }
+
+                        ImDrawList* dl = ImGui::GetWindowDrawList();
+                        if (is_sel) {
+                            dl->AddRect(p_min, p_max, IM_COL32(66, 150, 250, 255), 4.0f, 0, 2.0f);
+                        } else if (hovered) {
+                            dl->AddRect(p_min, p_max, IM_COL32(110, 110, 110, 200), 4.0f, 0, 1.0f);
+                        } else {
+                            dl->AddRect(p_min, p_max, IM_COL32(45, 45, 50, 160), 4.0f, 0, 1.0f);
+                        }
+
+                        ImVec2 thumb_pos = ImVec2(p_min.x + 2.0f, p_min.y + 2.0f);
+                        ImVec2 thumb_size = ImVec2(card_w - 4.0f, 54.0f);
+                        dl->AddRectFilled(thumb_pos, ImVec2(thumb_pos.x + thumb_size.x, thumb_pos.y + thumb_size.y), IM_COL32(41, 82, 56, 255), 2.0f);
+                        const char* placeholder = "[Audio]";
+                        ImVec2 txt_sz = ImGui::CalcTextSize(placeholder);
+                        dl->AddText(ImVec2(thumb_pos.x + (thumb_size.x - txt_sz.x) * 0.5f, thumb_pos.y + (thumb_size.y - txt_sz.y) * 0.5f), IM_COL32(200, 200, 200, 255), placeholder);
+
+                        std::string id_tag = "[" + a.id + "]";
+                        dl->AddText(ImVec2(p_min.x + 4.0f, p_min.y + 58.0f), IM_COL32(51, 217, 128, 255), id_tag.c_str());
+
+                        ImVec2 dur_sz = ImGui::CalcTextSize(dur_str.c_str());
+                        dl->AddText(ImVec2(p_max.x - dur_sz.x - 4.0f, p_min.y + 58.0f), IM_COL32(150, 150, 150, 255), dur_str.c_str());
+
+                        std::string short_name = filename;
+                        if (short_name.length() > 12) short_name = short_name.substr(0, 10) + "..";
+                        dl->AddText(ImVec2(p_min.x + 4.0f, p_min.y + 74.0f), IM_COL32(230, 230, 230, 255), short_name.c_str());
+
+                        ImGui::PopID();
+                        col_idx++;
+                        if (col_idx >= cols) col_idx = 0;
+                    }
+
+                    // Prefabs
+                    for (const auto* pfp : grp.prefabs) {
+                        const auto& pf = *pfp;
+                        std::string pf_name = pf.name;
+                        if (col_idx > 0) ImGui::SameLine(0.0f, card_pad);
+
+                        ImGui::PushID(pf.id.c_str());
+                        ImVec2 p_min = ImGui::GetCursorScreenPos();
+                        ImVec2 p_max = ImVec2(p_min.x + card_w, p_min.y + card_h);
+                        bool is_sel = (m_selected_asset_id == pf.id && m_selected_is_prefab);
+
+                        std::string sel_id = "##grid_pf_" + pf.id;
+                        if (ImGui::Selectable(sel_id.c_str(), is_sel, ImGuiSelectableFlags_AllowItemOverlap, ImVec2(card_w, card_h))) {
+                            select_asset(pf.id, true, true);
+                        }
+                        bool hovered = ImGui::IsItemHovered();
+                        std::string dur_str = format_timecode(pf.duration, false);
+
+                        if (hovered) {
+                            ImGui::SetTooltip("Prefab: %s\nID: %s\n%s\n%dV %dA (%dc)", pf_name.c_str(), pf.id.c_str(), dur_str.c_str(), pf.video_tracks, pf.audio_tracks, pf.total_clips);
+                            if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
+                                select_asset(pf.id, true, true);
+                                if (on_add_prefab_to_timeline) on_add_prefab_to_timeline(pf.id, playhead_time);
+                            }
+                            if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
+                                select_asset(pf.id, true, true);
+                                m_context_asset_id = pf.id;
+                                m_context_is_video = true;
+                                m_context_is_prefab = true;
+                                m_open_asset_context = true;
+                                item_was_right_clicked = true;
+                            }
+                        }
+
+                        if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
+                            ImGui::SetDragDropPayload("MINICUT_ASSET_PREFAB", pf.id.c_str(), pf.id.size() + 1);
+                            ImGui::Text("Insert prefab %s at playhead", pf_name.c_str());
+                            ImGui::EndDragDropSource();
+                        }
+
+                        ImDrawList* dl = ImGui::GetWindowDrawList();
+                        if (is_sel) {
+                            dl->AddRect(p_min, p_max, IM_COL32(66, 150, 250, 255), 4.0f, 0, 2.0f);
+                        } else if (hovered) {
+                            dl->AddRect(p_min, p_max, IM_COL32(110, 110, 110, 200), 4.0f, 0, 1.0f);
+                        } else {
+                            dl->AddRect(p_min, p_max, IM_COL32(45, 45, 50, 160), 4.0f, 0, 1.0f);
+                        }
+
+                        ImVec2 thumb_pos = ImVec2(p_min.x + 2.0f, p_min.y + 2.0f);
+                        ImVec2 thumb_size = ImVec2(card_w - 4.0f, 54.0f);
+                        if (pf.thumbnail_texture) {
+                            dl->AddImage((ImTextureID)(intptr_t)pf.thumbnail_texture, thumb_pos, ImVec2(thumb_pos.x + thumb_size.x, thumb_pos.y + thumb_size.y));
+                        } else {
+                            dl->AddRectFilled(thumb_pos, ImVec2(thumb_pos.x + thumb_size.x, thumb_pos.y + thumb_size.y), IM_COL32(82, 46, 97, 255), 2.0f);
+                            const char* placeholder = "[Prefab]";
+                            ImVec2 txt_sz = ImGui::CalcTextSize(placeholder);
+                            dl->AddText(ImVec2(thumb_pos.x + (thumb_size.x - txt_sz.x) * 0.5f, thumb_pos.y + (thumb_size.y - txt_sz.y) * 0.5f), IM_COL32(200, 200, 200, 255), placeholder);
+                        }
+
+                        std::string id_tag = "[" + pf.id + "]";
+                        dl->AddText(ImVec2(p_min.x + 4.0f, p_min.y + 58.0f), IM_COL32(217, 115, 255, 255), id_tag.c_str());
+
+                        ImVec2 dur_sz = ImGui::CalcTextSize(dur_str.c_str());
+                        dl->AddText(ImVec2(p_max.x - dur_sz.x - 4.0f, p_min.y + 58.0f), IM_COL32(150, 150, 150, 255), dur_str.c_str());
+
+                        std::string short_name = pf_name;
+                        if (short_name.length() > 12) short_name = short_name.substr(0, 10) + "..";
+                        dl->AddText(ImVec2(p_min.x + 4.0f, p_min.y + 74.0f), IM_COL32(230, 230, 230, 255), short_name.c_str());
+
+                        ImGui::PopID();
+                        col_idx++;
+                        if (col_idx >= cols) col_idx = 0;
                     }
                 }
-
-                // Drag & Drop Source
-                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
-                    ImGui::SetDragDropPayload("MINICUT_ASSET_AUDIO", a.id.c_str(), a.id.size() + 1);
-                    ImGui::Text("Add audio %s to timeline", filename.c_str());
-                    ImGui::EndDragDropSource();
-                }
-
-                ImGui::SameLine(0.0f, 4.0f);
-                ImGui::TextColored(ImVec4(0.2f, 0.8f, 0.5f, 1.0f), "[AUD]");
-
-                ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%s", a.id.c_str());
-
-                ImGui::TableSetColumnIndex(2);
-                ImGui::TextUnformatted(filename.c_str());
-
-                ImGui::TableSetColumnIndex(3);
-                ImGui::Text("%s", format_timecode(a.duration, false).c_str());
-
-                ImGui::TableSetColumnIndex(4);
-                ImGui::Text("%dHz %dch", a.sample_rate, a.channels);
             }
         }
-
-        // 3. Project Prefabs
-        if (m_filter_type == 0 || m_filter_type == 4) {
-            for (const auto& pf : project.prefabs) {
-                std::string pf_lower = pf.name;
-                std::transform(pf_lower.begin(), pf_lower.end(), pf_lower.begin(), ::tolower);
-                if (!search_str.empty() && pf_lower.find(search_str) == std::string::npos) {
-                    continue;
-                }
-
-                const float row_height = 36.0f;
-                ImGui::TableNextRow(ImGuiTableRowFlags_None, row_height);
-                bool is_selected = (m_selected_asset_id == pf.id && m_selected_is_prefab);
-
-                ImGui::TableSetColumnIndex(0);
-                std::string sel_id = "##sel_pf_" + pf.id;
-                if (ImGui::Selectable(sel_id.c_str(), is_selected, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap, ImVec2(0, row_height))) {
-                    m_selected_asset_id = pf.id;
-                    m_selected_is_prefab = true;
-                }
-
-                // Double click & right-click
-                if (ImGui::IsItemHovered()) {
-                    if (ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left)) {
-                        m_selected_asset_id = pf.id;
-                        m_selected_is_prefab = true;
-                        if (on_add_prefab_to_timeline) {
-                            on_add_prefab_to_timeline(pf.id, playhead_time);
-                        }
-                    }
-                    if (ImGui::IsMouseClicked(ImGuiMouseButton_Right)) {
-                        m_selected_asset_id = pf.id;
-                        m_selected_is_prefab = true;
-                        m_context_asset_id = pf.id;
-                        m_context_is_prefab = true;
-                        m_open_asset_context = true;
-                        item_was_right_clicked = true;
-                    }
-                }
-
-                // Drag & Drop Source
-                if (ImGui::BeginDragDropSource(ImGuiDragDropFlags_SourceAllowNullID)) {
-                    ImGui::SetDragDropPayload("MINICUT_ASSET_PREFAB", pf.id.c_str(), pf.id.size() + 1);
-                    ImGui::Text("Insert prefab %s at playhead", pf.name.c_str());
-                    ImGui::EndDragDropSource();
-                }
-
-                ImGui::SameLine(0.0f, 4.0f);
-                if (pf.thumbnail_texture) {
-                    ImGui::Image((ImTextureID)(intptr_t)pf.thumbnail_texture, ImVec2(40, 24));
-                } else {
-                    ImGui::TextColored(ImVec4(0.85f, 0.45f, 1.0f, 1.0f), "[PF]");
-                }
-
-                ImGui::TableSetColumnIndex(1);
-                ImGui::Text("%s", pf.id.c_str());
-
-                ImGui::TableSetColumnIndex(2);
-                std::string display_name = "[Prefab] " + pf.name;
-                ImGui::TextUnformatted(display_name.c_str());
-
-                ImGui::TableSetColumnIndex(3);
-                ImGui::Text("%s", format_timecode(pf.duration, false).c_str());
-
-                ImGui::TableSetColumnIndex(4);
-                ImGui::Text("%dV %dA (%dc)", pf.video_tracks, pf.audio_tracks, pf.total_clips);
-            }
-        }
-
-        ImGui::EndTable();
+        ImGui::EndChild();
     }
 
     // Right click on empty space of the window or table
@@ -1090,6 +1615,30 @@ void ClipManager::render_ui(Project& project, double playhead_time,
 
                 ImGui::Separator();
 
+                std::string curr_folder = pf->folder;
+                if (ImGui::BeginMenu("Move to Folder")) {
+                    if (ImGui::MenuItem("None (Root)", nullptr, curr_folder.empty())) {
+                        set_asset_folder(project, pf->id, true, true, "");
+                        if (on_project_changed) on_project_changed();
+                    }
+                    ImGui::Separator();
+                    for (const auto& fld : project.asset_folders) {
+                        if (ImGui::MenuItem(fld.c_str(), nullptr, curr_folder == fld)) {
+                            set_asset_folder(project, pf->id, true, true, fld);
+                            if (on_project_changed) on_project_changed();
+                        }
+                    }
+                    ImGui::Separator();
+                    if (ImGui::MenuItem("+ New Folder...")) {
+                        m_show_new_folder_dialog = true;
+                        std::memset(m_folder_input_buf, 0, sizeof(m_folder_input_buf));
+                        m_folder_target_asset_id = pf->id;
+                        m_folder_target_is_video = true;
+                        m_folder_target_is_prefab = true;
+                    }
+                    ImGui::EndMenu();
+                }
+
                 if (ImGui::MenuItem("- Delete Prefab from Pool", "Del")) {
                     remove_prefab(project, pf->id, false);
                     if (on_project_changed) on_project_changed();
@@ -1107,12 +1656,26 @@ void ClipManager::render_ui(Project& project, double playhead_time,
             int usages = get_asset_usage_count(project, cid);
 
             if (is_vid) {
-                const auto* va = project.find_video_asset(cid);
+                auto* va = project.find_video_asset_mut(cid);
                 if (va) {
                     file_path = va->path;
                     file_name = fs::path(va->path).filename().string();
                     ImGui::TextColored(ImVec4(0.3f, 0.75f, 1.0f, 1.0f), "[%s] %s", va->id.c_str(), va->is_image ? "Image" : "Video");
                     ImGui::Text("%dx%d | %s", va->width, va->height, format_timecode(va->duration, false).c_str());
+
+                    float sx = static_cast<float>(va->scale_x);
+                    float sy = static_cast<float>(va->scale_y);
+                    ImGui::SetNextItemWidth(100.0f);
+                    if (ImGui::DragFloat(_TR("inspector_scale_x"), &sx, 0.01f, 0.01f, 10.0f, "%.2fx")) {
+                        va->scale_x = std::max(0.01, static_cast<double>(sx));
+                        va->scale = va->scale_x;
+                        if (on_project_changed) on_project_changed();
+                    }
+                    ImGui::SetNextItemWidth(100.0f);
+                    if (ImGui::DragFloat(_TR("inspector_scale_y"), &sy, 0.01f, 0.01f, 10.0f, "%.2fx")) {
+                        va->scale_y = std::max(0.01, static_cast<double>(sy));
+                        if (on_project_changed) on_project_changed();
+                    }
                 }
             } else {
                 const auto* aa = project.find_audio_asset(cid);
@@ -1142,6 +1705,30 @@ void ClipManager::render_ui(Project& project, double playhead_time,
             }
 
             ImGui::Separator();
+
+            std::string curr_folder = get_asset_folder(project, cid, is_vid, false);
+            if (ImGui::BeginMenu("Move to Folder")) {
+                if (ImGui::MenuItem("None (Root)", nullptr, curr_folder.empty())) {
+                    set_asset_folder(project, cid, is_vid, false, "");
+                    if (on_project_changed) on_project_changed();
+                }
+                ImGui::Separator();
+                for (const auto& fld : project.asset_folders) {
+                    if (ImGui::MenuItem(fld.c_str(), nullptr, curr_folder == fld)) {
+                        set_asset_folder(project, cid, is_vid, false, fld);
+                        if (on_project_changed) on_project_changed();
+                    }
+                }
+                ImGui::Separator();
+                if (ImGui::MenuItem("+ New Folder...")) {
+                    m_show_new_folder_dialog = true;
+                    std::memset(m_folder_input_buf, 0, sizeof(m_folder_input_buf));
+                    m_folder_target_asset_id = cid;
+                    m_folder_target_is_video = is_vid;
+                    m_folder_target_is_prefab = false;
+                }
+                ImGui::EndMenu();
+            }
 
             if (ImGui::MenuItem("- Delete from Clip Pool", "Del")) {
                 remove_asset(project, cid, is_vid, true);
@@ -1182,18 +1769,141 @@ void ClipManager::render_ui(Project& project, double playhead_time,
             if (on_import_prefab) on_import_prefab();
         }
         ImGui::Separator();
+        if (ImGui::MenuItem("+ New Folder...")) {
+            m_show_new_folder_dialog = true;
+            std::memset(m_folder_input_buf, 0, sizeof(m_folder_input_buf));
+            m_folder_target_asset_id.clear();
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem(_TR("project_generate_demo"))) {
+            if (on_generate_demo) on_generate_demo();
+        }
+        ImGui::Separator();
+        if (ImGui::BeginMenu("View Mode")) {
+            if (ImGui::MenuItem("List View", nullptr, m_view_mode == 0)) {
+                m_view_mode = 0;
+            }
+            if (ImGui::MenuItem("Grid View", nullptr, m_view_mode == 1)) {
+                m_view_mode = 1;
+            }
+            ImGui::EndMenu();
+        }
+        ImGui::Separator();
         if (ImGui::MenuItem("Delete All Unused Assets")) {
             int removed = delete_unused_assets(project);
             if (removed > 0 && on_project_changed) on_project_changed();
         }
         if (ImGui::MenuItem("Clear Selection")) {
-            m_selected_asset_id.clear();
-            m_selected_is_prefab = false;
+            clear_selection();
+        }
+        ImGui::EndPopup();
+    }
+
+    // Context menu for folder header
+    if (ImGui::BeginPopup("FolderHeaderContextMenu")) {
+        ImGui::TextDisabled("Folder: %s", m_context_folder_name.c_str());
+        ImGui::Separator();
+        if (ImGui::MenuItem("Rename Folder...")) {
+            m_show_rename_folder_dialog = true;
+            std::snprintf(m_folder_input_buf, sizeof(m_folder_input_buf), "%s", m_context_folder_name.c_str());
+        }
+        if (ImGui::MenuItem("Delete Folder")) {
+            delete_folder(project, m_context_folder_name);
+            if (on_project_changed) on_project_changed();
+        }
+        ImGui::Separator();
+        if (ImGui::MenuItem("+ New Folder...")) {
+            m_show_new_folder_dialog = true;
+            std::memset(m_folder_input_buf, 0, sizeof(m_folder_input_buf));
+            m_folder_target_asset_id.clear();
+        }
+        ImGui::EndPopup();
+    }
+
+    // Modal: New Asset Folder
+    if (m_show_new_folder_dialog) {
+        ImGui::OpenPopup("New Asset Folder");
+        m_show_new_folder_dialog = false;
+    }
+    if (ImGui::BeginPopupModal("New Asset Folder", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Enter folder name:");
+        bool enter = ImGui::InputText("##new_folder_name", m_folder_input_buf, sizeof(m_folder_input_buf), ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::Spacing();
+        if (ImGui::Button("OK", ImVec2(80, 0)) || enter) {
+            std::string fname = m_folder_input_buf;
+            if (!fname.empty()) {
+                create_folder(project, fname);
+                if (!m_folder_target_asset_id.empty()) {
+                    set_asset_folder(project, m_folder_target_asset_id, m_folder_target_is_video, m_folder_target_is_prefab, fname);
+                    m_folder_target_asset_id.clear();
+                }
+                if (on_project_changed) on_project_changed();
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(80, 0))) {
+            m_folder_target_asset_id.clear();
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    // Modal: Rename Asset Folder
+    if (m_show_rename_folder_dialog) {
+        ImGui::OpenPopup("Rename Asset Folder");
+        m_show_rename_folder_dialog = false;
+    }
+    if (ImGui::BeginPopupModal("Rename Asset Folder", nullptr, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Enter new name for '%s':", m_context_folder_name.c_str());
+        bool enter = ImGui::InputText("##rename_folder_name", m_folder_input_buf, sizeof(m_folder_input_buf), ImGuiInputTextFlags_EnterReturnsTrue);
+        ImGui::Spacing();
+        if (ImGui::Button("OK", ImVec2(80, 0)) || enter) {
+            std::string nname = m_folder_input_buf;
+            if (!nname.empty() && nname != m_context_folder_name) {
+                rename_folder(project, m_context_folder_name, nname);
+                if (on_project_changed) on_project_changed();
+            }
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel", ImVec2(80, 0))) {
+            ImGui::CloseCurrentPopup();
         }
         ImGui::EndPopup();
     }
 
     ImGui::Separator();
+
+    // Inline Scale X / Scale Y for selected video/image asset
+    if (!m_selected_asset_id.empty() && m_selected_is_video && !m_selected_is_prefab) {
+        if (auto* sel_va = project.find_video_asset_mut(m_selected_asset_id)) {
+            float sx = static_cast<float>(sel_va->scale_x);
+            float sy = static_cast<float>(sel_va->scale_y);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextDisabled("Asset Scale:");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(65.0f);
+            if (ImGui::DragFloat("X##AssetSX", &sx, 0.01f, 0.01f, 10.0f, "%.2fx")) {
+                sel_va->scale_x = std::max(0.01, static_cast<double>(sx));
+                sel_va->scale = sel_va->scale_x;
+                if (on_project_changed) on_project_changed();
+            }
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(65.0f);
+            if (ImGui::DragFloat("Y##AssetSY", &sy, 0.01f, 0.01f, 10.0f, "%.2fx")) {
+                sel_va->scale_y = std::max(0.01, static_cast<double>(sy));
+                if (on_project_changed) on_project_changed();
+            }
+            ImGui::SameLine();
+            if (ImGui::SmallButton("R##ResetAssetScale")) {
+                sel_va->scale = 1.0;
+                sel_va->scale_x = 1.0;
+                sel_va->scale_y = 1.0;
+                if (on_project_changed) on_project_changed();
+            }
+        }
+    }
 
     // Bottom Action buttons
     if (ImGui::Button("+ Add to Timeline", ImVec2(120, 26))) {
@@ -1245,3 +1955,61 @@ void ClipManager::render_ui(Project& project, double playhead_time,
     ImGui::SameLine();
     ImGui::TextDisabled("(Del to delete, Dbl-click to add)");
 }
+
+bool ClipManager::create_folder(Project& project, const std::string& folder_name) {
+    if (folder_name.empty()) return false;
+    return project.add_asset_folder(folder_name);
+}
+
+bool ClipManager::rename_folder(Project& project, const std::string& old_name, const std::string& new_name) {
+    if (old_name.empty() || new_name.empty() || old_name == new_name) return false;
+    if (m_selected_folder_filter == old_name) {
+        m_selected_folder_filter = new_name;
+    }
+    return project.rename_asset_folder(old_name, new_name);
+}
+
+bool ClipManager::delete_folder(Project& project, const std::string& folder_name) {
+    if (folder_name.empty()) return false;
+    if (m_selected_folder_filter == folder_name) {
+        m_selected_folder_filter.clear();
+    }
+    return project.remove_asset_folder(folder_name);
+}
+
+void ClipManager::set_asset_folder(Project& project, const std::string& asset_id, bool is_video, bool is_prefab, const std::string& folder_name) {
+    if (!folder_name.empty()) {
+        project.add_asset_folder(folder_name);
+    }
+    if (is_prefab) {
+        if (auto* pf = project.find_prefab_mut(asset_id)) {
+            pf->folder = folder_name;
+        }
+    } else if (is_video) {
+        if (auto* va = project.find_video_asset_mut(asset_id)) {
+            va->folder = folder_name;
+        }
+    } else {
+        if (auto* aa = project.find_audio_asset_mut(asset_id)) {
+            aa->folder = folder_name;
+        }
+    }
+}
+
+std::string ClipManager::get_asset_folder(const Project& project, const std::string& asset_id, bool is_video, bool is_prefab) const {
+    if (is_prefab) {
+        if (const auto* pf = project.find_prefab(asset_id)) {
+            return pf->folder;
+        }
+    } else if (is_video) {
+        if (const auto* va = project.find_video_asset(asset_id)) {
+            return va->folder;
+        }
+    } else {
+        if (const auto* aa = project.find_audio_asset(asset_id)) {
+            return aa->folder;
+        }
+    }
+    return "";
+}
+

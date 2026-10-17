@@ -2,6 +2,7 @@
 #include "MediaDecoder.h"
 #include "TempManager.h"
 #include "TextGenerator.h"
+#include "ProjectSerializer.h"
 #include <imgui.h>
 #include <filesystem>
 #include <iostream>
@@ -28,6 +29,7 @@ static std::string format_srt_time(double seconds) {
     snprintf(buf, sizeof(buf), "%02d:%02d:%02d,%03d", hr, min, sec, ms);
     return std::string(buf);
 }
+
 
 bool ExportManager::write_srt_file(const std::string& srt_path, const Project& project) {
     struct Cue {
@@ -225,9 +227,247 @@ bool ExportManager::delete_format_preset(int index) {
 
 ExportManager::~ExportManager() {
     cancel_export();
+    cancel_batch_processing();
     if (m_worker_thread.joinable()) {
         m_worker_thread.join();
     }
+    if (m_batch_thread.joinable()) {
+        m_batch_thread.join();
+    }
+}
+
+std::string ExportManager::get_error_message() {
+    std::lock_guard<std::mutex> lock(m_status_mutex);
+    return m_error_message;
+}
+
+bool ExportManager::export_headless_sync(const Project& project, const ExportConfig& config,
+                                        const std::function<void(float progress, const std::string& status)>& progress_cb) {
+    if (m_is_exporting.load()) {
+        return false;
+    }
+
+    if (m_worker_thread.joinable()) {
+        m_worker_thread.join();
+    }
+
+    m_config = config;
+    m_progress.store(0.0f);
+    m_audio_progress.store(0.0f);
+    m_current_frame.store(0);
+    m_total_frames.store(0);
+    m_is_finished.store(false);
+    m_is_error.store(false);
+    m_cancel_requested.store(false);
+    m_is_exporting.store(true);
+
+    {
+        std::lock_guard<std::mutex> lock(m_status_mutex);
+        m_status_text = "Starting export pipeline...";
+        m_error_message.clear();
+    }
+
+    std::thread worker(&ExportManager::export_thread_func, this, project, config);
+    float last_reported = -1.0f;
+    std::string last_status = "";
+    while (m_is_exporting.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        float p = m_progress.load();
+        std::string s = get_status_text();
+        if (progress_cb && (std::abs(p - last_reported) >= 0.01f || s != last_status)) {
+            last_reported = p;
+            last_status = s;
+            progress_cb(p, s);
+        }
+    }
+
+    if (worker.joinable()) {
+        worker.join();
+    }
+
+    if (progress_cb) {
+        progress_cb(m_progress.load(), get_status_text());
+    }
+
+    return m_is_finished.load() && !m_is_error.load();
+}
+
+void ExportManager::add_batch_job(const std::string& project_path, const std::string& output_path,
+                                  const std::string& format, int width, int height, int fps) {
+    std::lock_guard<std::mutex> lock(m_batch_mutex);
+    BatchJob job;
+    job.id = m_next_batch_job_id++;
+    job.project_path = project_path;
+    if (output_path.empty()) {
+        fs::path p(project_path);
+        std::string stem = p.stem().string();
+        std::string ext = "." + format;
+        if (!p.parent_path().empty()) {
+            job.output_path = (p.parent_path() / (stem + ext)).string();
+        } else {
+            job.output_path = stem + ext;
+        }
+    } else {
+        job.output_path = output_path;
+    }
+    job.format = format;
+    job.width = width;
+    job.height = height;
+    job.fps = fps;
+    job.status = BatchJob::Status::Queued;
+    job.progress = 0.0f;
+    m_batch_jobs.push_back(job);
+}
+
+bool ExportManager::edit_batch_job(int job_id, const std::string& project_path, const std::string& output_path,
+                                   const std::string& format, int width, int height, int fps) {
+    std::lock_guard<std::mutex> lock(m_batch_mutex);
+    for (auto& job : m_batch_jobs) {
+        if (job.id == job_id) {
+            if (job.status == BatchJob::Status::Processing) return false;
+            job.project_path = project_path;
+            job.output_path = output_path;
+            job.format = format;
+            job.width = width;
+            job.height = height;
+            job.fps = fps;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool ExportManager::delete_batch_job(int job_id) {
+    std::lock_guard<std::mutex> lock(m_batch_mutex);
+    auto it = std::remove_if(m_batch_jobs.begin(), m_batch_jobs.end(), [&](const BatchJob& j) {
+        return j.id == job_id && j.status != BatchJob::Status::Processing;
+    });
+    if (it != m_batch_jobs.end()) {
+        m_batch_jobs.erase(it, m_batch_jobs.end());
+        if (m_selected_batch_job_id == job_id) {
+            m_selected_batch_job_id = -1;
+        }
+        return true;
+    }
+    return false;
+}
+
+void ExportManager::clear_batch_jobs() {
+    std::lock_guard<std::mutex> lock(m_batch_mutex);
+    if (m_is_batch_running.load()) return;
+    m_batch_jobs.clear();
+    m_selected_batch_job_id = -1;
+}
+
+float ExportManager::get_batch_overall_progress() const {
+    std::lock_guard<std::mutex> lock(m_batch_mutex);
+    if (m_batch_jobs.empty()) return 0.0f;
+    float sum = 0.0f;
+    for (const auto& job : m_batch_jobs) {
+        if (job.status == BatchJob::Status::Completed) {
+            sum += 1.0f;
+        } else if (job.status == BatchJob::Status::Processing) {
+            sum += job.progress;
+        }
+    }
+    return sum / static_cast<float>(m_batch_jobs.size());
+}
+
+void ExportManager::start_batch_processing() {
+    if (m_is_batch_running.load() || m_is_exporting.load()) return;
+    if (m_batch_thread.joinable()) {
+        m_batch_thread.join();
+    }
+    m_is_batch_running.store(true);
+    m_batch_cancel_requested.store(false);
+    m_batch_thread = std::thread(&ExportManager::batch_thread_func, this);
+}
+
+void ExportManager::cancel_batch_processing() {
+    m_batch_cancel_requested.store(true);
+    cancel_export();
+}
+
+void ExportManager::batch_thread_func() {
+    m_is_batch_running.store(true);
+    m_batch_cancel_requested.store(false);
+
+    for (size_t i = 0; i < m_batch_jobs.size(); ++i) {
+        if (m_batch_cancel_requested.load()) {
+            std::lock_guard<std::mutex> lock(m_batch_mutex);
+            if (m_batch_jobs[i].status == BatchJob::Status::Queued) {
+                m_batch_jobs[i].status = BatchJob::Status::Cancelled;
+            }
+            continue;
+        }
+
+        BatchJob current_job;
+        {
+            std::lock_guard<std::mutex> lock(m_batch_mutex);
+            if (m_batch_jobs[i].status != BatchJob::Status::Queued) {
+                continue;
+            }
+            m_batch_jobs[i].status = BatchJob::Status::Processing;
+            m_batch_jobs[i].progress = 0.0f;
+            m_current_batch_job_id.store(m_batch_jobs[i].id);
+            current_job = m_batch_jobs[i];
+        }
+
+        if (!fs::exists(current_job.project_path)) {
+            std::lock_guard<std::mutex> lock(m_batch_mutex);
+            m_batch_jobs[i].status = BatchJob::Status::Failed;
+            m_batch_jobs[i].error_message = "Project file does not exist: " + current_job.project_path;
+            continue;
+        }
+
+        std::ifstream ifs(current_job.project_path);
+        if (!ifs.is_open()) {
+            std::lock_guard<std::mutex> lock(m_batch_mutex);
+            m_batch_jobs[i].status = BatchJob::Status::Failed;
+            m_batch_jobs[i].error_message = "Could not open project file";
+            continue;
+        }
+
+        std::string json_str((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+        Project sub_project;
+        if (!ProjectSerializer::deserialize_json(sub_project, json_str)) {
+            std::lock_guard<std::mutex> lock(m_batch_mutex);
+            m_batch_jobs[i].status = BatchJob::Status::Failed;
+            m_batch_jobs[i].error_message = "Failed to deserialize project JSON";
+            continue;
+        }
+
+        ExportConfig cfg;
+        cfg.output_path = current_job.output_path;
+        cfg.format = current_job.format;
+        cfg.width = current_job.width;
+        cfg.height = current_job.height;
+        cfg.fps = current_job.fps;
+
+        int job_idx = static_cast<int>(i);
+        bool ok = export_headless_sync(sub_project, cfg, [this, job_idx](float p, const std::string& st) {
+            std::lock_guard<std::mutex> lock(m_batch_mutex);
+            if (job_idx < static_cast<int>(m_batch_jobs.size())) {
+                m_batch_jobs[job_idx].progress = p;
+            }
+        });
+
+        {
+            std::lock_guard<std::mutex> lock(m_batch_mutex);
+            if (m_batch_cancel_requested.load()) {
+                m_batch_jobs[i].status = BatchJob::Status::Cancelled;
+            } else if (ok) {
+                m_batch_jobs[i].status = BatchJob::Status::Completed;
+                m_batch_jobs[i].progress = 1.0f;
+            } else {
+                m_batch_jobs[i].status = BatchJob::Status::Failed;
+                m_batch_jobs[i].error_message = get_error_message();
+            }
+        }
+    }
+
+    m_current_batch_job_id.store(0);
+    m_is_batch_running.store(false);
 }
 
 void ExportManager::set_output_path(const std::string& path) {
@@ -257,8 +497,8 @@ bool ExportManager::start_export(const Project& project, const ExportConfig& con
     if (m_is_exporting.load()) return false;
 
     m_config = config;
-    m_progress.store(0.0f);
-    m_audio_progress.store(0.0f);
+    m_audio_progress.store(0.10f);
+    m_progress.store(0.025f);
     m_current_frame.store(0);
     m_total_frames.store(0);
     m_is_finished.store(false);
@@ -268,7 +508,7 @@ bool ExportManager::start_export(const Project& project, const ExportConfig& con
 
     {
         std::lock_guard<std::mutex> lock(m_status_mutex);
-        m_status_text = "Preparing export snapshot...";
+        m_status_text = "Mixing timeline audio: 10%";
         m_error_message.clear();
     }
 
@@ -312,7 +552,7 @@ void ExportManager::export_thread_func(Project project_snapshot, ExportConfig co
     // ------------------------------------------------------------------------
     {
         std::lock_guard<std::mutex> lock(m_status_mutex);
-        m_status_text = "Mixing timeline audio...";
+        m_status_text = "Mixing timeline audio: 10%";
     }
 
     // Check if any active audio track exists
@@ -337,7 +577,7 @@ void ExportManager::export_thread_func(Project project_snapshot, ExportConfig co
                     path = a->path;
                 } else {
                     const auto* v = project_snapshot.find_video_asset(clip.asset_id);
-                    if (v && v->has_audio) path = v->path;
+                    if (v && (v->has_audio || !v->is_image)) path = v->path;
                 }
 
                 if (!path.empty() && audio_buffers.find(path) == audio_buffers.end()) {
@@ -397,7 +637,7 @@ void ExportManager::export_thread_func(Project project_snapshot, ExportConfig co
                         path = a->path;
                     } else {
                         const auto* v = project_snapshot.find_video_asset(clip.asset_id);
-                        if (v && v->has_audio) path = v->path;
+                        if (v && (v->has_audio || !v->is_image)) path = v->path;
                     }
 
                     if (path.empty() || audio_buffers.find(path) == audio_buffers.end()) continue;
@@ -563,15 +803,17 @@ void ExportManager::export_thread_func(Project project_snapshot, ExportConfig co
                     double rel_time = clip.clip_relative_time(current_t);
                     double media_time = clip.media_time(current_t);
 
-                    double pos_x = project_snapshot.get_clip_param(clip, "pos_x", rel_time);
-                    double pos_y = project_snapshot.get_clip_param(clip, "pos_y", rel_time);
-                    double rot   = project_snapshot.get_clip_param(clip, "rotation", rel_time);
-                    double scale = project_snapshot.get_clip_param(clip, "scale", rel_time);
+                    double pos_x   = project_snapshot.get_clip_param(clip, "pos_x", rel_time);
+                    double pos_y   = project_snapshot.get_clip_param(clip, "pos_y", rel_time);
+                    double rot     = project_snapshot.get_clip_param(clip, "rotation", rel_time);
+                    double scale_x = project_snapshot.get_clip_param(clip, "scale_x", rel_time) * va->scale_x;
+                    double scale_y = project_snapshot.get_clip_param(clip, "scale_y", rel_time) * va->scale_y;
                     double opacity = project_snapshot.get_clip_param(clip, "opacity", rel_time);
                     opacity = std::clamp(opacity, 0.0, 1.0);
 
                     bool has_spatial_transform = (std::abs(pos_x) > 1e-3 || std::abs(pos_y) > 1e-3 ||
-                                                  std::abs(rot) > 1e-3 || std::abs(scale - 1.0) > 1e-3);
+                                                  std::abs(rot) > 1e-3 || std::abs(scale_x - 1.0) > 1e-3 ||
+                                                  std::abs(scale_y - 1.0) > 1e-3);
 
                     if (va->is_image || has_spatial_transform) {
                         int src_w = it->second->width > 0 ? it->second->width : config.width;
@@ -580,7 +822,7 @@ void ExportManager::export_thread_func(Project project_snapshot, ExportConfig co
                             blit_transformed_layer(
                                 frame_buffer, config.width, config.height,
                                 layer_buffer, src_w, src_h,
-                                pos_x, pos_y, rot, scale, opacity
+                                pos_x, pos_y, rot, scale_x, scale_y, opacity
                             );
                         }
                     } else {
@@ -910,6 +1152,275 @@ void ExportManager::render_progress_contents() {
     }
 }
 
+void ExportManager::render_batch_contents() {
+    ImGui::Text("Queue .minicut projects to render multiple videos sequentially");
+    ImGui::Separator();
+
+    // Top buttons: + Add Project, Edit Job, Delete Job, Clear Queue
+    bool running = m_is_batch_running.load();
+    if (running) ImGui::BeginDisabled();
+
+    if (ImGui::Button("+ Add Project...")) {
+        m_show_add_batch_dialog = true;
+        m_batch_input_project[0] = '\0';
+        m_batch_input_output[0] = '\0';
+        m_batch_input_width = 1920;
+        m_batch_input_height = 1080;
+        m_batch_input_fps = 30;
+        m_batch_input_fmt_idx = 0;
+    }
+    ImGui::SameLine();
+
+    bool has_sel = (m_selected_batch_job_id > 0);
+    if (!has_sel) ImGui::BeginDisabled();
+    if (ImGui::Button("Edit Job")) {
+        std::lock_guard<std::mutex> lock(m_batch_mutex);
+        for (const auto& job : m_batch_jobs) {
+            if (job.id == m_selected_batch_job_id) {
+                strncpy(m_batch_input_project, job.project_path.c_str(), sizeof(m_batch_input_project) - 1);
+                strncpy(m_batch_input_output, job.output_path.c_str(), sizeof(m_batch_input_output) - 1);
+                m_batch_input_width = job.width;
+                m_batch_input_height = job.height;
+                m_batch_input_fps = job.fps;
+                if (job.format == "gif") m_batch_input_fmt_idx = 1;
+                else if (job.format == "webp") m_batch_input_fmt_idx = 2;
+                else m_batch_input_fmt_idx = 0;
+                m_show_edit_batch_dialog = true;
+                break;
+            }
+        }
+    }
+    ImGui::SameLine();
+    if (ImGui::Button("Delete Job")) {
+        delete_batch_job(m_selected_batch_job_id);
+    }
+    if (!has_sel) ImGui::EndDisabled();
+
+    ImGui::SameLine();
+    if (ImGui::Button("Clear All")) {
+        clear_batch_jobs();
+    }
+    if (running) ImGui::EndDisabled();
+
+    ImGui::Spacing();
+
+    // Table of batch jobs
+    static ImGuiTableFlags batch_table_flags = ImGuiTableFlags_ScrollY | ImGuiTableFlags_RowBg |
+                                               ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_Resizable;
+    float batch_table_h = ImGui::GetContentRegionAvail().y - 48.0f;
+    if (batch_table_h < 100.0f) batch_table_h = 100.0f;
+
+    if (ImGui::BeginTable("BatchJobsTable", 5, batch_table_flags, ImVec2(0, batch_table_h))) {
+        ImGui::TableSetupColumn("ID", ImGuiTableColumnFlags_WidthFixed, 36.0f);
+        ImGui::TableSetupColumn("Project File", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Output Destination", ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn("Specs", ImGuiTableColumnFlags_WidthFixed, 100.0f);
+        ImGui::TableSetupColumn("Status / Progress", ImGuiTableColumnFlags_WidthFixed, 130.0f);
+        ImGui::TableHeadersRow();
+
+        std::lock_guard<std::mutex> lock(m_batch_mutex);
+        for (const auto& job : m_batch_jobs) {
+            ImGui::TableNextRow();
+            bool is_sel = (m_selected_batch_job_id == job.id);
+
+            ImGui::TableSetColumnIndex(0);
+            std::string sel_label = "#" + std::to_string(job.id);
+            if (ImGui::Selectable(sel_label.c_str(), is_sel, ImGuiSelectableFlags_SpanAllColumns | ImGuiSelectableFlags_AllowItemOverlap)) {
+                m_selected_batch_job_id = job.id;
+            }
+
+            ImGui::TableSetColumnIndex(1);
+            std::string proj_name = fs::path(job.project_path).filename().string();
+            ImGui::TextUnformatted(proj_name.empty() ? job.project_path.c_str() : proj_name.c_str());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", job.project_path.c_str());
+            }
+
+            ImGui::TableSetColumnIndex(2);
+            std::string out_name = fs::path(job.output_path).filename().string();
+            ImGui::TextUnformatted(out_name.empty() ? job.output_path.c_str() : out_name.c_str());
+            if (ImGui::IsItemHovered()) {
+                ImGui::SetTooltip("%s", job.output_path.c_str());
+            }
+
+            ImGui::TableSetColumnIndex(3);
+            ImGui::Text("%dx%d %dfps", job.width, job.height, job.fps);
+
+            ImGui::TableSetColumnIndex(4);
+            if (job.status == BatchJob::Status::Queued) {
+                ImGui::TextDisabled("Queued");
+            } else if (job.status == BatchJob::Status::Processing) {
+                char p_buf[32];
+                snprintf(p_buf, sizeof(p_buf), "%.0f%%", job.progress * 100.0f);
+                ImGui::ProgressBar(job.progress, ImVec2(-1, 16), p_buf);
+            } else if (job.status == BatchJob::Status::Completed) {
+                ImGui::TextColored(ImVec4(0.2f, 0.85f, 0.3f, 1.0f), "Completed");
+            } else if (job.status == BatchJob::Status::Failed) {
+                ImGui::TextColored(ImVec4(0.9f, 0.25f, 0.25f, 1.0f), "Failed");
+                if (ImGui::IsItemHovered() && !job.error_message.empty()) {
+                    ImGui::SetTooltip("%s", job.error_message.c_str());
+                }
+            } else if (job.status == BatchJob::Status::Cancelled) {
+                ImGui::TextColored(ImVec4(0.85f, 0.6f, 0.2f, 1.0f), "Cancelled");
+            }
+        }
+
+        ImGui::EndTable();
+    }
+
+    ImGui::Separator();
+
+    // Bottom execution controls
+    if (!running) {
+        bool can_start = false;
+        {
+            std::lock_guard<std::mutex> lock(m_batch_mutex);
+            for (const auto& j : m_batch_jobs) {
+                if (j.status == BatchJob::Status::Queued) {
+                    can_start = true;
+                    break;
+                }
+            }
+        }
+        if (!can_start) ImGui::BeginDisabled();
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.2f, 0.6f, 0.35f, 1.0f));
+        if (ImGui::Button("Start Batch Processing", ImVec2(180, 28))) {
+            start_batch_processing();
+        }
+        ImGui::PopStyleColor();
+        if (!can_start) ImGui::EndDisabled();
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.75f, 0.2f, 0.2f, 1.0f));
+        if (ImGui::Button("Cancel Batch", ImVec2(120, 28))) {
+            cancel_batch_processing();
+        }
+        ImGui::PopStyleColor();
+        ImGui::SameLine();
+        float overall_p = get_batch_overall_progress();
+        char overall_buf[64];
+        snprintf(overall_buf, sizeof(overall_buf), "Overall: %.0f%%", overall_p * 100.0f);
+        ImGui::ProgressBar(overall_p, ImVec2(240, 24), overall_buf);
+    }
+
+    // Modal: Add Batch Job
+    if (m_show_add_batch_dialog) {
+        ImGui::OpenPopup("Add Batch Job");
+    }
+    if (ImGui::BeginPopupModal("Add Batch Job", &m_show_add_batch_dialog, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Enter Project (.minicut) and Output details:");
+        ImGui::Spacing();
+
+        ImGui::Text("Project Path:");
+        ImGui::SetNextItemWidth(360.0f);
+        if (ImGui::InputText("##BatchProjPath", m_batch_input_project, sizeof(m_batch_input_project))) {
+            if (strlen(m_batch_input_output) == 0 && strlen(m_batch_input_project) > 0) {
+                fs::path p(m_batch_input_project);
+                std::string stem = p.stem().string();
+                std::string ext = (m_batch_input_fmt_idx == 1) ? ".gif" : (m_batch_input_fmt_idx == 2) ? ".webp" : ".mp4";
+                std::string auto_out;
+                if (!p.parent_path().empty()) {
+                    auto_out = (p.parent_path() / (stem + ext)).string();
+                } else {
+                    auto_out = stem + ext;
+                }
+                strncpy(m_batch_input_output, auto_out.c_str(), sizeof(m_batch_input_output) - 1);
+            }
+        }
+
+        ImGui::Text("Output Destination:");
+        ImGui::SetNextItemWidth(360.0f);
+        ImGui::InputText("##BatchOutPath", m_batch_input_output, sizeof(m_batch_input_output));
+
+        const char* fmt_opts[] = { "MP4 Video (.mp4)", "Animated GIF (.gif)", "Animated WebP (.webp)" };
+        ImGui::Text("Format:");
+        ImGui::SetNextItemWidth(200.0f);
+        if (ImGui::Combo("##BatchFormat", &m_batch_input_fmt_idx, fmt_opts, 3)) {
+            std::string ext = (m_batch_input_fmt_idx == 1) ? ".gif" : (m_batch_input_fmt_idx == 2) ? ".webp" : ".mp4";
+            if (strlen(m_batch_input_output) > 0) {
+                fs::path p(m_batch_input_output);
+                p.replace_extension(ext);
+                strncpy(m_batch_input_output, p.string().c_str(), sizeof(m_batch_input_output) - 1);
+            }
+        }
+
+        ImGui::Text("Resolution:");
+        ImGui::SetNextItemWidth(80.0f);
+        ImGui::InputInt("W##BatchW", &m_batch_input_width, 0);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(80.0f);
+        ImGui::InputInt("H##BatchH", &m_batch_input_height, 0);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(80.0f);
+        ImGui::InputInt("FPS##BatchFPS", &m_batch_input_fps, 0);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        if (ImGui::Button("Add to Queue", ImVec2(110, 26))) {
+            if (strlen(m_batch_input_project) > 0) {
+                std::string fmt = (m_batch_input_fmt_idx == 1) ? "gif" : (m_batch_input_fmt_idx == 2) ? "webp" : "mp4";
+                add_batch_job(m_batch_input_project, m_batch_input_output, fmt, m_batch_input_width, m_batch_input_height, m_batch_input_fps);
+            }
+            m_show_add_batch_dialog = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel##CancelAddBatch", ImVec2(90, 26))) {
+            m_show_add_batch_dialog = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+
+    // Modal: Edit Batch Job
+    if (m_show_edit_batch_dialog) {
+        ImGui::OpenPopup("Edit Batch Job");
+    }
+    if (ImGui::BeginPopupModal("Edit Batch Job", &m_show_edit_batch_dialog, ImGuiWindowFlags_AlwaysAutoResize)) {
+        ImGui::Text("Edit job settings (ID #%d):", m_selected_batch_job_id);
+        ImGui::Spacing();
+
+        ImGui::Text("Project Path:");
+        ImGui::SetNextItemWidth(360.0f);
+        ImGui::InputText("##EditBatchProjPath", m_batch_input_project, sizeof(m_batch_input_project));
+
+        ImGui::Text("Output Destination:");
+        ImGui::SetNextItemWidth(360.0f);
+        ImGui::InputText("##EditBatchOutPath", m_batch_input_output, sizeof(m_batch_input_output));
+
+        const char* fmt_opts[] = { "MP4 Video (.mp4)", "Animated GIF (.gif)", "Animated WebP (.webp)" };
+        ImGui::Text("Format:");
+        ImGui::SetNextItemWidth(200.0f);
+        ImGui::Combo("##EditBatchFormat", &m_batch_input_fmt_idx, fmt_opts, 3);
+
+        ImGui::Text("Resolution:");
+        ImGui::SetNextItemWidth(80.0f);
+        ImGui::InputInt("W##EditBatchW", &m_batch_input_width, 0);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(80.0f);
+        ImGui::InputInt("H##EditBatchH", &m_batch_input_height, 0);
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(80.0f);
+        ImGui::InputInt("FPS##EditBatchFPS", &m_batch_input_fps, 0);
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        if (ImGui::Button("Save Changes", ImVec2(110, 26))) {
+            if (strlen(m_batch_input_project) > 0 && m_selected_batch_job_id > 0) {
+                std::string fmt = (m_batch_input_fmt_idx == 1) ? "gif" : (m_batch_input_fmt_idx == 2) ? "webp" : "mp4";
+                edit_batch_job(m_selected_batch_job_id, m_batch_input_project, m_batch_input_output, fmt, m_batch_input_width, m_batch_input_height, m_batch_input_fps);
+            }
+            m_show_edit_batch_dialog = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Cancel##CancelEditBatch", ImVec2(90, 26))) {
+            m_show_edit_batch_dialog = false;
+            ImGui::CloseCurrentPopup();
+        }
+        ImGui::EndPopup();
+    }
+}
+
 void ExportManager::render_ui(const std::function<void(const ExportConfig& cfg)>& on_start_export, bool standalone_window) {
     if (standalone_window) {
         ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -921,7 +1432,17 @@ void ExportManager::render_ui(const std::function<void(const ExportConfig& cfg)>
             if (m_is_exporting.load() || m_is_finished.load() || m_is_error.load()) {
                 render_progress_contents();
             } else if (m_show_dialog) {
-                render_settings_contents(on_start_export);
+                if (ImGui::BeginTabBar("ExportTabBar")) {
+                    if (ImGui::BeginTabItem("Single Export")) {
+                        render_settings_contents(on_start_export);
+                        ImGui::EndTabItem();
+                    }
+                    if (ImGui::BeginTabItem("Batch Processing")) {
+                        render_batch_contents();
+                        ImGui::EndTabItem();
+                    }
+                    ImGui::EndTabBar();
+                }
             }
         }
         ImGui::End();
@@ -936,10 +1457,20 @@ void ExportManager::render_ui(const std::function<void(const ExportConfig& cfg)>
 
         ImVec2 center = ImVec2(ImGui::GetIO().DisplaySize.x * 0.5f, ImGui::GetIO().DisplaySize.y * 0.5f);
         ImGui::SetNextWindowPos(center, ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
-        ImGui::SetNextWindowSize(ImVec2(560, 360), ImGuiCond_Appearing);
+        ImGui::SetNextWindowSize(ImVec2(620, 420), ImGuiCond_Appearing);
 
         if (ImGui::Begin("Export Timeline Media###ExportDialog", &m_show_dialog, ImGuiWindowFlags_NoCollapse)) {
-            render_settings_contents(on_start_export);
+            if (ImGui::BeginTabBar("ExportTabBar")) {
+                if (ImGui::BeginTabItem("Single Export")) {
+                    render_settings_contents(on_start_export);
+                    ImGui::EndTabItem();
+                }
+                if (ImGui::BeginTabItem("Batch Processing")) {
+                    render_batch_contents();
+                    ImGui::EndTabItem();
+                }
+                ImGui::EndTabBar();
+            }
         }
         ImGui::End();
     }

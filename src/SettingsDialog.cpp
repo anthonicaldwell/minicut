@@ -96,6 +96,37 @@ void SettingsDialog::render(SettingsLogic& logic, App& app) {
                 }
                 ImGui::TextDisabled("Current Active Backend: %s", RenderSystem::instance().get_backend_name());
 
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // Temporary Storage Cleanup
+                ImGui::Text("Temporary Storage");
+                if (ImGui::Button("Clean Up Temporary Files", ImVec2(220, 26))) {
+                    app.cleanup_temp_files();
+                }
+                ImGui::TextDisabled("Purges temporary render caches and decoded frame scratch buffers.");
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // Prefab Hot-Reloading
+                ImGui::Text("Prefab Project Hot-Reloading");
+                bool hot_reload = logic.get_prefab_hot_reload();
+                if (ImGui::Checkbox("Enable Prefab Hot-Reload on Change", &hot_reload)) {
+                    logic.set_prefab_hot_reload(hot_reload);
+                    logic.save_to_disk();
+                }
+                if (hot_reload) {
+                    float interval = logic.get_prefab_reload_interval();
+                    if (ImGui::SliderFloat("Reload Check Interval", &interval, 0.5f, 30.0f, "%.1fs")) {
+                        logic.set_prefab_reload_interval(interval);
+                        logic.save_to_disk();
+                    }
+                }
+                ImGui::TextDisabled("Automatically updates timeline clips when external .minicut prefab files are modified on disk.");
+
                 ImGui::EndTabItem();
             }
 
@@ -245,10 +276,48 @@ void SettingsDialog::render(SettingsLogic& logic, App& app) {
                 ImGui::EndTabItem();
             }
 
-            // Tab 4: Accessibility
-            if (ImGui::BeginTabItem("Accessibility")) {
+            // Tab 4: Appearance & Accessibility
+            if (ImGui::BeginTabItem("Appearance & Accessibility")) {
                 ImGui::Spacing();
-                ImGui::TextDisabled("Visual & Accessibility Settings");
+                ImGui::TextDisabled("Visual, Appearance & Accessibility Settings");
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // Preview Window Background & Padding
+                ImGui::Text("Preview Window Background & Padding");
+                const char* bg_modes[] = {
+                    "Default Dark (Theme)",
+                    "Solid Black (Cinema)",
+                    "Deep Navy",
+                    "Neutral Gray (Colorist)",
+                    "Checkerboard (Transparency)",
+                    "Custom Color"
+                };
+                int bg_idx = logic.get_preview_bg_mode();
+                if (ImGui::Combo("Preview Background", &bg_idx, bg_modes, 6)) {
+                    logic.set_preview_bg_mode(bg_idx);
+                    logic.save_to_disk();
+                }
+                if (bg_idx == 5) {
+                    float custom_col[4];
+                    const float* src_col = logic.get_preview_bg_custom_color();
+                    custom_col[0] = src_col[0];
+                    custom_col[1] = src_col[1];
+                    custom_col[2] = src_col[2];
+                    custom_col[3] = src_col[3];
+                    if (ImGui::ColorEdit4("Custom Background Color", custom_col)) {
+                        logic.set_preview_bg_custom_color(custom_col[0], custom_col[1], custom_col[2], custom_col[3]);
+                        logic.save_to_disk();
+                    }
+                }
+                float pad = logic.get_preview_padding();
+                if (ImGui::SliderFloat("Preview Padding Margin", &pad, 0.0f, 40.0f, "%.0f px")) {
+                    logic.set_preview_padding(pad);
+                    logic.save_to_disk();
+                }
+                ImGui::TextDisabled("Customizes the padding area and background styling of the video preview window.");
+
+                ImGui::Spacing();
                 ImGui::Separator();
                 ImGui::Spacing();
 
@@ -280,6 +349,18 @@ void SettingsDialog::render(SettingsLogic& logic, App& app) {
                     app.apply_theme();
                 }
                 ImGui::TextDisabled("Adapts timeline clip and track lane colors using accessible palettes.");
+
+                ImGui::Spacing();
+                ImGui::Separator();
+                ImGui::Spacing();
+
+                // Menu Font Size
+                float menu_font = logic.get_menu_font_size();
+                if (ImGui::SliderFloat("Menu Font Size", &menu_font, 11.0f, 26.0f, "%.1f pt")) {
+                    logic.set_menu_font_size(menu_font);
+                    logic.save_to_disk();
+                }
+                ImGui::TextDisabled("Controls the text size in the main application menu bar.");
 
                 ImGui::EndTabItem();
             }
