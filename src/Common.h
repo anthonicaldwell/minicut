@@ -10,7 +10,7 @@
 #include <chrono>
 #include <GL/glew.h>
 
-#define MINICUT_VERSION "1.5.0"
+#define MINICUT_VERSION "1.5.1"
 
 // Forward declarations
 struct VideoAsset;
