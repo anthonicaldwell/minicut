@@ -244,17 +244,25 @@ void SettingsDialog::render(SettingsLogic& logic, App& app) {
                         "Default (Auto-Detect Language)", "English (en)", "English US (en-us)", "English UK (en-uk)",
                         "Japanese / 日本語 (ja)", "Korean / 한국어 (ko)", "Ukrainian / Українська (uk)", "Arabic / العربية (ar)",
                         "Spanish / Español (es)", "French / Français (fr)", "German / Deutsch (de)", "Chinese / 中文 (cmn)",
-                        "Male 1 (en+m1)", "Male 2 (en+m3)", "Female 1 (en+f1)", "Female 2 (en+f3)"
+                        "Male 1 (en+m1)", "Male 2 (en+m3)", "Female 1 (en+f1)", "Female 2 (en+f3)",
+                        "男性 1 (ja+m1)", "男性 2 (ja+m2)", "男性 3 (ja+m3)", "男性 4 (ja+m4)", "男性 5 (ja+m5)", "男性 6 (ja+m6)", "男性 7 (ja+m7)",
+                        "女性 1 (ja+f1)", "女性 2 (ja+f2)", "女性 3 (ja+f3)", "女性 4 (ja+f4)", "女性 5 (ja+f5)"
                     };
+                    // 17-Oct-2026@1700
                     static const char* sys_keys[] = {
                         "default", "en", "en-us", "en-uk", "ja", "ko", "uk", "ar", "es", "fr", "de", "cmn",
-                        "en+m1", "en+m3", "en+f1", "en+f3"
+                        "en+m1", "en+m3", "en+f1", "en+f3",
+                        "ja+m1", "ja+m2", "ja+m3", "ja+m4", "ja+m5", "ja+m6", "ja+m7",
+                        "ja+f1", "ja+f2", "ja+f3", "ja+f4", "ja+f5"
                     };
+
+                    int total_voices = sizeof(sys_keys) / sizeof(sys_keys[0]);
+
                     int v_idx = 0;
-                    for (int i = 0; i < 16; ++i) {
+                    for (int i = 0; i < total_voices; ++i) {
                         if (saved_voice == sys_keys[i]) { v_idx = i; break; }
                     }
-                    if (ImGui::Combo("Default System Voice", &v_idx, sys_names, 16)) {
+                    if (ImGui::Combo("Default System Voice", &v_idx, sys_names, total_voices)) {
                         logic.set_tts_voice(sys_keys[v_idx]);
                         logic.save_to_disk();
                     }

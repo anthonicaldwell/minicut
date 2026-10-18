@@ -24,7 +24,9 @@ void TTSDialog::open() {
     }
     static const std::vector<std::string> s_system_voices = {
         "default", "en", "en-us", "en-uk", "ja", "ko", "uk", "ar", "es", "fr", "de", "cmn",
-        "en+m1", "en+m3", "en+f1", "en+f3"
+        "en+m1", "en+m3", "en+f1", "en+f3",
+        "ja+m1", "ja+m2", "ja+m3", "ja+m4", "ja+m5", "ja+m6", "ja+m7",
+        "ja+f1", "ja+f2", "ja+f3", "ja+f4", "ja+f5"
     };
     for (size_t i = 0; i < s_system_voices.size(); ++i) {
         if (s_system_voices[i] == saved_voice) {
@@ -69,7 +71,9 @@ void TTSDialog::render(App& app) {
         static const std::vector<std::string> s_gemini_voices = { "Puck", "Charon", "Kore", "Fenrir", "Aoede" };
         static const std::vector<std::string> s_system_voices = {
             "default", "en", "en-us", "en-uk", "ja", "ko", "uk", "ar", "es", "fr", "de", "cmn",
-            "en+m1", "en+m3", "en+f1", "en+f3"
+            "en+m1", "en+m3", "en+f1", "en+f3",
+            "ja+m1", "ja+m2", "ja+m3", "ja+m4", "ja+m5", "ja+m6", "ja+m7",
+            "ja+f1", "ja+f2", "ja+f3", "ja+f4", "ja+f5"
         };
         std::string chosen_voice;
 
@@ -86,10 +90,12 @@ void TTSDialog::render(App& app) {
                 "Default (Auto-Detect Language)", "English (en)", "English US (en-us)", "English UK (en-uk)",
                 "Japanese / 日本語 (ja)", "Korean / 한국어 (ko)", "Ukrainian / Українська (uk)", "Arabic / العربية (ar)",
                 "Spanish / Español (es)", "French / Français (fr)", "German / Deutsch (de)", "Chinese / 中文 (cmn)",
-                "Male 1 (en+m1)", "Male 2 (en+m3)", "Female 1 (en+f1)", "Female 2 (en+f3)"
+                "Male 1 (en+m1)", "Male 2 (en+m3)", "Female 1 (en+f1)", "Female 2 (en+f3)",
+                "男性 1 (ja+m1)", "男性 2 (ja+m2)", "男性 3 (ja+m3)", "男性 4 (ja+m4)", "男性 5 (ja+m5)", "男性 6 (ja+m6)", "男性 7 (ja+m7)",
+                "女性 1 (ja+f1)", "女性 2 (ja+f2)", "女性 3 (ja+f3)", "女性 4 (ja+f4)", "女性 5 (ja+f5)"
             };
             ImGui::SetNextItemWidth(240.0f);
-            if (ImGui::Combo("Voice Selection", &m_system_voice_idx, system_names, 16)) {
+            if (ImGui::Combo("Voice Selection", &m_system_voice_idx, system_names, s_system_voices.size())) {
                 SettingsLogic::instance().set_tts_voice(s_system_voices[m_system_voice_idx]);
                 SettingsLogic::instance().save_to_disk();
             }

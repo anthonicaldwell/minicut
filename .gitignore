@@ -1,4 +1,5 @@
 build/
+dist/
 minicut
 agy
 *.tar.gz
@@ -6,3 +7,6 @@ agy
 *.log
 backup_minicut/
 imgui.ini
+test_src_*
+test_audio_*
+test_exported_*
