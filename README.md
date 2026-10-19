@@ -1,3 +1,5 @@
+**Manual Note (2026.10.19):** Tokens ran out, and I'm off the paid tier now so this won't be maintained. Right now it's basically a functional prototype, but with more test I've seen that it needs a lot of refactoring and is missing some pretty key features. Not to mention a few weird bugs that can be frustrating. If the time arises I might revisit this and code it within my manual C++ framework. As that is extremely time consuming and I have neither the time or money currently so the chances of that are rare. If you wish to have your agent continue have it read PROJECT_SUMMARY.md and it should be able to pull context for most things.
+
 # minicut (v1.5.0)
 
 [English](README.md) | [العربية](docs/README_ar.md) | [日本語](docs/README_ja.md) | [한국어](docs/README_ko.md) | [Українська](docs/README_uk.md)
@@ -38,6 +40,7 @@
 `minicut` was conceived and developed through an interactive "vibe coding" journey with **Google DeepMind Antigravity**, an advanced AI pair programming assistant.
 
 Starting from an initial architectural idea, the application was engineered from scratch in modern **C++20**:
+
 - **Rendering & UI**: Dual Vulkan 1.2+ and OpenGL 3.3 backends coupled with **Dear ImGui**, customized with a KDE Plasma Breeze Dark theme.
 - **Media Engine**: Native **FFmpeg** pipeline for high-performance frame decoding, audio resampling, and multi-threaded video encoding (H.264/AAC, OGG/Theora, WebP, GIF).
 - **Typography & Localization**: Vector glyph rendering via **FreeType 2** with native cursive BiDi shaping for Arabic and complete CJK coverage for Japanese and Korean.
@@ -85,13 +88,17 @@ Starting from an initial architectural idea, the application was engineered from
 ## Basic Guidance: How to Use minicut
 
 ### 1. Installation & Launch
+
 To install minicut for your user account (automatically checking and installing all required system dependencies):
+
 ```bash
 ./install.sh -y
 ```
+
 *(Use `--deps-only` to check/install dependencies without compiling, or `--no-deps` to skip dependency resolution)*
 
 Run `minicut` from your terminal or launch it from your desktop application launcher:
+
 ```bash
 minicut
 # Or from the project build directory:
@@ -102,19 +109,19 @@ minicut my_project.minicut
 
 ### 2. Command Line Arguments
 
-| Command Option | Description |
-|---|---|
-| `minicut [project.minicut]` | Launches graphical application opening the specified project file. |
-| `minicut --render <project.minicut>` | Headless mode: Renders project to video without GUI. |
-| `--output <file>` | Output file path for headless rendering (e.g. `final_cut.mp4`). |
-| `--format <mp4\|webp\|gif>` | Target container format (defaults to extension or `mp4`). |
-| `--width <w> --height <h>` | Target render dimensions (defaults to project settings or `1920x1080`). |
-| `--fps <fps>` | Target render framerate (defaults to `30`). |
-| `--bitrate <bps>` | Target video bitrate (defaults to `4000000`). |
-| `--srt` | Generate matching `.srt` subtitle file during headless export. |
-| `minicut --reconfig` | Resets all user preferences and UI state to factory defaults. |
-| `minicut --version` / `-v` | Displays version and build info. |
-| `minicut --help` / `-h` | Displays complete help manual. |
+| Command Option                       | Description                                                             |
+| ------------------------------------ | ----------------------------------------------------------------------- |
+| `minicut [project.minicut]`          | Launches graphical application opening the specified project file.      |
+| `minicut --render <project.minicut>` | Headless mode: Renders project to video without GUI.                    |
+| `--output <file>`                    | Output file path for headless rendering (e.g. `final_cut.mp4`).         |
+| `--format <mp4\|webp\|gif>`          | Target container format (defaults to extension or `mp4`).               |
+| `--width <w> --height <h>`           | Target render dimensions (defaults to project settings or `1920x1080`). |
+| `--fps <fps>`                        | Target render framerate (defaults to `30`).                             |
+| `--bitrate <bps>`                    | Target video bitrate (defaults to `4000000`).                           |
+| `--srt`                              | Generate matching `.srt` subtitle file during headless export.          |
+| `minicut --reconfig`                 | Resets all user preferences and UI state to factory defaults.           |
+| `minicut --version` / `-v`           | Displays version and build info.                                        |
+| `minicut --help` / `-h`              | Displays complete help manual.                                          |
 
 ### 3. Basic Editing Workflow
 
@@ -147,6 +154,7 @@ minicut my_project.minicut
 ## Documentation & Scripting Manuals
 
 Comprehensive API reference manuals for both **Lua** and **JavaScript** are bundled in the `docs/` folder:
+
 - 📘 [Lua Scripting API Reference](docs/LUA_API.md) (`minicut_lua_api.pdf`)
 - 📒 [JavaScript Scripting API Reference](docs/JAVASCRIPT_API.md) (`minicut_js_api.pdf`)
 
